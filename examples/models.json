@@ -1,0 +1,21 @@
+{
+  "schema": "tokmo-models-v1",
+  "_comment": [
+    "Copy to var/data/models.json. Each stage takes one model or an ordered list (a chain).",
+    "Spec: [provider:]model[@effort]. Providers: zai (default, GLM key), codex (codex login), claude (claude login).",
+    "The first model answers; the next one is used only while the previous one fails with QUOTA/AUTH/TRANSIENT,",
+    "and the preferred model is probed again after 5m/15m (transient) or 6h (quota/auth). Never on a bad answer.",
+    "Stages: news.screen (candidate selection), news.first_pass (first analysis), news.confirm (final analysis when",
+    "needs_confirmation says so). Unknown ids are rejected at load time; run tools/check_api_keys.py to verify.",
+    "Object form for the confirm stage: {\"model\": \"codex:gpt-5.6-sol\", \"effort\": \"high\", \"transport\": \"direct\"}",
+    "Single-model stages (exactly one, no chain): paper.decide (PAPER opportunity rotation), quant.rotation_entry",
+    "(hyundai rotation -> Quant). Changing them requires tools/install_product_gate.py install --force-routing + issue --reissue."
+  ],
+  "news": {
+    "screen": ["glm-5.3", "codex:gpt-5.6-terra@low"],
+    "first_pass": ["glm-5.3", "codex:gpt-5.6-terra@low"],
+    "confirm": ["codex:gpt-5.6-sol@high", "claude:claude-opus-5"]
+  },
+  "paper": { "decide": "codex:gpt-6-astra" },
+  "quant": { "rotation_entry": "codex:gpt-6-astra" }
+}

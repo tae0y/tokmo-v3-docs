@@ -1,0 +1,28 @@
+{
+  "name": "rising-improving",
+  "purpose": "상승 중 실적 개선",
+  "classification": "synthetic-design-pair",
+  "base": "base-synthetic.json",
+  "replace": {
+    "positions": []
+  },
+  "instrument_updates": {
+    "KR:000001": {
+      "evidence": [
+        {
+          "id": "business-case",
+          "kind": "disclosure",
+          "text": "수주 잔고와 매출이 함께 증가했다는 공시. 영업이익도 전년 대비 크게 증가했다. 고객 다변화와 신규 공장 가동률 상승이 확인됐다.",
+          "available_at": "2026-09-07T01:00:00+00:00",
+          "source": "합성 공시 역할 · 실제 자료 아님"
+        }
+      ]
+    }
+  },
+  "expected_actions": {
+    "KR:000001": [
+      "BUY",
+      "WATCH"
+    ]
+  }
+}

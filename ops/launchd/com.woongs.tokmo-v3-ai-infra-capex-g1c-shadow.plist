@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>TOKMO_G1C_LAUNCHD</key>
+		<string>1</string>
+	</dict>
+	<key>Label</key>
+	<string>com.woongs.tokmo-v3-ai-infra-capex-g1c-shadow</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/home/tokmo/tokmo-v3/var/runtime/ai-infra-capex-g1c-shadow/run_ai_infra_capex_shadow.zsh</string>
+	</array>
+	<key>StandardErrorPath</key>
+	<string>/dev/null</string>
+	<key>StandardOutPath</key>
+	<string>/dev/null</string>
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Minute</key>
+		<integer>12</integer>
+	</dict>
+	<key>WorkingDirectory</key>
+	<string>/home/tokmo/tokmo-v3</string>
+</dict>
+</plist>

@@ -1,0 +1,36 @@
+{
+  "name": "missing-cash",
+  "purpose": "실적 개선이지만 예수금 미확인",
+  "classification": "synthetic-held-out",
+  "base": "base-synthetic.json",
+  "replace": {
+    "positions": [],
+    "cash": [],
+    "extra_capital": [
+      {
+        "account": "personal-a",
+        "scope": "personal",
+        "currency": "KRW",
+        "amount": "0"
+      }
+    ]
+  },
+  "instrument_updates": {
+    "KR:000001": {
+      "evidence": [
+        {
+          "id": "business-case",
+          "kind": "disclosure",
+          "text": "신규 공급 계약과 생산 확대, 영업이익 증가가 공시로 확인되었다.",
+          "available_at": "2026-09-07T01:00:00+00:00",
+          "source": "합성 공시 역할 · 실제 자료 아님"
+        }
+      ]
+    }
+  },
+  "expected_actions": {
+    "KR:000001": [
+      "WATCH"
+    ]
+  }
+}

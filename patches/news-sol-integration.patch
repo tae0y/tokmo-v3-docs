@@ -1,0 +1,54 @@
+--- a/tools/subscription_json_model.py
++++ b/tools/subscription_json_model.py
+@@ -80,8 +80,9 @@
+     return output
+
+
+-def infer(prompt, *, provider, model, timeout, schema=None, effort='medium', diagnostic_path=None):
++def infer(prompt, *, provider, model, timeout, schema=None, effort='medium', diagnostic_path=None, runner=None):
+     start = time.monotonic()
++    run_inference = runner or _run
+     with tempfile.TemporaryDirectory(prefix='tokmo-news-inference-') as directory:
+         folder = Path(directory)
+         if provider == 'codex':
+@@ -97,7 +98,7 @@
+                 path.write_text(json.dumps(schema))
+                 argv.extend(['--output-schema', str(path)])
+             diagnostic_args={'diagnostic_path':diagnostic_path} if diagnostic_path is not None else {}
+-            raw = _run(argv + ['-'], prompt, directory, timeout,**diagnostic_args)
++            raw = run_inference(argv + ['-'], prompt, directory, timeout,**diagnostic_args)
+             events = [json.loads(line) for line in raw.splitlines() if line.strip()]
+             messages, usage = [], {}
+             for event in events:
+@@ -119,7 +120,7 @@
+                 '--tools','','--strict-mcp-config','--mcp-config','{"mcpServers":{}}',
+                 '--setting-sources','','--no-session-persistence']
+             diagnostic_args={'diagnostic_path':diagnostic_path} if diagnostic_path is not None else {}
+-            raw = _run(argv,prompt,directory,timeout,**diagnostic_args)
++            raw = run_inference(argv,prompt,directory,timeout,**diagnostic_args)
+             events=[json.loads(line) for line in raw.splitlines() if line.strip()]
+             for event in events:
+                 if event.get('type')=='assistant' and any(c.get('type')=='tool_use' for c in event.get('message',{}).get('content',[])):
+--- a/tools/news_decision_models.py
++++ b/tools/news_decision_models.py
+@@ -1,4 +1,4 @@
+-"""Configurable one-shot subscription model adapter; no launcher or tools."""
++"""One-shot model adapter; NEWS confirmation uses the common no-tools launcher."""
+ import json
+ import hashlib
+ import os
+@@ -325,9 +325,14 @@
+                            if self.model.startswith('codex:') else None)
+         if self.model.startswith('codex:'):
+             from subscription_json_model import infer
++            transport = {}
++            if self.stage == 'analyze':
++                from news_subscription_model import run_news
++                transport['runner'] = run_news
+             provider, name = self.model.split(':', 1)
+             text, metadata = infer(prompt, provider=provider, model=name, timeout=self.timeout,
+                 schema=response_schema(self.stage, incremental=bool(incremental), typed=typed), effort=self.reasoning_effort,
++                **transport,
+                 **({'diagnostic_path':self.diagnostic_path} if self.diagnostic_path is not None else {}))
+             usage_observation(metadata)
+             result = decode_response(text)

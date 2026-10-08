@@ -1,0 +1,53 @@
+{
+ "ref": "main",
+ "version": "v20261008_01",
+ "source_commit": "ca21862e2138d879b15f73987f0a7367c5b7e105",
+ "exported_from": "canonical",
+ "removed": [
+  "playbooks/",
+  ".ai/",
+  ".hermes/",
+  "ops/dist/",
+  "ops/hermes-scripts-archive/",
+  "tests/hermes_cron/",
+  "order/",
+  "plans/",
+  "ops/hermes-cron/one-shot/",
+  "docs/investment-followup-config.example.json",
+  "docs/order-alert-semantics-20260922-deployment.json",
+  "docs/order-alert-semantics-20260922-hashes.json",
+  "docs/order-alert-semantics-20260922-results.json",
+  "docs/pension-incremental-import-20260922-results.json",
+  "docs/plan-monitor-runtime-baseline-20260912.json",
+  "ops/hermes-cron/jobs-snapshot-20260924.json",
+  "design history: 196 files (docs/ keeps DISTRIBUTION.md, API-KEYS.md, pulse-g2-shadow-runbook.md)"
+ ],
+ "added": [
+  "ops/product-gate/product_model_gate.py",
+  "ops/product-gate/model_routing.py"
+ ],
+ "rewrites": {
+  "canonical project path": 13,
+  "owner home": 12,
+  "owner prefix": 4,
+  "owner repo name": 6,
+  "owner folder": 5,
+  "nickname (+noun)": 5,
+  "nickname (original)": 5,
+  "telegram dm id assignment": 3,
+  "owner user name": 8,
+  "nickname (test sentinel)": 1,
+  "telegram chat id": 4,
+  "telegram receipt id": 1,
+  "telegram dm target": 3,
+  "telegram dm mention": 3,
+  "nickname (subject)": 3,
+  "nickname (possessive)": 3,
+  "owner bot name": 1,
+  "nickname (copula)": 1,
+  "nickname (subject 2)": 1
+ },
+ "residual": [],
+ "files": 1173,
+ "tree_sha256": "003cedac5a5d67eff3742cb13d40a640b4348bdedf297cfeca718fe9b3442d30"
+}

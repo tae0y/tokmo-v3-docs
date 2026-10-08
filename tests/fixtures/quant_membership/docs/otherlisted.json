@@ -1,0 +1,26 @@
+{
+  "classification": "RECONSTRUCTED_CONTRACT",
+  "official_url": "https://www.nasdaqtrader.com/dynamic/symdir/otherlisted.txt",
+  "retrieved_at_utc": "2026-08-13T00:00:00Z",
+  "quote_excerpt": "ACT Symbol|Security Name|Exchange|CQS Symbol|ETF|Round Lot Size|Test Issue|NASDAQ Symbol\nAllowed values are:\n- A = NYSE MKT\n- N = New York Stock Exchange (NYSE)\n- P = NYSE ARCA\n- Z = BATS Global Markets (BATS)\n- V = Investors' Exchange, LLC (IEXG)\nThe row contains the words File Creation Time followed by mmddyyyyhhmm as the first field, followed by all delimiters to round out the row.",
+  "quote_sha256": "faf3ac8c2377d09630bbc64be7fce1b921fdb841b3dad965d4196c25e20b5979",
+  "parser_fields_tokens": {
+    "header": "ACT Symbol|Security Name|Exchange|CQS Symbol|ETF|Round Lot Size|Test Issue|NASDAQ Symbol",
+    "exchange_tokens": ["A", "N", "P", "V", "Z"],
+    "supported_exchange_tokens": ["N"],
+    "test_issue_tokens": ["N", "Y"],
+    "etf_tokens": ["N", "Y"],
+    "footer_first_field_prefix": "File Creation Time: ",
+    "footer_timestamp_ascii_digits": 12,
+    "footer_total_fields": 8
+  },
+  "access_fair_use_note": "Documentation-only excerpt used for offline parser-contract review; no live data request in this wave.",
+  "reconstruction_procedure": [
+    "exact header line",
+    "supported exchange token N only",
+    "footer first field exact prefix plus 12 ASCII digits",
+    "seven empty trailing footer fields"
+  ],
+  "fixture_relpath": "otherlisted_sample.txt",
+  "fixture_sha256": "13489c9e7160456884d83f750724ceef9512059a2a1cc9133fae4d6439acf52b"
+}

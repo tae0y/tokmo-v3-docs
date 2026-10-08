@@ -1,0 +1,29 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+.env.toss
+.env.kis
+
+# Quant membership package namespace is code; official JSON remains gated.
+!src/tokmo/data/
+!src/tokmo/data/__init__.py
+
+# V3 typed runtime config is source code, not runtime state.
+!src/tokmo/runtime/
+!src/tokmo/runtime/config.py
+
+# Runtime output, state and locks relocated from ~/.hermes (never source).
+var/
+
+# Credentials relocated from ~/.config/tokmo* and ~/.hermes/credentials (never tracked).
+.secrets/
+
+# Owner-installed Quant approval record (private, host-specific).
+quant-on-demand-approval.json
+
+# Owner-issued PAPER product approval (private, host-specific).
+ops/opportunity-rotation-product-approval.json
+
+# Owner-issued NEWS product approval (private, host-specific).
+ops/news-product-approval.json

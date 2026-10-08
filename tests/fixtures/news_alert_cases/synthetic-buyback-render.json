@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "id": "synthetic-buyback-render",
+  "description": "합성 단일 공시의 아침 전달과 설명 품질 최종 확인",
+  "observations": [
+    {
+      "id": "retirement",
+      "observed_at": "2026-09-01T23:02:00+09:00",
+      "published_at": "2026-09-01T23:02:00+09:00",
+      "title": "가상 반도체회사 자사주 소각 결정 공시",
+      "text": "공식 공시 원문: 이사회가 발행주식 총수의 2%인 보유 자기주식 전량을 다음 달 소각하기로 결정했다. 신규 자금 조달이나 추가 주식 발행 계획은 없다. 이 수치는 합성 검증을 위한 자료다.",
+      "source_kind": "DISCLOSURE",
+      "publisher": "SYNTHETIC DART",
+      "url": "https://example.invalid/retirement"
+    }
+  ],
+  "context": [],
+  "checkpoints": [
+    "2026-09-02T08:00:00+09:00"
+  ],
+  "recorded_responses": {
+    "screen": [],
+    "analyze": []
+  },
+  "expectations": [
+    {
+      "at": "2026-09-01T23:02:00+09:00",
+      "alert_count": 0
+    },
+    {
+      "at": "2026-09-02T08:00:00+09:00",
+      "alert_count": 1,
+      "contains": "긍정",
+      "not_contains": "MORNING_RELEASE"
+    }
+  ],
+  "simulate_delivery": true
+}

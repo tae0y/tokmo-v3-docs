@@ -1,0 +1,7 @@
+{
+  "label": "PAPER 단순 비용 가정: 매수/매도 각 0.015%, 보통주 매도 세금 0.20%, KODEX200 거래세 0%; 실제 계좌 요율 아님",
+  "buy_rate": "0.00015",
+  "sell_rate": "0.00015",
+  "stock_tax_rate": "0.002",
+  "benchmark_tax_rate": "0"
+}

@@ -1,0 +1,24 @@
+{
+  "classification": "RECONSTRUCTED_CONTRACT",
+  "official_url": "https://www.sec.gov/files/company_tickers_exchange.json",
+  "retrieved_at_utc": "2026-08-13T00:00:00Z",
+  "quote_excerpt": "We periodically update these files to provide functionality for EDGAR searches, but do not guarantee accuracy or scope.\n- company_tickers_exchange.json: data file for EDGAR conformed company name, CIK, ticker, exchange associations\n{\"fields\":[\"cik\",\"name\",\"ticker\",\"exchange\"],\"data\":[[1045810,\"NVIDIA CORP\",\"NVDA\",\"Nasdaq\"]",
+  "quote_sha256": "05be5ccc0b3c827bbfbffad26a2090216a2329148aa6f9aa005e0b74e8c65a8c",
+  "parser_fields_tokens": {
+    "request_path": "/files/company_tickers_exchange.json",
+    "fields": ["cik", "name", "ticker", "exchange"],
+    "allowed_exchange_tokens": ["Nasdaq", "NYSE"],
+    "registry_cik_normalization": {
+      "direction": "left_zero_pad",
+      "ascii_digits": 10
+    }
+  },
+  "access_fair_use_note": "Documentation-only excerpt used for offline parser-contract review; no live data request in this wave.",
+  "reconstruction_procedure": [
+    "exact fields envelope",
+    "supported exchange tokens Nasdaq and NYSE only",
+    "registry CIK left-zero-padded to 10 ASCII digits before comparison"
+  ],
+  "fixture_relpath": "sec_registry_sample.json",
+  "fixture_sha256": "fe8192dfc25c2df96c1c96dca80fa4eca2d0a1d91557041501b89748f246a99d"
+}

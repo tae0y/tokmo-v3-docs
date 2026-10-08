@@ -1,0 +1,40 @@
+{
+  "source_url": "https://openapi.tossinvest.com/openapi-docs/latest/openapi.json",
+  "openapi_version": "1.2.5",
+  "captured_for": "GET /api/v1/prices and PriceResponse contract tests",
+  "operation": {
+    "method": "GET",
+    "path": "/api/v1/prices",
+    "rate_limit_group": "MARKET_DATA",
+    "symbols": {
+      "required": true,
+      "minimum_items": 1,
+      "maximum_items": 200,
+      "separator": ",",
+      "pattern": "^[A-Za-z0-9.,\\-]+$"
+    },
+    "success_envelope": "result[]"
+  },
+  "price_response": {
+    "type": "object",
+    "required": ["symbol", "lastPrice", "currency"],
+    "properties": {
+      "symbol": {"type": "string"},
+      "timestamp": {
+        "type": ["string", "null"],
+        "format": "date-time",
+        "description": "데이터 시각. 체결 미발생 등으로 시각이 없을 경우 null"
+      },
+      "lastPrice": {"type": "string", "format": "decimal", "maxLength": 30},
+      "currency": {
+        "type": "string",
+        "known_values": ["KRW", "USD"],
+        "unknown_values_must_be_tolerated": true
+      }
+    }
+  },
+  "examples": {
+    "kr": {"symbol": "005930", "timestamp": "2026-03-25T09:30:00.123+09:00", "lastPrice": "72000", "currency": "KRW"},
+    "us": {"symbol": "AAPL", "timestamp": "2026-03-25T22:30:00.456+09:00", "lastPrice": "185.70", "currency": "USD"}
+  }
+}

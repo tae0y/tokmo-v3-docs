@@ -1,0 +1,23 @@
+{
+  "classification": "RECONSTRUCTED_CONTRACT",
+  "official_url": "https://data.sec.gov/submissions/CIK0000320193.json",
+  "retrieved_at_utc": "2026-08-13T00:00:00Z",
+  "quote_excerpt": "Submissions by company and extracted XBRL data are available via RESTful APIs on data.sec.gov, offering JSON formatted data.",
+  "quote_sha256": "cbda9b52bcc87867110b479fc8fceee3d31e41ce2e45d711edcf4db4bab31c40",
+  "parser_fields_tokens": {
+    "request_path_template": "/submissions/CIK##########.json",
+    "body_fields": ["cik", "sic", "tickers", "exchanges"]
+  },
+  "reconstructed_contract_choices": {
+    "body_cik_ascii_digits": 10,
+    "allowed_exchange_tokens": ["NASDAQ", "NYSE"]
+  },
+  "access_fair_use_note": "Documentation-only excerpt used for offline parser-contract review; no live data request in this wave.",
+  "reconstruction_procedure": [
+    "path evidence and body choices stored separately",
+    "body CIK fixed to 10 ASCII digits",
+    "body exchange tokens fixed to NASDAQ or NYSE"
+  ],
+  "fixture_relpath": "sec_submissions_aapl.json",
+  "fixture_sha256": "6d94719556c977210920b22800eb9ae29fb569da72351a3820442bf4a41625b5"
+}

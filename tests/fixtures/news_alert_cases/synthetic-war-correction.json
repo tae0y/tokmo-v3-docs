@@ -1,0 +1,140 @@
+{
+  "version": 1,
+  "id": "synthetic-war-correction",
+  "description": "SYNTHETIC: invented war, duplicate and correction. Not historical evidence or an AI quality benchmark.",
+  "observations": [
+    {
+      "id": "w1",
+      "observed_at": "2026-09-01T23:00:00+09:00",
+      "published_at": "2026-09-01T23:00:00+09:00",
+      "title": "합성 전쟁 발생",
+      "text": "합성 전쟁 발생",
+      "source_kind": "NEWS",
+      "publisher": "SYNTHETIC test source",
+      "url": "https://example.invalid/w1"
+    },
+    {
+      "id": "w2",
+      "observed_at": "2026-09-01T23:01:00+09:00",
+      "published_at": "2026-09-01T23:01:00+09:00",
+      "title": "같은 발표 재인용",
+      "text": "같은 발표 재인용",
+      "source_kind": "NEWS",
+      "publisher": "SYNTHETIC test source",
+      "url": "https://example.invalid/w2"
+    },
+    {
+      "id": "d1",
+      "observed_at": "2026-09-01T23:02:00+09:00",
+      "published_at": "2026-09-01T23:02:00+09:00",
+      "title": "합성 공식 정정",
+      "text": "합성 공식 정정",
+      "source_kind": "DISCLOSURE",
+      "publisher": "SYNTHETIC test source",
+      "url": "https://example.invalid/d1"
+    }
+  ],
+  "checkpoints": [],
+  "context": [],
+  "recorded_responses": {
+    "screen": [
+      {
+        "candidates": [
+          {
+            "evidence_ids": [
+              "w1"
+            ],
+            "event_id": null,
+            "title": "합성 전쟁 발생"
+          }
+        ],
+        "ignored": []
+      },
+      {
+        "candidates": [],
+        "ignored": [
+          {
+            "evidence_id": "w2",
+            "reason": "동일 발표 재인용"
+          }
+        ]
+      },
+      {
+        "candidates": [
+          {
+            "evidence_ids": [
+              "d1"
+            ],
+            "event_id": "$first_event",
+            "comparison_event_ids": [],
+            "event_reason": "같은 합성 전쟁 사건의 공식 정정",
+            "title": "합성 공식 정정"
+          }
+        ],
+        "ignored": []
+      }
+    ],
+    "analyze": [
+      {
+        "event_id": null,
+        "title": "합성 전쟁 발생",
+        "evidence_ids": [
+          "w1"
+        ],
+        "facts": "합성 전쟁 발생",
+        "interpretation": "합성 검증 자료: 시장 전반의 위험 증가",
+        "importance": "HIGH",
+        "urgency": "IMMEDIATE",
+        "confirmation": "REPORTED",
+        "change": "NEW",
+        "why_now": "새로운 사실 확인",
+        "portfolio_note": "보유 종목과 무관한 전체 시장 사건",
+        "next_check": "후속 공식 발표 확인",
+        "open": true,
+        "notify": true
+      },
+      {
+        "event_id": "$first_event",
+        "title": "합성 공식 정정",
+        "evidence_ids": [
+          "d1"
+        ],
+        "facts": "합성 공식 정정",
+        "interpretation": "합성 검증 자료: 시장 전반의 위험 증가",
+        "importance": "HIGH",
+        "urgency": "IMMEDIATE",
+        "confirmation": "OFFICIAL",
+        "change": "CORRECTION",
+        "material_change": {
+          "prior_claim": "합성 전쟁 발생",
+          "new_fact": "합성 공식 정정",
+          "support_ids": [
+            "d1"
+          ],
+          "why_not_covered": "첫 제안 본문은 정정 전 보도만 담았다"
+        },
+        "why_now": "새로운 사실 확인",
+        "portfolio_note": "보유 종목과 무관한 전체 시장 사건",
+        "next_check": "후속 공식 발표 확인",
+        "open": true,
+        "notify": true
+      }
+    ]
+  },
+  "expectations": [
+    {
+      "at": "2026-09-01T23:00:00+09:00",
+      "alert_count": 1,
+      "contains": "합성 전쟁 발생"
+    },
+    {
+      "at": "2026-09-01T23:01:00+09:00",
+      "alert_count": 0
+    },
+    {
+      "at": "2026-09-01T23:02:00+09:00",
+      "alert_count": 1,
+      "contains": "합성 공식 정정"
+    }
+  ]
+}

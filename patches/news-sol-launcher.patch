@@ -1,0 +1,238 @@
+--- a/minimal-continuity-cli
++++ b/minimal-continuity-cli
+@@ -9,6 +9,7 @@
+ import math
+ import os
+ import re
++import signal
+ import subprocess
+ import sys
+ import threading
+@@ -37,6 +38,8 @@
+ TOKEN = re.compile(r"[A-Za-z0-9._-]{1,120}")
+ MIN_TIMEOUT_SECONDS = 9000
+ MIN_MAX_TURNS = 150
++NEWS_PURPOSE = "tokmo-news-confirmation"
++NEWS_ROUTE = {"provider": "codex", "model": "gpt-5.6-sol", "role": "analysis", "continuity": "fresh"}
+ CALLER_OWNED = {"raw_argv", "argv", "tools", "output_format", "sandbox", "permission_mode"}
+ # Owner-written marker inside output_dir: run() terminates ONLY its own CLI child (never a
+ # foreign pid) and still persists RESULT/event evidence. Advertised in the READY receipt.
+@@ -194,9 +197,52 @@
+     return descriptor
+
+
++def news_request(req: dict[str, Any]) -> bool:
++    return req.get("purpose") == NEWS_PURPOSE
++
++
++def news_quota(entry: dict[str, Any], observed: datetime) -> list[dict[str, str]]:
++    windows = entry.get("windows")
++    if (now() - observed).total_seconds() < -120:
++        return [issue("QUOTA_STALE", "provider", "future observation")]
++    if not isinstance(windows, list) or not windows:
++        return [issue("PROVIDER_UNAVAILABLE", "provider")]
++    labels = set()
++    for window in windows:
++        if not isinstance(window, dict):
++            return [issue("PROVIDER_UNAVAILABLE", "provider")]
++        label, value = window.get("label"), window.get("remaining")
++        if not isinstance(label, str) or not label or label in labels or type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 100:
++            return [issue("PROVIDER_UNAVAILABLE", "provider")]
++        labels.add(label)
++        if value == 0:
++            return [issue("QUOTA_EXHAUSTED", "provider")]
++    return [] if "Session" in labels else [issue("PROVIDER_UNAVAILABLE", "provider")]
++
++
++def news_output_error(output: str) -> str | None:
++    try:
++        rows = [json.loads(line) for line in output.splitlines() if line.strip()]
++        messages = []
++        for row in rows:
++            item = row.get("item") or {}
++            # Codex also emits informational CLI warnings as item.type=error.
++            # They are not tools; process exit status still gates success.
++            if item and item.get("type") not in {"reasoning", "agent_message", "error"}:
++                return "NEWS_TOOL_USE_REJECTED"
++            if row.get("type") == "item.completed" and item.get("type") == "agent_message":
++                messages.append(item.get("text"))
++        if not messages or not isinstance(json.loads(messages[-1]), dict):
++            return "NEWS_JSON_RESPONSE_INVALID"
++    except (ValueError, TypeError, AttributeError):
++        return "NEWS_JSON_RESPONSE_INVALID"
++    return None
++
++
+ def validate_request(req: dict[str, Any]) -> tuple[list[dict[str, str]], dict[str, Any] | None]:
+     issues: list[dict[str, str]] = []
+-    for key in sorted(set(req) - ALLOWED_REQUEST):
++    allowed = ALLOWED_REQUEST | {"response_schema"} if news_request(req) else ALLOWED_REQUEST
++    for key in sorted(set(req) - allowed):
+         code = "CALLER_OWNED_FLAG" if key in CALLER_OWNED else "UNSUPPORTED_FIELD"
+         issues.append(issue(code, key))
+     for key in sorted(LEGACY_FIELDS & set(req)):
+@@ -212,16 +258,27 @@
+     timeout = req.get("timeout_seconds")
+     if "timeout_seconds" in req and (
+         not isinstance(timeout, (int, float)) or isinstance(timeout, bool)
+-        or timeout < MIN_TIMEOUT_SECONDS
++        or (not math.isfinite(timeout) or not 0 < timeout <= 120 if news_request(req) else timeout < MIN_TIMEOUT_SECONDS)
+     ):
+         issues.append(issue("PREFLIGHT_CONTRACT_ERROR", "timeout_seconds", "minimum 9000 seconds"))
+     turns = req.get("max_turns")
+     if "max_turns" in req and (
+-        not isinstance(turns, int) or isinstance(turns, bool) or turns < MIN_MAX_TURNS
++        not isinstance(turns, int) or isinstance(turns, bool) or (turns != 1 if news_request(req) else turns < MIN_MAX_TURNS)
+     ):
+         issues.append(issue("PREFLIGHT_CONTRACT_ERROR", "max_turns", "minimum 150 turns"))
+     if req.get("schema") != SCHEMA:
+         issues.append(issue("SCHEMA_INVALID", "schema"))
++    if news_request(req):
++        if any(req.get(k) != v for k, v in NEWS_ROUTE.items()) or "executable" in req:
++            issues.append(issue("ROUTE_NOT_ADMITTED", "purpose", "NEWS exact fresh SOL analysis only"))
++        schema = req.get("response_schema")
++        try:
++            valid_schema = isinstance(schema, dict) and schema.get("type") == "object"
++            json.dumps(schema, allow_nan=False)
++        except (TypeError, ValueError):
++            valid_schema = False
++        if not valid_schema:
++            issues.append(issue("SCHEMA_INVALID", "response_schema"))
+     if req.get("provider") not in {"claude", "codex", "zai", "agy"}:
+         issues.append(issue("PROVIDER_UNSUPPORTED", "provider"))
+     if req.get("provider") == "agy" and any(req.get(key) != value for key, value in AGY_GROUP_ROUTE.items()):
+@@ -285,6 +342,8 @@
+             issues.append(issue("PROVIDER_UNAVAILABLE", "provider"))
+         elif req.get("provider") == "agy":
+             issues.extend(agy_gate(provider))
++        elif news_request(req):
++            issues.extend(news_quota(provider, observed))
+         # Admitted set is surfaced in `detail` so the caller can correct the
+         # request without re-reading MODEL_ROUTING_STATE.md.
+         admitted = sorted(admitted_route_models(text))
+@@ -422,6 +481,15 @@
+         if resume:
+             raise ValueError("FRESH_RESUME_CONFLICT")
+         argv = [exe, "exec", "--json", "--model", req["model"], "{PROMPT}"]
++        if news_request(req):
++            argv = [exe, "exec", "--ignore-user-config", "--ephemeral", "--skip-git-repo-check",
++                    "--sandbox", "read-only", "--json", "--model", req["model"], "--cd", req["workspace"],
++                    "--output-schema", str(Path(req["output_dir"]).resolve() / "response-schema.json")]
++            for setting in ['approval_policy="never"', 'web_search="disabled"', 'features.shell_tool=false',
++                            'features.multi_agent=false', 'features.plugins=false', 'features.remote_plugin=false',
++                            'features.skip_host_skill_discovery=true', 'model_reasoning_effort="high"']:
++                argv.extend(["-c", setting])
++            argv.append("-")
+     elif provider == "agy":
+         if resume:
+             raise ValueError("FRESH_RESUME_CONFLICT")
+@@ -442,6 +510,8 @@
+     }
+     if "executable_reason" in req:
+         core["executable_reason"] = req["executable_reason"]
++    if news_request(req):
++        core["response_schema_sha256"] = sha_bytes(canonical_json(req["response_schema"]) + b"\n")
+     core["invocation_sha256"] = sha_bytes(canonical_json(core))
+     return core
+
+@@ -507,6 +577,9 @@
+     if issues:
+         return preflight_failure(req, issues)
+     output.mkdir(parents=True, exist_ok=True)
++    if news_request(req):
++        os.chmod(output, 0o700)
++        atomic_json(output / "response-schema.json", req["response_schema"])
+     atomic_json(output / "PLAN.json", plan)
+     ready = {
+         "schema": READY_SCHEMA, "status": "READY", "invocation_sha256": plan["invocation_sha256"],
+@@ -625,6 +698,15 @@
+     identity["workspace"] = str(Path(str(req.get("workspace", ""))).resolve())
+     if any(identity[key] != plan[key] for key in IDENTITY_FIELDS):
+         return "REQUEST_IDENTITY_CHANGED"
++    if news_request(req):
++        if validate_request(dict(req))[0] or req.get("timeout_seconds") != plan.get("timeout_seconds"):
++            return "NEWS_REQUEST_CHANGED"
++        try:
++            expected = plan["response_schema_sha256"]
++            if sha_bytes(canonical_json(req["response_schema"]) + b"\n") != expected or sha_file(Path(plan["output_dir"]) / "response-schema.json") != expected:
++                return "NEWS_SCHEMA_CHANGED"
++        except (KeyError, OSError, TypeError, ValueError):
++            return "NEWS_SCHEMA_CHANGED"
+     if not Path(str(plan.get("workspace", ""))).is_dir():
+         return "PATH_MISSING"
+     try:
+@@ -655,30 +737,43 @@
+     return None
+
+
+-def run_child(argv: list[str], cwd: str, timeout: float, cancel_path: Path) -> tuple[subprocess.CompletedProcess[str] | None, bool]:
++def run_child(argv: list[str], cwd: str, timeout: float, cancel_path: Path, *, prompt: str | None = None) -> tuple[subprocess.CompletedProcess[str] | None, bool]:
+     """Spawn the CLI child unless the owner already wrote the cancel marker; poll the marker while it
+     runs and terminate ONLY this child (SIGTERM, SIGKILL after 5 s). Returns (result or None, cancelled).
+     Timeout semantics are subprocess.run's: kill, wait, re-raise TimeoutExpired."""
+     if cancel_path.exists():
+         return None, True
+-    child = subprocess.Popen(argv, cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
++    options = {}
++    if prompt is not None:
++        env = {k: v for k, v in os.environ.items() if k not in {"OPENAI_API_KEY", "CODEX_API_KEY", "ANTHROPIC_API_KEY"}}
++        options = dict(stdin=subprocess.PIPE, env=env, start_new_session=True)
++    child = subprocess.Popen(argv, cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **options)
++
++    def stop(hard=False):
++        try:
++            if prompt is not None:
++                os.killpg(child.pid, signal.SIGKILL if hard else signal.SIGTERM)
++            else:
++                child.kill() if hard else child.terminate()
++        except ProcessLookupError:
++            pass
+     done, cancelled = threading.Event(), threading.Event()
+
+     def watch() -> None:
+         while not done.is_set():
+             if cancel_path.exists():
+                 cancelled.set()
+-                child.terminate()
++                stop()
+                 if not done.wait(5.0):
+-                    child.kill()
++                    stop(True)
+                 return
+             done.wait(0.25)
+
+     threading.Thread(target=watch, name="cancel-marker-watch", daemon=True).start()
+     try:
+-        stdout, stderr = child.communicate(timeout=timeout)
++        stdout, stderr = child.communicate(input=prompt, timeout=timeout) if prompt is not None else child.communicate(timeout=timeout)
+     except subprocess.TimeoutExpired:
+-        child.kill()
++        stop(True)
+         child.wait()
+         raise
+     finally:
+@@ -729,11 +824,14 @@
+         argv = [prompt if value == "{PROMPT}" else value for value in plan["argv"]]
+         try:
+             child, cancelled = run_child(argv, plan["workspace"], float(plan["timeout_seconds"]),
+-                                         Path(req["output_dir"]) / CANCEL_MARKER)
++                                         Path(req["output_dir"]) / CANCEL_MARKER,
++                                         **({"prompt": prompt} if news_request(req) else {}))
+             if child is None:
+                 started, session_id = "FALSE", None
+             else:
+                 started, session_id, failure = classify_start(req["provider"], child.stdout, child.stderr, child.returncode)
++                if news_request(req) and child.returncode == 0:
++                    error_class = news_output_error(child.stdout)
+             if cancelled:
+                 error_class = "USER_CANCELLED"
+         except subprocess.TimeoutExpired:
+@@ -750,7 +848,7 @@
+     # Success needs both: a started model API and no failed task result.
+     succeeded = started == "TRUE" and error_class is None
+     descriptor_action = "none"
+-    if started == "TRUE" and session_id:
++    if started == "TRUE" and session_id and not news_request(req):
+         path = descriptor_path(req["task_key"])
+         try:
+             existing = read_json(path) if path.exists() else None

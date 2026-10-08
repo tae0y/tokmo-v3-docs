@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "id": "synthetic-incremental-systemic-shock",
+  "description": "SYNTHETIC, invented public-source excerpt and example portfolio. A new systemic risk without a held company in the source must reach final review. No claim about any real bank or historical market.",
+  "observations": [
+    {
+      "id": "synthetic-funding-shock",
+      "observed_at": "2026-09-09T10:00:00+09:00",
+      "published_at": "2026-09-09T09:58:00+09:00",
+      "source_kind": "NEWS",
+      "publisher": "SYNTHETIC test source",
+      "title": "주요국 단기자금시장 경색…은행 간 결제 지연·아시아 주식 동반 급락",
+      "text": "이전까지 정상적으로 운영되던 여러 국가의 은행 간 단기자금 거래가 오늘 오전 급격히 위축됐다. 현지 주요 은행들이 일부 기관 간 결제 지연을 공지했고 중앙은행들이 긴급 유동성 공급 회의를 소집했다. 한국을 포함한 아시아 주요 주가지수는 장중 동반 급락 중이다. 중앙은행 회의 결과와 경색 원인은 아직 확인되지 않았다. 이 뉴스에는 개별 상장기업의 실적 변화가 포함되어 있지 않다.",
+      "url": "https://example.invalid/systemic-shock"
+    }
+  ],
+  "context": [
+    {
+      "observed_at": "2026-09-09T10:00:00+09:00",
+      "context": {
+        "portfolio_status": "FRESH",
+        "instruments": [
+          {
+            "key": "KR:000660",
+            "name": "SK하이닉스",
+            "kind": "equity"
+          }
+        ],
+        "holdings": [
+          {
+            "key": "KR:000660",
+            "name": "SK하이닉스",
+            "scope": "personal",
+            "account": "synthetic",
+            "currency": "KRW",
+            "quantity": "3"
+          }
+        ],
+        "investment_followup": {
+          "status": "OK",
+          "choices": [
+            {
+              "id": "synthetic-choice",
+              "keys": [
+                "KR:000660"
+              ],
+              "action": "HOLD",
+              "phase": "ADOPTED",
+              "summary": "메모리 공급 부족이 해소되기 전까지 보유",
+              "reason_quotes": [
+                "기업 전망은 유지해도 금융위기로 계좌 위험이 커지면 일부 줄이고 현금을 늘릴지 다시 판단한다."
+              ],
+              "condition_quotes": [
+                "전량 매도는 미리 정하지 않음"
+              ]
+            }
+          ],
+          "delivered_reviews": []
+        }
+      }
+    }
+  ],
+  "checkpoints": [],
+  "recorded_responses": {},
+  "expectations": [
+    {
+      "alert_evidence_id": "synthetic-funding-shock",
+      "min_alert_count": 1
+    }
+  ]
+}

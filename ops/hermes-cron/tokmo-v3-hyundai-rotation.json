@@ -1,0 +1,15 @@
+{
+  "name": "tokmo-v3-hyundai-rotation-daily",
+  "schedule": "12 10 * * 1-5",
+  "script": "tokmo_v3_hyundai_rotation.sh",
+  "no_agent": true,
+  "deliver": "local",
+  "workdir": "/home/tokmo/tokmo-v3",
+  "policy_version": "hyundai-rotation-daily-v1",
+  "ai_analysis": true,
+  "telegram_alerts": true,
+  "order_write": true,
+  "enabled": false,
+  "paused": true,
+  "install_gate": "docs/hyundai-rotation-automation-plan-20260911.md §4: owner-run install after implementation review; live sending additionally needs ~/.hermes/state/tokmo-v3/hyundai-rotation/live.flag"
+}

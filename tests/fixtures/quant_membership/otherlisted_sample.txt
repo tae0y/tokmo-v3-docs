@@ -1,0 +1,4 @@
+ACT Symbol|Security Name|Exchange|CQS Symbol|ETF|Round Lot Size|Test Issue|NASDAQ Symbol
+IBM|International Business Machines Common Stock|N|IBM|N|100|N|IBM
+ZZZ|Unsupported Acquisition Corp. Warrant|A|ZZZ|N|100|N|ZZZ
+File Creation Time: 081320260130|||||||

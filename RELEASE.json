@@ -1,0 +1,9 @@
+{
+ "schema": "tokmo-v3-release-v1",
+ "version": "v20261008_01",
+ "source_ref": "main",
+ "source_commit": "ca21862e2138d879b15f73987f0a7367c5b7e105",
+ "files": 1173,
+ "tree_sha256": "003cedac5a5d67eff3742cb13d40a640b4348bdedf297cfeca718fe9b3442d30",
+ "exported_at": "2026-10-08T12:27:44+00:00"
+}

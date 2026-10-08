@@ -1,0 +1,27 @@
+{
+  "name": "rising-deteriorating",
+  "purpose": "동일한 상승 중 사업 악화",
+  "classification": "synthetic-design-pair",
+  "base": "base-synthetic.json",
+  "replace": {
+    "positions": []
+  },
+  "instrument_updates": {
+    "KR:000001": {
+      "evidence": [
+        {
+          "id": "business-case",
+          "kind": "disclosure",
+          "text": "핵심 고객 계약 해지와 다음 분기 생산량 축소 공시. 최근 주가 상승과 달리 영업이익이 급감했고 재고가 쌓였다.",
+          "available_at": "2026-09-07T01:00:00+00:00",
+          "source": "합성 공시 역할 · 실제 자료 아님"
+        }
+      ]
+    }
+  },
+  "expected_actions": {
+    "KR:000001": [
+      "WATCH"
+    ]
+  }
+}

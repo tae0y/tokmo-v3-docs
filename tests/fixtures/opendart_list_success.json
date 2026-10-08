@@ -1,0 +1,21 @@
+{
+    "status": "000",
+    "message": "정상",
+    "page_no": 1,
+    "page_count": 1,
+    "total_count": 42,
+    "total_page": 42,
+    "list": [
+        {
+            "corp_code": "00164779",
+            "corp_name": "SK하이닉스",
+            "stock_code": "000660",
+            "corp_cls": "Y",
+            "report_nm": "동일인등출자계열회사와의상품ㆍ용역거래변경",
+            "rcept_no": "20260727000169",
+            "flr_nm": "SK하이닉스",
+            "rcept_dt": "20260727",
+            "rm": "공"
+        }
+    ]
+}

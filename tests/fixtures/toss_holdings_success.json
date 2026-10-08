@@ -1,0 +1,6 @@
+{"result": {"items": [
+  {"symbol": "SYN001", "quantity": "10", "averagePurchasePrice": "71000",
+   "currency": "KRW", "market": "KR", "name": "SYNTHETIC-EQUITY-A", "assetType": "equity"},
+  {"symbol": "SYNU", "quantity": "2.50", "averagePurchasePrice": "120.75",
+   "currency": "USD", "market": "US", "name": "SYNTHETIC-EQUITY-B", "assetType": "equity"}
+]}}

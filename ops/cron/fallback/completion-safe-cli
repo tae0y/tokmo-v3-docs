@@ -1,0 +1,39 @@
+#!/bin/bash
+# Minimal stand-in for Hermes' completion-safe-cli, for installs without Hermes.
+# Contract used by ops/hermes-cron wrappers:
+#   completion-safe-cli --job-id ID --stdout F --stderr F --manifest F --cwd DIR --timeout SECONDS -- CMD [ARGS...]
+# Runs CMD with a wall-clock limit, captures stdout/stderr, and writes a JSON manifest containing
+# child_exit_code (the wrappers read that field). Exit status mirrors the child (124 on timeout).
+set -u
+JOB=""; OUT=/dev/null; ERR=/dev/null; MANIFEST=""; CWD="."; TIMEOUT=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --job-id) JOB="$2"; shift 2 ;;
+    --stdout) OUT="$2"; shift 2 ;;
+    --stderr) ERR="$2"; shift 2 ;;
+    --manifest) MANIFEST="$2"; shift 2 ;;
+    --cwd) CWD="$2"; shift 2 ;;
+    --timeout) TIMEOUT="$2"; shift 2 ;;
+    --) shift; break ;;
+    *) shift ;;   # ignore Hermes-only options (policy, model, ...)
+  esac
+done
+STARTED="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+cd "$CWD" || exit 2
+( "$@" >"$OUT" 2>"$ERR" ) & CHILD=$!
+TIMED_OUT=false
+if [ "$TIMEOUT" -gt 0 ] 2>/dev/null; then
+  ( sleep "$TIMEOUT"; kill -0 "$CHILD" 2>/dev/null && kill -TERM "$CHILD" 2>/dev/null ) & WATCH=$!
+  wait "$CHILD" 2>/dev/null; RC=$?
+  kill "$WATCH" 2>/dev/null; wait "$WATCH" 2>/dev/null
+  [ "$RC" -eq 143 ] && TIMED_OUT=true
+else
+  wait "$CHILD" 2>/dev/null; RC=$?
+fi
+if [ -n "$MANIFEST" ]; then
+  mkdir -p "$(dirname "$MANIFEST")"
+  printf '{"job_id":"%s","started_at":"%s","ended_at":"%s","cwd":"%s","child_exit_code":%s,"timed_out":%s,"launcher":"fallback"}\n' \
+    "$JOB" "$STARTED" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$CWD" "$RC" "$TIMED_OUT" >"$MANIFEST"
+fi
+$TIMED_OUT && exit 124
+exit "$RC"

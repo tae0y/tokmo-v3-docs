@@ -1,0 +1,5 @@
+client_secret=fake-review-only
+api_key=fake-review-only
+/Users/fake/path/review-only
+raw_body review canary
+response_body review canary

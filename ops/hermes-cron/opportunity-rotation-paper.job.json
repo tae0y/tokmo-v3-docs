@@ -1,0 +1,13 @@
+{
+  "name": "tokmo-v3-opportunity-paper-1m",
+  "runtime_job_id": "158ef27e151c",
+  "schedule": "* 8-16 * * 1-5",
+  "timezone": "Asia/Seoul",
+  "no_agent": true,
+  "script": "tokmo_v3_opportunity_rotation.sh",
+  "repository_script": "ops/hermes-cron/tokmo_v3_opportunity_rotation.sh",
+  "workdir": "/home/tokmo/tokmo-v3",
+  "deliver": "telegram:-1000000000000",
+  "failure_deliver": "telegram:<owner-chat-id>",
+  "activation": "owner-approved PAPER operation 2026-09-28; result notice approved 2026-10-02; runtime readback is authority, not this template"
+}

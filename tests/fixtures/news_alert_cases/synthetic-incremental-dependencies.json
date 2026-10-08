@@ -1,0 +1,279 @@
+{
+  "version": 1,
+  "id": "synthetic-incremental-dependencies",
+  "description": "SYNTHETIC: same sources, unrelated then related quantity changes and an explicit deadline. Recorded replay checks routing, not AI judgment. Variant A efficient, B incremental, C incremental + scoped reuse.",
+  "observations": [
+    {
+      "id": "a",
+      "observed_at": "2026-09-09T10:00:00+09:00",
+      "published_at": "2026-09-09T10:00:00+09:00",
+      "source_kind": "NEWS",
+      "publisher": "SYNTHETIC",
+      "title": "합성기업1 분기 양산 발표 대기",
+      "text": "회사는 9월 10일 새벽 양산 진행 상황을 발표할 예정이다.",
+      "url": "https://example.invalid/a"
+    }
+  ],
+  "context": [
+    {
+      "observed_at": "2026-09-09T10:00:00+09:00",
+      "context": {
+        "holdings": [
+          {
+            "key": "KR:000001",
+            "quantity": "10",
+            "account": "example"
+          },
+          {
+            "key": "KR:000002",
+            "quantity": "1",
+            "account": "example"
+          }
+        ],
+        "instruments": [
+          {
+            "key": "KR:000001",
+            "name": "합성기업1"
+          },
+          {
+            "key": "KR:000002",
+            "name": "합성기업2"
+          }
+        ],
+        "portfolio_status": "FRESH",
+        "investment_followup": {
+          "status": "OK",
+          "choices": [],
+          "delivered_reviews": []
+        }
+      }
+    },
+    {
+      "observed_at": "2026-09-09T16:00:00+09:00",
+      "context": {
+        "holdings": [
+          {
+            "key": "KR:000001",
+            "quantity": "10",
+            "account": "example"
+          },
+          {
+            "key": "KR:000002",
+            "quantity": "3",
+            "account": "example"
+          }
+        ],
+        "instruments": [
+          {
+            "key": "KR:000001",
+            "name": "합성기업1"
+          },
+          {
+            "key": "KR:000002",
+            "name": "합성기업2"
+          }
+        ],
+        "portfolio_status": "FRESH",
+        "investment_followup": {
+          "status": "OK",
+          "choices": [],
+          "delivered_reviews": []
+        }
+      }
+    },
+    {
+      "observed_at": "2026-09-09T22:00:00+09:00",
+      "context": {
+        "holdings": [
+          {
+            "key": "KR:000001",
+            "quantity": "20",
+            "account": "example"
+          },
+          {
+            "key": "KR:000002",
+            "quantity": "3",
+            "account": "example"
+          }
+        ],
+        "instruments": [
+          {
+            "key": "KR:000001",
+            "name": "합성기업1"
+          },
+          {
+            "key": "KR:000002",
+            "name": "합성기업2"
+          }
+        ],
+        "portfolio_status": "FRESH",
+        "investment_followup": {
+          "status": "OK",
+          "choices": [],
+          "delivered_reviews": []
+        }
+      }
+    }
+  ],
+  "checkpoints": [
+    "2026-09-10T04:00:00+09:00"
+  ],
+  "recorded_responses": {
+    "screen": [
+      {
+        "candidates": [
+          {
+            "event_id": null,
+            "evidence_ids": [
+              "a"
+            ]
+          }
+        ],
+        "ignored": []
+      }
+    ],
+    "analyze": [
+      {
+        "title": "합성기업1 분기 양산 발표 대기",
+        "facts": "회사는 9월 10일 새벽 양산 진행 상황을 발표할 예정이다.",
+        "interpretation": "예정된 발표 전에는 같은 자료로 진전을 확인할 수 없다.",
+        "why_now": "추가 사실 없음",
+        "portfolio_note": "",
+        "next_check": "약속한 발표 시각에 공식 확인",
+        "importance": "HIGH",
+        "urgency": "NORMAL",
+        "confirmation": "REPORTED",
+        "change": "NONE",
+        "notify": false,
+        "open": true,
+        "evidence_ids": [
+          "a"
+        ],
+        "subject_keys": [
+          "KR:000001"
+        ],
+        "review_dependencies": {
+          "all_portfolio": false,
+          "keys": [
+            "KR:000001"
+          ]
+        },
+        "followup_scope": {
+          "all_choices": false,
+          "choice_ids": []
+        },
+        "recheck": {
+          "after": "2026-09-10T04:00:00+09:00",
+          "reason": "예정된 공식 발표 시각"
+        }
+      },
+      {
+        "title": "합성기업1 분기 양산 발표 대기",
+        "facts": "회사는 9월 10일 새벽 양산 진행 상황을 발표할 예정이다.",
+        "interpretation": "예정된 발표 전에는 같은 자료로 진전을 확인할 수 없다.",
+        "why_now": "추가 사실 없음",
+        "portfolio_note": "",
+        "next_check": "약속한 발표 시각에 공식 확인",
+        "importance": "HIGH",
+        "urgency": "NORMAL",
+        "confirmation": "REPORTED",
+        "change": "NONE",
+        "notify": false,
+        "open": true,
+        "evidence_ids": [
+          "a"
+        ],
+        "subject_keys": [
+          "KR:000001"
+        ],
+        "review_dependencies": {
+          "all_portfolio": false,
+          "keys": [
+            "KR:000001"
+          ]
+        },
+        "followup_scope": {
+          "all_choices": false,
+          "choice_ids": []
+        },
+        "recheck": {
+          "after": "2026-09-10T04:00:00+09:00",
+          "reason": "예정된 공식 발표 시각"
+        }
+      },
+      {
+        "title": "합성기업1 분기 양산 발표 대기",
+        "facts": "회사는 9월 10일 새벽 양산 진행 상황을 발표할 예정이다.",
+        "interpretation": "예정된 발표 전에는 같은 자료로 진전을 확인할 수 없다.",
+        "why_now": "추가 사실 없음",
+        "portfolio_note": "",
+        "next_check": "약속한 발표 시각에 공식 확인",
+        "importance": "HIGH",
+        "urgency": "NORMAL",
+        "confirmation": "REPORTED",
+        "change": "NONE",
+        "notify": false,
+        "open": true,
+        "evidence_ids": [
+          "a"
+        ],
+        "subject_keys": [
+          "KR:000001"
+        ],
+        "review_dependencies": {
+          "all_portfolio": false,
+          "keys": [
+            "KR:000001"
+          ]
+        },
+        "followup_scope": {
+          "all_choices": false,
+          "choice_ids": []
+        },
+        "recheck": {
+          "after": "2026-09-10T04:00:00+09:00",
+          "reason": "예정된 공식 발표 시각"
+        }
+      },
+      {
+        "title": "합성기업1 분기 양산 발표 대기",
+        "facts": "회사는 9월 10일 새벽 양산 진행 상황을 발표할 예정이다.",
+        "interpretation": "예정된 발표 전에는 같은 자료로 진전을 확인할 수 없다.",
+        "why_now": "추가 사실 없음",
+        "portfolio_note": "",
+        "next_check": "약속한 발표 시각에 공식 확인",
+        "importance": "HIGH",
+        "urgency": "NORMAL",
+        "confirmation": "REPORTED",
+        "change": "NONE",
+        "notify": false,
+        "open": true,
+        "evidence_ids": [
+          "a"
+        ],
+        "subject_keys": [
+          "KR:000001"
+        ],
+        "review_dependencies": {
+          "all_portfolio": false,
+          "keys": [
+            "KR:000001"
+          ]
+        },
+        "followup_scope": {
+          "all_choices": false,
+          "choice_ids": []
+        },
+        "recheck": {
+          "after": "2026-09-10T04:00:00+09:00",
+          "reason": "예정된 공식 발표 시각"
+        }
+      }
+    ]
+  },
+  "expectations": [
+    {
+      "alert_count": 0
+    }
+  ]
+}

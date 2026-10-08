@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "id": "historical-kospi-20260903",
+  "description": "Historical collection replay; manually review expected alerts before evaluation.",
+  "sources": [
+    "/home/tokmo/.local/share/tokmo-v3/news/external_news_v4.sqlite3"
+  ],
+  "availability_note": "Collection times only. Revised news lacks older body snapshots; only the latest revision's conservative availability is exported. Disclosure listings are not document bodies.",
+  "observations": [
+    {
+      "id": "news:1ceb4f79a93841058ca6b2ecff6bd54f:1",
+      "observed_at": "2026-09-03T05:30:15.514614+00:00",
+      "published_at": "2026-09-03T05:24:24.000000+00:00",
+      "title": "[속보] 코스피, 돌연 하락 전환해 6,400대로…코스닥도 2%↓",
+      "text": "(",
+      "source_kind": "NEWS",
+      "publisher": "d74245449dd9ab6c0b066313ddd11d913f0187cc5b3c5f3feb6c8f79301e5a44",
+      "url": "https://www.yna.co.kr/view/AKR20260903112700008",
+      "source_id": "d74245449dd9ab6c0b066313ddd11d913f0187cc5b3c5f3feb6c8f79301e5a44",
+      "history_scope": "original_collection",
+      "first_seen_at": "2026-09-03T05:30:15.514614+00:00"
+    },
+    {
+      "id": "news:2bc7c48776bb4a768f0e9d6bfccf3aaa:1",
+      "observed_at": "2026-09-03T05:30:15.514614+00:00",
+      "published_at": "2026-09-03T05:19:33.000000+00:00",
+      "title": "임원 등에 '성과급 현금 대신 주식' 66%↑…삼성이 가장 많았다(종합)",
+      "text": "(세종=연합뉴스) 김수현 기자 = 올해 대기업집단에서 총수나 친족, 임원에게 성과 보상 등을 목적으로 주식을 지급하는 약정이 작년보다 66% 늘...",
+      "source_kind": "NEWS",
+      "publisher": "d74245449dd9ab6c0b066313ddd11d913f0187cc5b3c5f3feb6c8f79301e5a44",
+      "url": "https://www.yna.co.kr/view/AKR20260903085051002",
+      "source_id": "d74245449dd9ab6c0b066313ddd11d913f0187cc5b3c5f3feb6c8f79301e5a44",
+      "history_scope": "original_collection",
+      "first_seen_at": "2026-09-03T05:30:15.514614+00:00"
+    },
+    {
+      "id": "news:fc5e6c97085c49f0bb27b1a2b094799d:1",
+      "observed_at": "2026-09-03T05:30:15.514614+00:00",
+      "published_at": "2026-09-03T05:24:21.000000+00:00",
+      "title": "일본 국채금리 3% 돌파…엔 캐리 트레이드 촉발하나",
+      "text": "(서울=연합뉴스) 주종국 기자 = 10년 만기 일본 국채금리가 2일 3%를 돌파했다. 3%를 넘어선 것은 1996년 9월 이후 30년 만이다.",
+      "source_kind": "NEWS",
+      "publisher": "d74245449dd9ab6c0b066313ddd11d913f0187cc5b3c5f3feb6c8f79301e5a44",
+      "url": "https://www.yna.co.kr/view/AKR20260903091900009",
+      "source_id": "d74245449dd9ab6c0b066313ddd11d913f0187cc5b3c5f3feb6c8f79301e5a44",
+      "history_scope": "original_collection",
+      "first_seen_at": "2026-09-03T05:30:15.514614+00:00"
+    }
+  ],
+  "context": [],
+  "checkpoints": [
+    "2026-09-03T05:37:00+00:00"
+  ],
+  "expectations": [
+    {
+      "alert_evidence_id": "news:1ceb4f79a93841058ca6b2ecff6bd54f:1",
+      "urgency": "IMMEDIATE"
+    }
+  ],
+  "recorded_responses": {
+    "screen": [],
+    "analyze": []
+  }
+}

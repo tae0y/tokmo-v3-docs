@@ -1,0 +1,497 @@
+{
+  "version": 1,
+  "synthetic": true,
+  "simulate_delivery": true,
+  "description": "가상 시간순 사례. 실제 시장 이력이 아님. 미래 단계는 해당 시각 전 입력에 포함하지 않는다. 기존 재현에 무변화 정기점검 네 시점을 추가해 재사용과 확인 기한 도달을 검사한다.",
+  "id": "synthetic-context-duration-scheduled-review",
+  "context": [
+    {
+      "observed_at": "2026-09-01T09:00:00+09:00",
+      "context": {
+        "observed_at": "2026-09-01T09:00:00+09:00",
+        "portfolio_status": "OK",
+        "cash_status": "AVAILABLE",
+        "holdings": [
+          {
+            "key": "KR:SYN000",
+            "symbol": "SYN000",
+            "market_raw": "KR",
+            "name": "가상기업0",
+            "kind": "stock",
+            "scope": "personal",
+            "account": "synthetic-personal",
+            "currency": "KRW",
+            "quantity": "2",
+            "avg_price": "12345",
+            "observed_at": "2026-09-01T09:00:00+09:00",
+            "quantity_basis": "SYNTHETIC"
+          },
+          {
+            "key": "KR:SYN001",
+            "symbol": "SYN001",
+            "market_raw": "KR",
+            "name": "가상기업1",
+            "kind": "stock",
+            "scope": "personal",
+            "account": "synthetic-personal",
+            "currency": "KRW",
+            "quantity": "2",
+            "avg_price": "12345",
+            "observed_at": "2026-09-01T09:00:00+09:00",
+            "quantity_basis": "SYNTHETIC"
+          },
+          {
+            "key": "KR:SYN002",
+            "symbol": "SYN002",
+            "market_raw": "KR",
+            "name": "가상기업2",
+            "kind": "stock",
+            "scope": "personal",
+            "account": "synthetic-personal",
+            "currency": "KRW",
+            "quantity": "2",
+            "avg_price": "12345",
+            "observed_at": "2026-09-01T09:00:00+09:00",
+            "quantity_basis": "SYNTHETIC"
+          },
+          {
+            "key": "KR:SYN003",
+            "symbol": "SYN003",
+            "market_raw": "KR",
+            "name": "가상기업3",
+            "kind": "stock",
+            "scope": "personal",
+            "account": "synthetic-personal",
+            "currency": "KRW",
+            "quantity": "2",
+            "avg_price": "12345",
+            "observed_at": "2026-09-01T09:00:00+09:00",
+            "quantity_basis": "SYNTHETIC"
+          },
+          {
+            "key": "KR:SYN004",
+            "symbol": "SYN004",
+            "market_raw": "KR",
+            "name": "가상기업4",
+            "kind": "stock",
+            "scope": "personal",
+            "account": "synthetic-personal",
+            "currency": "KRW",
+            "quantity": "2",
+            "avg_price": "12345",
+            "observed_at": "2026-09-01T09:00:00+09:00",
+            "quantity_basis": "SYNTHETIC"
+          },
+          {
+            "key": "KR:SYN005",
+            "symbol": "SYN005",
+            "market_raw": "KR",
+            "name": "가상기업5",
+            "kind": "stock",
+            "scope": "personal",
+            "account": "synthetic-personal",
+            "currency": "KRW",
+            "quantity": "2",
+            "avg_price": "12345",
+            "observed_at": "2026-09-01T09:00:00+09:00",
+            "quantity_basis": "SYNTHETIC"
+          },
+          {
+            "key": "KR:SYN006",
+            "symbol": "SYN006",
+            "market_raw": "KR",
+            "name": "가상기업6",
+            "kind": "stock",
+            "scope": "personal",
+            "account": "synthetic-personal",
+            "currency": "KRW",
+            "quantity": "2",
+            "avg_price": "12345",
+            "observed_at": "2026-09-01T09:00:00+09:00",
+            "quantity_basis": "SYNTHETIC"
+          },
+          {
+            "key": "KR:SYN007",
+            "symbol": "SYN007",
+            "market_raw": "KR",
+            "name": "가상기업7",
+            "kind": "stock",
+            "scope": "personal",
+            "account": "synthetic-personal",
+            "currency": "KRW",
+            "quantity": "2",
+            "avg_price": "12345",
+            "observed_at": "2026-09-01T09:00:00+09:00",
+            "quantity_basis": "SYNTHETIC"
+          }
+        ],
+        "instruments": [
+          {
+            "key": "KR:SYN000",
+            "symbol": "SYN000",
+            "market": "KR",
+            "name": "가상기업0",
+            "kind": "stock",
+            "identity_source": "synthetic_capture",
+            "identity_at": "2026-09-01T09:00:00+09:00"
+          },
+          {
+            "key": "KR:SYN001",
+            "symbol": "SYN001",
+            "market": "KR",
+            "name": "가상기업1",
+            "kind": "stock",
+            "identity_source": "synthetic_capture",
+            "identity_at": "2026-09-01T09:00:00+09:00"
+          },
+          {
+            "key": "KR:SYN002",
+            "symbol": "SYN002",
+            "market": "KR",
+            "name": "가상기업2",
+            "kind": "stock",
+            "identity_source": "synthetic_capture",
+            "identity_at": "2026-09-01T09:00:00+09:00"
+          },
+          {
+            "key": "KR:SYN003",
+            "symbol": "SYN003",
+            "market": "KR",
+            "name": "가상기업3",
+            "kind": "stock",
+            "identity_source": "synthetic_capture",
+            "identity_at": "2026-09-01T09:00:00+09:00"
+          },
+          {
+            "key": "KR:SYN004",
+            "symbol": "SYN004",
+            "market": "KR",
+            "name": "가상기업4",
+            "kind": "stock",
+            "identity_source": "synthetic_capture",
+            "identity_at": "2026-09-01T09:00:00+09:00"
+          },
+          {
+            "key": "KR:SYN005",
+            "symbol": "SYN005",
+            "market": "KR",
+            "name": "가상기업5",
+            "kind": "stock",
+            "identity_source": "synthetic_capture",
+            "identity_at": "2026-09-01T09:00:00+09:00"
+          },
+          {
+            "key": "KR:SYN006",
+            "symbol": "SYN006",
+            "market": "KR",
+            "name": "가상기업6",
+            "kind": "stock",
+            "identity_source": "synthetic_capture",
+            "identity_at": "2026-09-01T09:00:00+09:00"
+          },
+          {
+            "key": "KR:SYN007",
+            "symbol": "SYN007",
+            "market": "KR",
+            "name": "가상기업7",
+            "kind": "stock",
+            "identity_source": "synthetic_capture",
+            "identity_at": "2026-09-01T09:00:00+09:00"
+          },
+          {
+            "key": "KR:SYN008",
+            "symbol": "SYN008",
+            "market": "KR",
+            "name": "가상기업8",
+            "kind": "stock",
+            "identity_source": "synthetic_capture",
+            "identity_at": "2026-09-01T09:00:00+09:00"
+          },
+          {
+            "key": "KR:SYN009",
+            "symbol": "SYN009",
+            "market": "KR",
+            "name": "가상기업9",
+            "kind": "stock",
+            "identity_source": "synthetic_capture",
+            "identity_at": "2026-09-01T09:00:00+09:00"
+          },
+          {
+            "key": "KR:SYN010",
+            "symbol": "SYN010",
+            "market": "KR",
+            "name": "가상기업10",
+            "kind": "stock",
+            "identity_source": "synthetic_capture",
+            "identity_at": "2026-09-01T09:00:00+09:00"
+          },
+          {
+            "key": "KR:SYN011",
+            "symbol": "SYN011",
+            "market": "KR",
+            "name": "가상기업11",
+            "kind": "stock",
+            "identity_source": "synthetic_capture",
+            "identity_at": "2026-09-01T09:00:00+09:00"
+          },
+          {
+            "key": "KR:SYN012",
+            "symbol": "SYN012",
+            "market": "KR",
+            "name": "가상기업12",
+            "kind": "stock",
+            "identity_source": "synthetic_capture",
+            "identity_at": "2026-09-01T09:00:00+09:00"
+          },
+          {
+            "key": "KR:SYN013",
+            "symbol": "SYN013",
+            "market": "KR",
+            "name": "가상기업13",
+            "kind": "stock",
+            "identity_source": "synthetic_capture",
+            "identity_at": "2026-09-01T09:00:00+09:00"
+          },
+          {
+            "key": "KR:SYN014",
+            "symbol": "SYN014",
+            "market": "KR",
+            "name": "가상기업14",
+            "kind": "stock",
+            "identity_source": "synthetic_capture",
+            "identity_at": "2026-09-01T09:00:00+09:00"
+          },
+          {
+            "key": "KR:SYN015",
+            "symbol": "SYN015",
+            "market": "KR",
+            "name": "가상기업15",
+            "kind": "stock",
+            "identity_source": "synthetic_capture",
+            "identity_at": "2026-09-01T09:00:00+09:00"
+          },
+          {
+            "key": "KR:SYN016",
+            "symbol": "SYN016",
+            "market": "KR",
+            "name": "가상기업16",
+            "kind": "stock",
+            "identity_source": "synthetic_capture",
+            "identity_at": "2026-09-01T09:00:00+09:00"
+          },
+          {
+            "key": "KR:SYN017",
+            "symbol": "SYN017",
+            "market": "KR",
+            "name": "가상기업17",
+            "kind": "stock",
+            "identity_source": "synthetic_capture",
+            "identity_at": "2026-09-01T09:00:00+09:00"
+          },
+          {
+            "key": "KR:SYN018",
+            "symbol": "SYN018",
+            "market": "KR",
+            "name": "가상기업18",
+            "kind": "stock",
+            "identity_source": "synthetic_capture",
+            "identity_at": "2026-09-01T09:00:00+09:00"
+          },
+          {
+            "key": "KR:SYN019",
+            "symbol": "SYN019",
+            "market": "KR",
+            "name": "가상기업19",
+            "kind": "stock",
+            "identity_source": "synthetic_capture",
+            "identity_at": "2026-09-01T09:00:00+09:00"
+          },
+          {
+            "key": "KR:SYN020",
+            "symbol": "SYN020",
+            "market": "KR",
+            "name": "가상기업20",
+            "kind": "stock",
+            "identity_source": "synthetic_capture",
+            "identity_at": "2026-09-01T09:00:00+09:00"
+          },
+          {
+            "key": "KR:SYN021",
+            "symbol": "SYN021",
+            "market": "KR",
+            "name": "가상기업21",
+            "kind": "stock",
+            "identity_source": "synthetic_capture",
+            "identity_at": "2026-09-01T09:00:00+09:00"
+          },
+          {
+            "key": "KR:SYN022",
+            "symbol": "SYN022",
+            "market": "KR",
+            "name": "가상기업22",
+            "kind": "stock",
+            "identity_source": "synthetic_capture",
+            "identity_at": "2026-09-01T09:00:00+09:00"
+          },
+          {
+            "key": "KR:SYN023",
+            "symbol": "SYN023",
+            "market": "KR",
+            "name": "가상기업23",
+            "kind": "stock",
+            "identity_source": "synthetic_capture",
+            "identity_at": "2026-09-01T09:00:00+09:00"
+          },
+          {
+            "key": "KR:SYN024",
+            "symbol": "SYN024",
+            "market": "KR",
+            "name": "가상기업24",
+            "kind": "stock",
+            "identity_source": "synthetic_capture",
+            "identity_at": "2026-09-01T09:00:00+09:00"
+          },
+          {
+            "key": "KR:SYN025",
+            "symbol": "SYN025",
+            "market": "KR",
+            "name": "가상기업25",
+            "kind": "stock",
+            "identity_source": "synthetic_capture",
+            "identity_at": "2026-09-01T09:00:00+09:00"
+          },
+          {
+            "key": "KR:SYN026",
+            "symbol": "SYN026",
+            "market": "KR",
+            "name": "가상기업26",
+            "kind": "stock",
+            "identity_source": "synthetic_capture",
+            "identity_at": "2026-09-01T09:00:00+09:00"
+          },
+          {
+            "key": "KR:SYN027",
+            "symbol": "SYN027",
+            "market": "KR",
+            "name": "가상기업27",
+            "kind": "stock",
+            "identity_source": "synthetic_capture",
+            "identity_at": "2026-09-01T09:00:00+09:00"
+          },
+          {
+            "key": "KR:SYN028",
+            "symbol": "SYN028",
+            "market": "KR",
+            "name": "가상기업28",
+            "kind": "stock",
+            "identity_source": "synthetic_capture",
+            "identity_at": "2026-09-01T09:00:00+09:00"
+          },
+          {
+            "key": "KR:SYN029",
+            "symbol": "SYN029",
+            "market": "KR",
+            "name": "가상기업29",
+            "kind": "stock",
+            "identity_source": "synthetic_capture",
+            "identity_at": "2026-09-01T09:00:00+09:00"
+          },
+          {
+            "key": "KR:SYN030",
+            "symbol": "SYN030",
+            "market": "KR",
+            "name": "가상기업30",
+            "kind": "stock",
+            "identity_source": "synthetic_capture",
+            "identity_at": "2026-09-01T09:00:00+09:00"
+          },
+          {
+            "key": "KR:SYN031",
+            "symbol": "SYN031",
+            "market": "KR",
+            "name": "가상기업31",
+            "kind": "stock",
+            "identity_source": "synthetic_capture",
+            "identity_at": "2026-09-01T09:00:00+09:00"
+          }
+        ]
+      }
+    }
+  ],
+  "observations": [
+    {
+      "id": "synthetic-context-duration:1",
+      "observed_at": "2026-09-01T10:00:00+09:00",
+      "published_at": "2026-09-01T10:00:00+09:00",
+      "source_kind": "NEWS",
+      "publisher": "가상 검증 통신",
+      "url": "https://example.invalid/synthetic-context-duration:1",
+      "title": "산업 조달비용 장기간 상승, 원가 부담 점검",
+      "text": "가상 산업 공급 사례다. 전국 제조업 원재료 조달비용지수가 정상기 100에서 135로 올라 한 달간 유지 중이다. 자동차·기계·전자업의 원가에 광범위한 부담을 주는 상황이다. 공급사는 9월 2일 주요 물류 설비 복구를 예상하고 있다. 원가 부담과 정상화 경과를 살펴볼 가치가 있다.",
+      "measurements": [
+        {
+          "metric": "synthetic-context-duration",
+          "unit": "point",
+          "value": 135,
+          "measured_at": "2026-09-01T10:00:00+09:00"
+        }
+      ]
+    },
+    {
+      "id": "synthetic-context-duration:2",
+      "observed_at": "2026-09-01T11:00:00+09:00",
+      "published_at": "2026-09-01T11:00:00+09:00",
+      "source_kind": "NEWS",
+      "publisher": "가상 검증 통신",
+      "url": "https://example.invalid/synthetic-context-duration:2",
+      "title": "조달비용 135.2, 높은 수준 이어져",
+      "text": "조달비용지수가 135.2다. 지난 기사와 같은 높은 범위의 작은 변동이다. 복구 예상 일정과 차질 규모는 바뀌지 않았다. 기존 공급사 설명을 그대로 다시 인용한다.",
+      "measurements": [
+        {
+          "metric": "synthetic-context-duration",
+          "unit": "point",
+          "value": 135.2,
+          "measured_at": "2026-09-01T11:00:00+09:00"
+        }
+      ]
+    },
+    {
+      "id": "synthetic-context-duration:3",
+      "observed_at": "2026-09-08T10:00:00+09:00",
+      "published_at": "2026-09-08T10:00:00+09:00",
+      "source_kind": "NEWS",
+      "publisher": "가상 검증 통신",
+      "url": "https://example.invalid/synthetic-context-duration:3",
+      "title": "설비 복구 예정일 지났지만 조달비용 부담 지속",
+      "text": "조달비용지수는 135다. 예정했던 9월 2일을 지나 9월 8일에도 물류 설비가 정상화되지 못했다는 현장 확인이 나왔다. 가격 급등이 추가로 나타난 것은 아니지만 높은 원가가 유지돼 기업의 누적 비용 부담과 기존 정상화 기대를 재점검할 시점이다. 구체적인 새 복구 일정은 확인되지 않았다.",
+      "measurements": [
+        {
+          "metric": "synthetic-context-duration",
+          "unit": "point",
+          "value": 135,
+          "measured_at": "2026-09-08T10:00:00+09:00"
+        }
+      ]
+    }
+  ],
+  "expectations": [
+    {
+      "at": "2026-09-01T10:00:00+09:00",
+      "alert_count": 1
+    },
+    {
+      "at": "2026-09-01T11:00:00+09:00",
+      "alert_count": 0
+    },
+    {
+      "at": "2026-09-08T10:00:00+09:00",
+      "alert_count": 1
+    }
+  ],
+  "checkpoints": [
+    "2026-09-01T16:00:00+09:00",
+    "2026-09-01T22:00:00+09:00",
+    "2026-09-02T04:00:00+09:00",
+    "2026-09-02T09:00:00+09:00"
+  ]
+}

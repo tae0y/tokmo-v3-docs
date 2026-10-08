@@ -1,0 +1,46 @@
+# tokmo-v3 schedule for a plain cron install (no Hermes). Times are Asia/Seoul.
+# 1. Replace PROJECT with your checkout path.  2. `crontab -e` and paste.  3. Keep TZ and the credentials lines.
+#
+# Every wrapper derives the project root from its own location; the variables below are only the
+# things a wrapper cannot discover: shell credentials for the stock bot and the Hermes helper fallbacks.
+TZ=Asia/Seoul
+PROJECT=/home/tokmo/tokmo-v3
+TOKMO_COMPLETION_SAFE_CLI=/home/tokmo/tokmo-v3/ops/cron/fallback/completion-safe-cli
+TOKMO_SYSTEM_ALERT_SCRIPT=/home/tokmo/tokmo-v3/ops/cron/fallback/send_system_alert.sh
+# Stock-bot dialogue (pulse) — same two values the macOS wrappers read from ~/.zshrc
+TELEGRAM_STOCK_BOT=
+TELEGRAM_CHAT_ID=
+# Optional: where fallback failure alerts go
+TELEGRAM_ALERT_BOT_TOKEN=
+TELEGRAM_ALERT_CHAT_ID=
+
+# ---- core (toss) ----------------------------------------------------------------------------
+* * * * *              $PROJECT/ops/hermes-cron/tokmo_v3_pulse.sh                      # 60s pulse: holdings, fills, stock-bot dialogue, news delivery
+*/5 * * * *            $PROJECT/ops/hermes-cron/tokmo_v3_cadence.sh                    # 5m cadence: quotes, calendar, session facts
+
+# ---- news -----------------------------------------------------------------------------------
+0,15,30,45 * * * *     $PROJECT/ops/hermes-cron/tokmo_news_group_a.sh                  # collection group A
+5,20,35,50 * * * *     $PROJECT/ops/hermes-cron/tokmo_news_group_b.sh                  # collection group B
+10,25,40,55 * * * *    $PROJECT/ops/hermes-cron/tokmo_news_group_c.sh                  # collection group C
+* * * * *              $PROJECT/.venv/bin/python $PROJECT/ops/hermes-cron/tokmo_news_fast_primary.py     # 5m primary sources (self-paced)
+* * * * *              $PROJECT/.venv/bin/python $PROJECT/ops/hermes-cron/tokmo_news_classifier_worker.py # decision worker (self-paced, ~8 min)
+1,31 * * * *           $PROJECT/ops/hermes-cron/tokmo_opendart_operation.sh            # Korean disclosures
+13,43 * * * *          $PROJECT/ops/hermes-cron/tokmo_sec_targeted_operation.sh        # US filings
+
+# ---- follow-up / quant ----------------------------------------------------------------------
+*/5 * * * *            $PROJECT/.venv/bin/python $PROJECT/ops/hermes-cron/tokmo_investment_followup.py  # choice follow-up reviews
+
+# ---- paper trading (opportunity rotation; no real orders) ------------------------------------
+* 8-16 * * 1-5         $PROJECT/ops/hermes-cron/tokmo_v3_opportunity_rotation.sh | $PROJECT/ops/cron/fallback/send_system_alert.sh --stdin   # decision windows 10:05 / 13:30 only; stdout = one result summary per decided slot (or a failure line), empty otherwise
+*/30 * * * *           $PROJECT/.venv/bin/python $PROJECT/tools/install_product_gate.py heartbeat   # product-gate quota snapshot (required by news GLM / paper / quant calls)
+
+# ---- rotation trading (only with var/state/hyundai-rotation/live.flag) ----------------------
+40 8 * * 1-5           TOKMO_ROTATION_MARKET=KR $PROJECT/ops/hermes-cron/tokmo_v3_rotation_settle.sh
+15 10 * * 1-5          $PROJECT/ops/hermes-cron/tokmo_v3_hyundai_rotation_analysis.sh
+15 10 * * 1-5          TOKMO_ROTATION_MARKET=KR $PROJECT/ops/hermes-cron/tokmo_v3_hyundai_rotation_handoff.sh
+*/10 10-11 * * 1-5     $PROJECT/ops/hermes-cron/tokmo_v3_hyundai_rotation_analysis_close.sh  # NOT_DUE before 10:40; backup close for approval windows ending up to 11:10
+*/5 8-21 * * 1-5       $PROJECT/ops/hermes-cron/tokmo_v3_hyundai_rotation_evaluation.sh   # outcome bookkeeping, no model calls
+
+# ---- optional -------------------------------------------------------------------------------
+# */15 13-17 * * 1-5   $PROJECT/.venv/bin/python $PROJECT/ops/hermes-cron/tokmo_yt_12man_fetch.py       # YouTube transcript tracker (needs an LLM step in Hermes; standalone prints transcripts only)
+# 10 4 * * 1           $PROJECT/ops/hermes-cron/tokmo_youtube_weekly_review.sh

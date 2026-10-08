@@ -1,0 +1,12 @@
+{
+  "name": "tokmo-v3-cadence-5m",
+  "schedule": "*/5 * * * *",
+  "script": "tokmo_v3_cadence.sh",
+  "no_agent": true,
+  "deliver": "local",
+  "workdir": "/home/tokmo/tokmo-v3",
+  "policy_version": "cadence-300s-v1",
+  "ai_analysis": false,
+  "telegram_alerts": false,
+  "order_write": false
+}

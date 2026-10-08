@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "id": "synthetic-macro-divergence",
+  "description": "합성 지표 검증. 실제 시세나 거래 통계가 아님.",
+  "simulate_delivery": true,
+  "observations": [
+    {
+      "id": "macro",
+      "observed_at": "2026-09-01T10:00:00+09:00",
+      "source_kind": "MARKET",
+      "source_authority": "OFFICIAL",
+      "publisher": "SYNTHETIC 증권사 지표",
+      "url": "https://example.invalid/macro",
+      "title": "코스피·원달러 환율·투자자 수급 10거래일 동향",
+      "text": "최근 10거래일 코스피는 8% 상승했다. 같은 기간 원달러 환율은 1500원에서 1530원으로 올랐다. 외국인은 국내 주식 5조원을 순매도했고 개인은 5조원을 순매수했다. 수급 수치는 같은 기간 누적값이다. 정확한 상승 원인을 확정할 추가 자료는 없다."
+    },
+    {
+      "id": "ordinary",
+      "observed_at": "2026-09-01T10:00:00+09:00",
+      "source_kind": "NEWS",
+      "publisher": "SYNTHETIC 지역신문",
+      "url": "https://example.invalid/ordinary",
+      "title": "동네 도서관 주말 독서행사 개최",
+      "text": "주민 20명이 참가할 예정이다. 금융·기업 관련 사항은 없다."
+    }
+  ],
+  "context": [],
+  "checkpoints": [],
+  "recorded_responses": {
+    "screen": [],
+    "analyze": []
+  },
+  "expectations": [
+    {
+      "alert_count": 1,
+      "alert_evidence_id": "macro",
+      "contains": "환율",
+      "not_contains": "도서관"
+    }
+  ]
+}

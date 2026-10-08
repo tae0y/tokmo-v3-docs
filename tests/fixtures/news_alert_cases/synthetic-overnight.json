@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "id": "synthetic-overnight",
+  "description": "SYNTHETIC: normal overnight disclosure held for morning. Not historical evidence or an AI quality benchmark.",
+  "observations": [
+    {
+      "id": "d2",
+      "observed_at": "2026-09-01T22:30:00+09:00",
+      "published_at": "2026-09-01T22:30:00+09:00",
+      "title": "합성 자사주 소각 공시",
+      "text": "합성 자사주 소각 공시",
+      "source_kind": "DISCLOSURE",
+      "publisher": "SYNTHETIC test source",
+      "url": "https://example.invalid/d2"
+    }
+  ],
+  "checkpoints": [
+    "2026-09-02T08:00:00+09:00"
+  ],
+  "context": [],
+  "recorded_responses": {
+    "screen": [
+      {
+        "candidates": [
+          {
+            "evidence_ids": [
+              "d2"
+            ],
+            "event_id": null,
+            "title": "합성 자사주 소각 공시"
+          }
+        ],
+        "ignored": []
+      }
+    ],
+    "analyze": [
+      {
+        "event_id": null,
+        "title": "합성 자사주 소각 공시",
+        "evidence_ids": [
+          "d2"
+        ],
+        "facts": "합성 자사주 소각 공시",
+        "interpretation": "합성 검증 자료: 시장 전반의 위험 증가",
+        "importance": "HIGH",
+        "urgency": "NORMAL",
+        "confirmation": "OFFICIAL",
+        "change": "NEW",
+        "why_now": "새로운 사실 확인",
+        "portfolio_note": "보유 종목과 무관한 전체 시장 사건",
+        "next_check": "후속 공식 발표 확인",
+        "open": true,
+        "notify": true
+      },
+      {
+        "event_id": "$first_event",
+        "title": "합성 자사주 소각 공시",
+        "evidence_ids": [
+          "d2"
+        ],
+        "facts": "합성 자사주 소각 공시",
+        "interpretation": "합성 검증 자료: 시장 전반의 위험 증가",
+        "importance": "HIGH",
+        "urgency": "NORMAL",
+        "confirmation": "OFFICIAL",
+        "change": "NONE",
+        "why_now": "새로운 사실 확인",
+        "portfolio_note": "보유 종목과 무관한 전체 시장 사건",
+        "next_check": "후속 공식 발표 확인",
+        "open": true,
+        "notify": true
+      }
+    ]
+  },
+  "expectations": [
+    {
+      "at": "2026-09-01T22:30:00+09:00",
+      "alert_count": 0
+    },
+    {
+      "at": "2026-09-02T08:00:00+09:00",
+      "alert_count": 1,
+      "contains": "합성 자사주 소각 공시"
+    }
+  ]
+}

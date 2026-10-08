@@ -1,0 +1,11 @@
+{
+  "enabled": false,
+  "delivery_enabled": false,
+  "cutoff": "SET_AT_ACTIVATION",
+  "screen_model": "glm-5.3-flash",
+  "analysis_model": "glm-5.3",
+  "model_wait_enabled": true,
+  "timeout_seconds": 90,
+  "max_batches": 5,
+  "daily_token_budget": null
+}

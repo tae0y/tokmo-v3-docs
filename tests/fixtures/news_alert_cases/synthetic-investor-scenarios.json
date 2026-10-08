@@ -1,0 +1,115 @@
+{
+  "version": 1,
+  "id": "synthetic-investor-scenarios",
+  "description": "합성 검증: 전쟁 초기/반복/장기화, 단일 공시와 야간 묶음. 실제 사건 기록 아님.",
+  "observations": [
+    {
+      "id": "war",
+      "observed_at": "2026-09-01T23:00:00+09:00",
+      "published_at": "2026-09-01T23:00:00+09:00",
+      "title": "이란·이스라엘 전면 군사 충돌…호르무즈 항로 운항 중단 보도",
+      "text": "양국 공습이 시작됐다고 로이터가 보도했다. 호르무즈 해협 통항 중단도 보도됐지만 아직 해운 당국 공식 확인은 없다. 현재 유가와 주가 자료는 없다.",
+      "source_kind": "NEWS",
+      "publisher": "SYNTHETIC Reuters",
+      "url": "https://example.invalid/war"
+    },
+    {
+      "id": "war-repeat",
+      "observed_at": "2026-09-01T23:01:00+09:00",
+      "published_at": "2026-09-01T23:01:00+09:00",
+      "title": "이란·이스라엘 교전, 앞선 로이터 기사 재인용",
+      "text": "23시 기사를 그대로 인용한 기사다. 새로운 피해, 유가, 공식 확인이나 변경된 사실은 없다.",
+      "source_kind": "NEWS",
+      "publisher": "SYNTHETIC Reuters",
+      "url": "https://example.invalid/war-repeat"
+    },
+    {
+      "id": "retirement",
+      "observed_at": "2026-09-01T23:02:00+09:00",
+      "published_at": "2026-09-01T23:02:00+09:00",
+      "title": "가상 반도체회사 자사주 소각 결정 공시",
+      "text": "공식 공시 원문: 이사회가 발행주식 총수의 2%인 보유 자기주식 전량을 다음 달 소각하기로 결정했다. 신규 자금 조달이나 추가 주식 발행 계획은 없다. 이 수치는 합성 검증을 위한 자료다.",
+      "source_kind": "DISCLOSURE",
+      "publisher": "SYNTHETIC DART",
+      "url": "https://example.invalid/retirement"
+    },
+    {
+      "id": "retirement-repeat",
+      "observed_at": "2026-09-01T23:03:00+09:00",
+      "published_at": "2026-09-01T23:03:00+09:00",
+      "title": "가상 반도체회사 자사주 소각, 공시 내용 보도",
+      "text": "앞선 23:02 공시를 그대로 설명한다. 소각 규모, 일정, 해석에 변화가 없다.",
+      "source_kind": "NEWS",
+      "publisher": "SYNTHETIC Reuters",
+      "url": "https://example.invalid/retirement-repeat"
+    },
+    {
+      "id": "escalation",
+      "observed_at": "2026-09-03T09:00:00+09:00",
+      "published_at": "2026-09-03T09:00:00+09:00",
+      "title": "휴전 협상 결렬…호르무즈 통항 중단 사흘째, 유가 추가 급등",
+      "text": "전쟁 3일째 휴전 협상이 결렬됐고 해운 당국은 호르무즈 통항 중단 지속을 확인했다는 보도다. 브렌트유는 전일 대비 9% 추가 상승했다. 단기 충돌로 끝날 가능성이 낮아졌다는 해운 업계 평가가 새로 나왔다.",
+      "source_kind": "NEWS",
+      "publisher": "SYNTHETIC Reuters",
+      "url": "https://example.invalid/escalation"
+    }
+  ],
+  "context": [
+    {
+      "observed_at": "2026-09-01T23:00:00+09:00",
+      "context": {
+        "holdings": [
+          {
+            "symbol": "005930"
+          }
+        ],
+        "user_intent": "NOT_PROVIDED"
+      }
+    },
+    {
+      "observed_at": "2026-09-03T09:00:00+09:00",
+      "context": {
+        "holdings": [],
+        "cash_status": "HIGH_CASH_FROM_ACCOUNT_SNAPSHOT",
+        "user_intent": "NOT_PROVIDED"
+      }
+    }
+  ],
+  "checkpoints": [
+    "2026-09-02T08:00:00+09:00"
+  ],
+  "recorded_responses": {
+    "screen": [],
+    "analyze": []
+  },
+  "expectations": [
+    {
+      "at": "2026-09-01T23:00:00+09:00",
+      "alert_count": 1,
+      "urgency": "IMMEDIATE"
+    },
+    {
+      "at": "2026-09-01T23:01:00+09:00",
+      "alert_count": 0
+    },
+    {
+      "at": "2026-09-01T23:02:00+09:00",
+      "alert_count": 0
+    },
+    {
+      "at": "2026-09-01T23:03:00+09:00",
+      "alert_count": 0
+    },
+    {
+      "at": "2026-09-02T08:00:00+09:00",
+      "alert_count": 1,
+      "contains": "밤사이"
+    },
+    {
+      "at": "2026-09-03T09:00:00+09:00",
+      "min_alert_count": 1,
+      "alert_evidence_id": "escalation"
+    }
+  ],
+  "simulate_delivery": true
+}

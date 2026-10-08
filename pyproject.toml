@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tokmo-v3-spike"
+version = "20261008.1"   # release v20261008_01 (vYYYYMMDD_NN <-> YYYYMMDD.N, PEP 440 has no "_"); docs/RELEASE.md
+requires-python = ">=3.12"
+description = "Read-only Tokmo V3 foundation walking spike"
+dependencies = [
+    "openpyxl==3.1.5",
+    "defusedxml==0.7.1",
+    "et-xmlfile==2.0.0",
+]
+
+[project.scripts]
+tokmo-lookup = "tokmo.programs.lookup:main"
+tokmo-live = "tokmo.composition:main"
+tokmo-cadence = "tokmo.composition:cadence_main"
+
+[tool.setuptools.package-data]
+"tokmo.data" = ["sec_sic_html_v1.json", "sec_sic_html_v1.manifest.json"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

@@ -1,0 +1,15 @@
+{
+  "name": "tokmo-v3-pulse-1m",
+  "schedule": "* * * * *",
+  "script": "tokmo_v3_pulse.sh",
+  "no_agent": true,
+  "deliver": "local",
+  "workdir": null,
+  "policy_version": "pulse-60s-v1",
+  "enabled": false,
+  "paused": true,
+  "install_gate": "G2+ explicit step (60s Pulse Plan §9.1); file presence is not installation",
+  "ai_analysis": false,
+  "telegram_alerts": false,
+  "order_write": false
+}

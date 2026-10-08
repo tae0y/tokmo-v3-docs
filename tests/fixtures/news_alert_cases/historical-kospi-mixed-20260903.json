@@ -1,0 +1,272 @@
+{
+  "version": 1,
+  "id": "historical-kospi-mixed-20260903",
+  "description": "Historical collection replay; manually review expected alerts before evaluation.",
+  "sources": [
+    "/home/tokmo/.local/share/tokmo-v3/news/external_news_v4.sqlite3"
+  ],
+  "availability_note": "Collection times only. Revised news lacks older body snapshots; only the latest revision's conservative availability is exported. Disclosure listings are not document bodies.",
+  "observations": [
+    {
+      "id": "news:0e46a2165ce34b1b9d2e83c729433d61:1",
+      "observed_at": "2026-09-03T05:21:58.592499+00:00",
+      "published_at": "2026-09-03T05:08:59.000000+00:00",
+      "title": "[속보] LG 구본무 선대회장 배우자, 구광모 파양소송 1심 패소",
+      "text": "[속보] LG 구본무 선대회장 배우자, 구광모 파양소송 1심 패소",
+      "source_kind": "NEWS",
+      "publisher": "c22ac7d13187a573613bfa3e5636e74eb0279b17d096124d2c1789473722a354",
+      "url": "https://news.jtbc.co.kr/article/NB12316524",
+      "source_id": "c22ac7d13187a573613bfa3e5636e74eb0279b17d096124d2c1789473722a354",
+      "history_scope": "original_collection",
+      "first_seen_at": "2026-09-03T05:21:58.592499+00:00"
+    },
+    {
+      "id": "news:cd4b2d853cf04bc6af540ce12de40abc:1",
+      "observed_at": "2026-09-03T05:21:58.592499+00:00",
+      "published_at": "2026-09-03T05:20:28.000000+00:00",
+      "title": "[속보]티빙, 3954만개 계정 개인정보 유출…암호키도 뚫려",
+      "text": "[속보]티빙, 3954만개 계정 개인정보 유출…암호키도 뚫려",
+      "source_kind": "NEWS",
+      "publisher": "c22ac7d13187a573613bfa3e5636e74eb0279b17d096124d2c1789473722a354",
+      "url": "https://news.jtbc.co.kr/article/NB12316528",
+      "source_id": "c22ac7d13187a573613bfa3e5636e74eb0279b17d096124d2c1789473722a354",
+      "history_scope": "original_collection",
+      "first_seen_at": "2026-09-03T05:21:58.592499+00:00"
+    },
+    {
+      "id": "news:ef72601862f8460a903f19a9fa248f42:2",
+      "observed_at": "2026-09-03T05:21:58.592499+00:00",
+      "published_at": "2026-09-03T04:37:32.000000+00:00",
+      "title": "9월 16일 첫차부터 서울 시내버스 노조 파업 예고",
+      "text": "서울 시내버스 노동조합이 오는 16일 첫차부터 전면 파업을 예고했습니다. 전국자동차노동조합연맹 서울시버스노동조합은 오늘(3일) \"지난 3월부터 사측과 9차례에 걸쳐 2026년도 단체 교섭을 진행해 왔으나 사측의 불",
+      "source_kind": "NEWS",
+      "publisher": "c22ac7d13187a573613bfa3e5636e74eb0279b17d096124d2c1789473722a354",
+      "url": "https://news.jtbc.co.kr/article/NB12316514",
+      "source_id": "c22ac7d13187a573613bfa3e5636e74eb0279b17d096124d2c1789473722a354",
+      "history_scope": "current_revision_only",
+      "first_seen_at": "2026-09-03T04:51:59.551985+00:00"
+    },
+    {
+      "id": "news:18a1b56441da4c18af9add67681fc7f9:1",
+      "observed_at": "2026-09-03T05:25:40.223991+00:00",
+      "published_at": "2026-09-03T05:11:07.000000+00:00",
+      "title": "[무안소식] 전남농협, 서울대서 도농 상생 직거래장터",
+      "text": "(무안=연합뉴스) 농협전남본부는 3일 서울대학교에서 '농심천심(農心天心)'운동과 전남 농산물의 우수성을 알리는 도농 상생 직거래장터를 열었다.",
+      "source_kind": "NEWS",
+      "publisher": "f603c081e997c7efcd8b1ff326ee67fd639ed7fd7676489c0ea743068737ce10",
+      "url": "https://www.yna.co.kr/view/AKR20260903109000054",
+      "source_id": "f603c081e997c7efcd8b1ff326ee67fd639ed7fd7676489c0ea743068737ce10",
+      "history_scope": "original_collection",
+      "first_seen_at": "2026-09-03T05:25:40.223991+00:00"
+    },
+    {
+      "id": "news:30c9bb4cc9e84307996529a722ddca84:1",
+      "observed_at": "2026-09-03T05:25:40.223991+00:00",
+      "published_at": "2026-09-03T05:18:46.000000+00:00",
+      "title": "울주군, 100억 투입 1천세대에 도시가스·LPG 소형저장탱크 보급",
+      "text": "(울산=연합뉴스) 장영은 기자 = 울산 울주군은 오는 2030년까지 총 100억원의 사업비를 연차적으로 투입해 에너지 소외지역 1천세대에 도시가...",
+      "source_kind": "NEWS",
+      "publisher": "f603c081e997c7efcd8b1ff326ee67fd639ed7fd7676489c0ea743068737ce10",
+      "url": "https://www.yna.co.kr/view/AKR20260903106600057",
+      "source_id": "f603c081e997c7efcd8b1ff326ee67fd639ed7fd7676489c0ea743068737ce10",
+      "history_scope": "original_collection",
+      "first_seen_at": "2026-09-03T05:25:40.223991+00:00"
+    },
+    {
+      "id": "news:3985389e7eb44cf789a3fd543b6983a8:1",
+      "observed_at": "2026-09-03T05:25:40.223991+00:00",
+      "published_at": "2026-09-03T05:21:31.000000+00:00",
+      "title": "상지대, '모두의 창업' 강원 멘토 기관 참여…도전자 모집",
+      "text": "(원주=연합뉴스) 임보연 기자 = 상지대학교 창업보육센터는 중소벤처기업부가 주관하는 '모두의 창업 프로젝트' 2차 사업의 강원지역 멘토 기관으로...",
+      "source_kind": "NEWS",
+      "publisher": "f603c081e997c7efcd8b1ff326ee67fd639ed7fd7676489c0ea743068737ce10",
+      "url": "https://www.yna.co.kr/view/AKR20260903111300062",
+      "source_id": "f603c081e997c7efcd8b1ff326ee67fd639ed7fd7676489c0ea743068737ce10",
+      "history_scope": "original_collection",
+      "first_seen_at": "2026-09-03T05:25:40.223991+00:00"
+    },
+    {
+      "id": "news:39d246adf5344664bc512d5600fe2b8c:1",
+      "observed_at": "2026-09-03T05:25:40.223991+00:00",
+      "published_at": "2026-09-03T05:22:02.000000+00:00",
+      "title": "티빙까지 개인정보 유출…플랫폼 보안에 커지는 경고음",
+      "text": "(서울=연합뉴스) 박형빈 기자 = 이동통신과 커머스에 이어 온라인동영상서비스(OTT) 티빙에서도 대규모 개인정보 유출이 확인되면서 일상과 밀접한...",
+      "source_kind": "NEWS",
+      "publisher": "f603c081e997c7efcd8b1ff326ee67fd639ed7fd7676489c0ea743068737ce10",
+      "url": "https://www.yna.co.kr/view/AKR20260903109500017",
+      "source_id": "f603c081e997c7efcd8b1ff326ee67fd639ed7fd7676489c0ea743068737ce10",
+      "history_scope": "original_collection",
+      "first_seen_at": "2026-09-03T05:25:40.223991+00:00"
+    },
+    {
+      "id": "news:41d1b212739346db97a11d77f8e4e747:1",
+      "observed_at": "2026-09-03T05:25:40.223991+00:00",
+      "published_at": "2026-09-03T05:13:17.000000+00:00",
+      "title": "티빙 3천954만 계정 왜 털렸나…접속키 관리 부실이 화근(종합)",
+      "text": "(서울=연합뉴스) 권하영 기자 = 온라인동영상서비스(OTT) 플랫폼 '티빙'에서 소스 코드가 포함된 기술 자산 361건과 이용자 계정 약 3천9...",
+      "source_kind": "NEWS",
+      "publisher": "f603c081e997c7efcd8b1ff326ee67fd639ed7fd7676489c0ea743068737ce10",
+      "url": "https://www.yna.co.kr/view/AKR20260903086951017",
+      "source_id": "f603c081e997c7efcd8b1ff326ee67fd639ed7fd7676489c0ea743068737ce10",
+      "history_scope": "original_collection",
+      "first_seen_at": "2026-09-03T05:25:40.223991+00:00"
+    },
+    {
+      "id": "news:4e1f6a00447343bf9d6a658b495ac39a:1",
+      "observed_at": "2026-09-03T05:25:40.223991+00:00",
+      "published_at": "2026-09-03T05:17:55.000000+00:00",
+      "title": "\"기후테크, 시장 안착하려면 필요자금 잇는 선금융 체계 갖춰야\"",
+      "text": "(서울=연합뉴스) 임성호 기자 = 기후 위기 해결에 기여하면서 수익을 창출하는 기후테크 기술이 실증과 상용화를 거쳐 시장에 자리 잡도록 하려면 ...",
+      "source_kind": "NEWS",
+      "publisher": "f603c081e997c7efcd8b1ff326ee67fd639ed7fd7676489c0ea743068737ce10",
+      "url": "https://www.yna.co.kr/view/AKR20260903110600003",
+      "source_id": "f603c081e997c7efcd8b1ff326ee67fd639ed7fd7676489c0ea743068737ce10",
+      "history_scope": "original_collection",
+      "first_seen_at": "2026-09-03T05:25:40.223991+00:00"
+    },
+    {
+      "id": "news:4edc3bf5e5f14a368a8c98b8f7d3c1e3:1",
+      "observed_at": "2026-09-03T05:25:40.223991+00:00",
+      "published_at": "2026-09-03T05:09:02.000000+00:00",
+      "title": "LG 구본무 선대회장 배우자, 양아들 구광모 파양소송 1심 패소",
+      "text": "(서울=연합뉴스) 이영섭 이승연 기자 = 구광모 LG그룹 회장을 상대로 선친인 고(故) 구본무 전 회장의 배우자이자 양어머니인 김영식 여사가 낸...",
+      "source_kind": "NEWS",
+      "publisher": "f603c081e997c7efcd8b1ff326ee67fd639ed7fd7676489c0ea743068737ce10",
+      "url": "https://www.yna.co.kr/view/AKR20260903108900004",
+      "source_id": "f603c081e997c7efcd8b1ff326ee67fd639ed7fd7676489c0ea743068737ce10",
+      "history_scope": "original_collection",
+      "first_seen_at": "2026-09-03T05:25:40.223991+00:00"
+    },
+    {
+      "id": "news:51edf39be98b472c9bf6adb5d678a3d8:1",
+      "observed_at": "2026-09-03T05:25:40.223991+00:00",
+      "published_at": "2026-09-03T05:19:33.000000+00:00",
+      "title": "임원 등에 '성과급 현금 대신 주식' 66%↑…삼성이 가장 많았다(종합)",
+      "text": "(세종=연합뉴스) 김수현 기자 = 올해 대기업집단에서 총수나 친족, 임원에게 성과 보상 등을 목적으로 주식을 지급하는 약정이 작년보다 66% 늘...",
+      "source_kind": "NEWS",
+      "publisher": "f603c081e997c7efcd8b1ff326ee67fd639ed7fd7676489c0ea743068737ce10",
+      "url": "https://www.yna.co.kr/view/AKR20260903085051002",
+      "source_id": "f603c081e997c7efcd8b1ff326ee67fd639ed7fd7676489c0ea743068737ce10",
+      "history_scope": "original_collection",
+      "first_seen_at": "2026-09-03T05:25:40.223991+00:00"
+    },
+    {
+      "id": "news:6e770fbb5fd94e54984927975ea42d40:2",
+      "observed_at": "2026-09-03T05:25:40.223991+00:00",
+      "published_at": "2026-09-03T05:02:03.000000+00:00",
+      "title": "티빙 이용자보다 왜 많나…유출 계정 3954만개 달한 이유",
+      "text": "(서울=연합뉴스) 유현민 기자 = 온라인동영상서비스(OTT) 티빙의 개인정보 유출 사고로 외부에 빠져나간 계정이 중복을 포함해 4천만개에 육박한...",
+      "source_kind": "NEWS",
+      "publisher": "f603c081e997c7efcd8b1ff326ee67fd639ed7fd7676489c0ea743068737ce10",
+      "url": "https://www.yna.co.kr/view/AKR20260903086400017",
+      "source_id": "f603c081e997c7efcd8b1ff326ee67fd639ed7fd7676489c0ea743068737ce10",
+      "history_scope": "current_revision_only",
+      "first_seen_at": "2026-09-03T05:10:40.666965+00:00"
+    },
+    {
+      "id": "news:6e9aa1a376ea444ba99b5886db662646:1",
+      "observed_at": "2026-09-03T05:25:40.223991+00:00",
+      "published_at": "2026-09-03T05:15:42.000000+00:00",
+      "title": "해경·육군, 야간 밀입국 합동훈련…해상 이중 감시 점검",
+      "text": "(동해=연합뉴스) 유형재 기자 = 동해해양경찰서는 지난 2일 육군 제23경비여단과 야간 해상 밀입국 차단을 위한 군·경 합동훈련을 실시했다고 3...",
+      "source_kind": "NEWS",
+      "publisher": "f603c081e997c7efcd8b1ff326ee67fd639ed7fd7676489c0ea743068737ce10",
+      "url": "https://www.yna.co.kr/view/AKR20260903109900062",
+      "source_id": "f603c081e997c7efcd8b1ff326ee67fd639ed7fd7676489c0ea743068737ce10",
+      "history_scope": "original_collection",
+      "first_seen_at": "2026-09-03T05:25:40.223991+00:00"
+    },
+    {
+      "id": "news:9baded8734b04498883c232b0300071d:1",
+      "observed_at": "2026-09-03T05:25:40.223991+00:00",
+      "published_at": "2026-09-03T05:20:00.000000+00:00",
+      "title": "노동장관, 10대그룹 인사책임자에 \"청년일자리 확대 노력해달라\"",
+      "text": "(서울=연합뉴스) 한혜원 기자 = 김영훈 고용노동부 장관은 3일 국내 10대 그룹 최고인사책임자(CHO)에게 \"청년 일자리 기회 확대를 위해 기...",
+      "source_kind": "NEWS",
+      "publisher": "f603c081e997c7efcd8b1ff326ee67fd639ed7fd7676489c0ea743068737ce10",
+      "url": "https://www.yna.co.kr/view/AKR20260903063300530",
+      "source_id": "f603c081e997c7efcd8b1ff326ee67fd639ed7fd7676489c0ea743068737ce10",
+      "history_scope": "original_collection",
+      "first_seen_at": "2026-09-03T05:25:40.223991+00:00"
+    },
+    {
+      "id": "news:ba9eda95866d41659ee3d364362ec7f1:1",
+      "observed_at": "2026-09-03T05:25:40.223991+00:00",
+      "published_at": "2026-09-03T05:06:51.000000+00:00",
+      "title": "'도심 속 문화축제' 익산서 5일 치킨·록밴드 페스티벌",
+      "text": "(익산=연합뉴스) 김진방 기자 = 전북 익산시는 오는 5∼6일 영등동 중앙체육공원에서 '제2회 치킨·록밴드 페스티벌'을 연다고 3일 밝혔다.",
+      "source_kind": "NEWS",
+      "publisher": "f603c081e997c7efcd8b1ff326ee67fd639ed7fd7676489c0ea743068737ce10",
+      "url": "https://www.yna.co.kr/view/AKR20260903107100055",
+      "source_id": "f603c081e997c7efcd8b1ff326ee67fd639ed7fd7676489c0ea743068737ce10",
+      "history_scope": "original_collection",
+      "first_seen_at": "2026-09-03T05:25:40.223991+00:00"
+    },
+    {
+      "id": "news:f8baf0e0da8e4ea7ad0fa9c42af5cacb:1",
+      "observed_at": "2026-09-03T05:25:40.223991+00:00",
+      "published_at": "2026-09-03T05:16:06.000000+00:00",
+      "title": "천안 K-컬처박람회 개막 이틀째…3대 산업전시관 '호응'",
+      "text": "(천안=연합뉴스) 유의주 기자 = '2026 천안 K-컬처 박람회' 개막 이틀째인 3일 K-푸드, K-웹툰, K-팝 등 3대 핵심 산업전시관에 ...",
+      "source_kind": "NEWS",
+      "publisher": "f603c081e997c7efcd8b1ff326ee67fd639ed7fd7676489c0ea743068737ce10",
+      "url": "https://www.yna.co.kr/view/AKR20260903108000063",
+      "source_id": "f603c081e997c7efcd8b1ff326ee67fd639ed7fd7676489c0ea743068737ce10",
+      "history_scope": "original_collection",
+      "first_seen_at": "2026-09-03T05:25:40.223991+00:00"
+    },
+    {
+      "id": "news:1ceb4f79a93841058ca6b2ecff6bd54f:1",
+      "observed_at": "2026-09-03T05:30:15.514614+00:00",
+      "published_at": "2026-09-03T05:24:24.000000+00:00",
+      "title": "[속보] 코스피, 돌연 하락 전환해 6,400대로…코스닥도 2%↓",
+      "text": "(",
+      "source_kind": "NEWS",
+      "publisher": "d74245449dd9ab6c0b066313ddd11d913f0187cc5b3c5f3feb6c8f79301e5a44",
+      "url": "https://www.yna.co.kr/view/AKR20260903112700008",
+      "source_id": "d74245449dd9ab6c0b066313ddd11d913f0187cc5b3c5f3feb6c8f79301e5a44",
+      "history_scope": "original_collection",
+      "first_seen_at": "2026-09-03T05:30:15.514614+00:00"
+    },
+    {
+      "id": "news:2bc7c48776bb4a768f0e9d6bfccf3aaa:1",
+      "observed_at": "2026-09-03T05:30:15.514614+00:00",
+      "published_at": "2026-09-03T05:19:33.000000+00:00",
+      "title": "임원 등에 '성과급 현금 대신 주식' 66%↑…삼성이 가장 많았다(종합)",
+      "text": "(세종=연합뉴스) 김수현 기자 = 올해 대기업집단에서 총수나 친족, 임원에게 성과 보상 등을 목적으로 주식을 지급하는 약정이 작년보다 66% 늘...",
+      "source_kind": "NEWS",
+      "publisher": "d74245449dd9ab6c0b066313ddd11d913f0187cc5b3c5f3feb6c8f79301e5a44",
+      "url": "https://www.yna.co.kr/view/AKR20260903085051002",
+      "source_id": "d74245449dd9ab6c0b066313ddd11d913f0187cc5b3c5f3feb6c8f79301e5a44",
+      "history_scope": "original_collection",
+      "first_seen_at": "2026-09-03T05:30:15.514614+00:00"
+    },
+    {
+      "id": "news:fc5e6c97085c49f0bb27b1a2b094799d:1",
+      "observed_at": "2026-09-03T05:30:15.514614+00:00",
+      "published_at": "2026-09-03T05:24:21.000000+00:00",
+      "title": "일본 국채금리 3% 돌파…엔 캐리 트레이드 촉발하나",
+      "text": "(서울=연합뉴스) 주종국 기자 = 10년 만기 일본 국채금리가 2일 3%를 돌파했다. 3%를 넘어선 것은 1996년 9월 이후 30년 만이다.",
+      "source_kind": "NEWS",
+      "publisher": "d74245449dd9ab6c0b066313ddd11d913f0187cc5b3c5f3feb6c8f79301e5a44",
+      "url": "https://www.yna.co.kr/view/AKR20260903091900009",
+      "source_id": "d74245449dd9ab6c0b066313ddd11d913f0187cc5b3c5f3feb6c8f79301e5a44",
+      "history_scope": "original_collection",
+      "first_seen_at": "2026-09-03T05:30:15.514614+00:00"
+    }
+  ],
+  "context": [],
+  "checkpoints": [
+    "2026-09-03T05:37:00+00:00"
+  ],
+  "expectations": [
+    {
+      "alert_evidence_id": "news:1ceb4f79a93841058ca6b2ecff6bd54f:1",
+      "urgency": "IMMEDIATE"
+    }
+  ],
+  "recorded_responses": {
+    "screen": [],
+    "analyze": []
+  }
+}

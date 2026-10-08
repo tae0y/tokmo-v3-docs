@@ -1,0 +1,22 @@
+{
+  "schema": "rotation-policies-v1",
+  "experiments": [
+    {
+      "experiment_id": "hyundai-005380-2026h2",
+      "account_scope": "toss-acct-a625b1d60ecf1ebc6735213a",
+      "symbol": "005380",
+      "market": "KR",
+      "quantity": "1",
+      "initial_budget": "450000",
+      "protected_quantity": "7",
+      "fee_buffer": "1500",
+      "default_buy": "380000",
+      "buy_floor": "350000",
+      "buy_ceiling": "392000",
+      "sell_target_pct": "3",
+      "sell_min_pct": "2",
+      "valid_until": "2027-01-01T00:00:00+09:00",
+      "plan_version": "hyundai-rotation-2026-09-12"
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "name": "concentrated-thesis",
+  "purpose": "장기 가설 유지와 계좌 집중",
+  "classification": "synthetic-held-out",
+  "base": "base-synthetic.json",
+  "replace": {
+    "positions": [
+      {
+        "account": "personal-a",
+        "scope": "personal",
+        "key": "KR:000001",
+        "quantity": "100",
+        "average_cost": "7000",
+        "sellable": "100",
+        "observed_at": "2026-09-07T01:00:00+00:00"
+      }
+    ],
+    "cash": [
+      {
+        "account": "personal-a",
+        "scope": "personal",
+        "currency": "KRW",
+        "available": "10000",
+        "total_cash": "10000",
+        "observed_at": "2026-09-07T01:00:00+00:00",
+        "source": "합성 계좌"
+      }
+    ]
+  },
+  "instrument_updates": {
+    "KR:000001": {
+      "evidence": [
+        {
+          "id": "business-case",
+          "kind": "disclosure",
+          "text": "매출과 이익이 증가했고 장기 보유 가설인 신규 공장 가동은 계획대로 진행된다. 다만 주가는 실적보다 빠르게 상승했다.",
+          "available_at": "2026-09-07T01:00:00+00:00",
+          "source": "합성 공시 역할 · 실제 자료 아님"
+        }
+      ]
+    }
+  },
+  "expected_actions": {
+    "KR:000001": [
+      "TRIM",
+      "HOLD"
+    ]
+  }
+}

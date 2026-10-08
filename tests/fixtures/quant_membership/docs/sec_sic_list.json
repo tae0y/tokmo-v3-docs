@@ -1,0 +1,19 @@
+{
+  "classification": "RECONSTRUCTED_CONTRACT",
+  "official_url": "https://www.sec.gov/search-filings/standard-industrial-classification-sic-code-list",
+  "retrieved_at_utc": "2026-08-13T00:00:00Z",
+  "quote_excerpt": "The Standard Industrial Classification Codes that appear in a company's disseminated EDGAR filings indicate the company's type of business.\n| 3571 | Office of Technology | ELECTRONIC COMPUTERS |\n| 5990 | Office of Trade & Services | RETAIL-RETAIL STORES, NEC |\n| 6799 | Office of Real Estate & Construction | INVESTORS, NEC |\n| 7000 | Office of Real Estate & Construction | HOTELS, ROOMING HOUSES, CAMPS & OTHER LODGING PLACES |",
+  "quote_sha256": "392905822e13e9fe7e4fd698d2704c15d61d5efc3b7dca751e0d90c838010608",
+  "parser_fields_tokens": {
+    "table_columns": ["SIC Code", "Office", "Industry Title"],
+    "fixture_codes": ["3571", "5990", "6000", "6799", "7000"]
+  },
+  "access_fair_use_note": "Documentation-only excerpt used for offline parser-contract review; no live data request in this wave.",
+  "reconstruction_procedure": [
+    "fail-closed four-digit SIC fixture set",
+    "only fixture-listed codes are admitted",
+    "6000..6799 maps to FINANCIALS only after official-set membership"
+  ],
+  "fixture_relpath": "sec_sic_reconstructed.json",
+  "fixture_sha256": "60716b943c44d44c28c160cc7aa26c3da5bf42466fbac2edae0b7e372325cac5"
+}

@@ -1,0 +1,11 @@
+{
+  "name": "tokmo-v3-hyundai-rotation-evaluation",
+  "schedule": "*/5 8-21 * * 1-5",
+  "timezone": "Asia/Seoul",
+  "script": "/home/tokmo/.hermes/scripts/tokmo_v3_hyundai_rotation_evaluation.sh",
+  "no_agent": true,
+  "deliver": "local",
+  "failure_deliver": "local",
+  "horizon_trading_sessions": 20,
+  "installed_job_id": "18e53a1220af"
+}

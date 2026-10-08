@@ -1,0 +1,82 @@
+{
+  "name": "partial-sale-before-further-rise",
+  "classification": "synthetic",
+  "steps": [
+    {
+      "at": "2026-09-07T01:00:00+00:00",
+      "responses": {
+        "personal-a:KR:000001": {
+          "action": "TRIM",
+          "option_id": "949d3f83b5cdb76e",
+          "summary": "사업 가설을 유지하면서 계좌 부담을 점검합니다.",
+          "reasons": [
+            {
+              "text": "가격 상승과 사업 근거를 함께 비교했습니다.",
+              "sources": [
+                "business-1",
+                "features"
+              ]
+            }
+          ],
+          "counterevidence": "최근 추세가 꺾이면 추가 하락할 수 있습니다.",
+          "change_conditions": [
+            "다음 실적에서 기존 성장 근거가 유지되는지 확인합니다."
+          ],
+          "thesis_status": "supported"
+        }
+      },
+      "expected": {
+        "KR:000001": [
+          "TRIM"
+        ]
+      },
+      "executions": [
+        {
+          "key": "KR:000001",
+          "price": "11000",
+          "at": "2026-09-07T02:00:00+00:00"
+        }
+      ]
+    },
+    {
+      "at": "2026-09-08T01:00:00+00:00",
+      "instruments": [
+        {
+          "market": "KR",
+          "symbol": "000001",
+          "price": "16000",
+          "price_at": "2026-09-08T01:00:00+00:00"
+        }
+      ],
+      "responses": {
+        "personal-a:KR:000001": {
+          "action": "HOLD",
+          "option_id": null,
+          "summary": "사업 가설을 유지하면서 계좌 부담을 점검합니다.",
+          "reasons": [
+            {
+              "text": "가격 상승과 사업 근거를 함께 비교했습니다.",
+              "sources": [
+                "business-1",
+                "features"
+              ]
+            }
+          ],
+          "counterevidence": "최근 추세가 꺾이면 추가 하락할 수 있습니다.",
+          "change_conditions": [
+            "다음 실적에서 기존 성장 근거가 유지되는지 확인합니다."
+          ],
+          "thesis_status": "supported"
+        }
+      },
+      "expected": {
+        "KR:000001": [
+          "HOLD"
+        ]
+      }
+    }
+  ],
+  "new_limit": 0,
+  "base": "replay-base-synthetic.json",
+  "purpose": "일부 매도 후 추가 상승을 놓쳐 단순 보유보다 불리한 결과도 보존"
+}

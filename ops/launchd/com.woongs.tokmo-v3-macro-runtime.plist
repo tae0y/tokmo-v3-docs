@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.woongs.tokmo-v3-macro-runtime</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/home/tokmo/tokmo-v3/var/runtime/macro-runtime/run_macro_runtime.zsh</string>
+	</array>
+	<key>StandardErrorPath</key>
+	<string>/dev/null</string>
+	<key>StandardOutPath</key>
+	<string>/dev/null</string>
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Hour</key>
+		<integer>16</integer>
+		<key>Minute</key>
+		<integer>10</integer>
+	</dict>
+	<key>WorkingDirectory</key>
+	<string>/home/tokmo/tokmo-v3</string>
+</dict>
+</plist>
