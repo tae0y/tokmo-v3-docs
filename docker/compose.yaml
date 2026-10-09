@@ -1,0 +1,46 @@
+# Run from the project root:
+#   docker compose -f docker/compose.yaml up -d --build      # scheduler
+#   docker compose -f docker/compose.yaml run --rm tokmo keys
+#   docker compose -f docker/compose.yaml run --rm test      # pytest in a clean container, no volumes
+name: tokmo-v3
+
+x-image: &image
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile
+  image: tokmo-v3:local
+
+services:
+  tokmo:
+    <<: *image
+    command: ["scheduler"]
+    restart: unless-stopped
+    init: true
+    env_file:
+      - path: tokmo.env
+        required: false
+    # Named volumes, not host bind mounts: the adapters reject credential files that are not 0600
+    # regular files, which a Windows/macOS host directory cannot guarantee.
+    volumes:
+      - var:/home/tokmo/tokmo-v3/var
+      - secrets:/home/tokmo/tokmo-v3/.secrets
+      - hermes:/home/tokmo/.hermes
+      - codex:/home/tokmo/.codex
+      - claude:/home/tokmo/.claude
+      - share:/home/tokmo/.local/share/tokmo-v3
+
+  test:
+    <<: *image
+    profiles: ["test"]
+    # "test" lives in the entrypoint so arguments given to `run test ...` reach pytest.
+    entrypoint: ["/home/tokmo/tokmo-v3/docker/entrypoint.sh", "test"]
+    command: []
+    init: true
+
+volumes:
+  var:
+  secrets:
+  hermes:
+  codex:
+  claude:
+  share:

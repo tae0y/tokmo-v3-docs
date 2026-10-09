@@ -1,0 +1,15 @@
+# Build context is the project root; nothing private or generated goes into the image.
+.git
+.venv
+.ruff_cache
+.pytest_cache
+**/__pycache__
+**/*.pyc
+var
+.secrets
+.env.toss
+.env.kis
+quant-on-demand-approval.json
+ops/news-product-approval.json
+ops/opportunity-rotation-product-approval.json
+docker/tokmo.env

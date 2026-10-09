@@ -1,0 +1,40 @@
+# tokmo-v3 schedule inside the container (supercronic, Asia/Seoul via TZ).
+# Same jobs as ops/cron/crontab.example. Differences:
+#   - no KEY=VALUE lines: PROJECT, TZ, the fallback paths and the Telegram values come from the container
+#     environment (Dockerfile ENV + docker/tokmo.env).
+#   - every job starts commented out. Uncomment a module once its keys and var/data config are in place
+#     (docs/setup.md, "모듈 켜고 끄기"), then `docker compose -f docker/compose.yaml up -d --build`.
+#     Start with news + the product-gate heartbeat, as the distribution guide recommends.
+
+# ---- product gate (needed by news GLM / paper / quant calls; run `gate` first) -----------------
+# */30 * * * *           $PROJECT/.venv/bin/python $PROJECT/tools/install_product_gate.py heartbeat
+
+# ---- core (toss) ----------------------------------------------------------------------------
+# * * * * *              $PROJECT/ops/hermes-cron/tokmo_v3_pulse.sh
+# */5 * * * *            $PROJECT/ops/hermes-cron/tokmo_v3_cadence.sh
+
+# ---- news -----------------------------------------------------------------------------------
+# 0,15,30,45 * * * *     $PROJECT/ops/hermes-cron/tokmo_news_group_a.sh
+# 5,20,35,50 * * * *     $PROJECT/ops/hermes-cron/tokmo_news_group_b.sh
+# 10,25,40,55 * * * *    $PROJECT/ops/hermes-cron/tokmo_news_group_c.sh
+# * * * * *              $PROJECT/.venv/bin/python $PROJECT/ops/hermes-cron/tokmo_news_fast_primary.py
+# * * * * *              $PROJECT/.venv/bin/python $PROJECT/ops/hermes-cron/tokmo_news_classifier_worker.py
+# 1,31 * * * *           $PROJECT/ops/hermes-cron/tokmo_opendart_operation.sh
+# 13,43 * * * *          $PROJECT/ops/hermes-cron/tokmo_sec_targeted_operation.sh
+
+# ---- follow-up / quant ----------------------------------------------------------------------
+# */5 * * * *            $PROJECT/.venv/bin/python $PROJECT/ops/hermes-cron/tokmo_investment_followup.py
+
+# ---- paper trading (opportunity rotation; no real orders) ------------------------------------
+# * 8-16 * * 1-5         $PROJECT/ops/hermes-cron/tokmo_v3_opportunity_rotation.sh | $PROJECT/ops/cron/fallback/send_system_alert.sh --stdin
+
+# ---- rotation trading (real orders only with var/state/hyundai-rotation/live.flag) -----------
+# 40 8 * * 1-5           TOKMO_ROTATION_MARKET=KR $PROJECT/ops/hermes-cron/tokmo_v3_rotation_settle.sh
+# 15 10 * * 1-5          $PROJECT/ops/hermes-cron/tokmo_v3_hyundai_rotation_analysis.sh
+# 15 10 * * 1-5          TOKMO_ROTATION_MARKET=KR $PROJECT/ops/hermes-cron/tokmo_v3_hyundai_rotation_handoff.sh
+# */10 10-11 * * 1-5     $PROJECT/ops/hermes-cron/tokmo_v3_hyundai_rotation_analysis_close.sh
+# */5 8-21 * * 1-5       $PROJECT/ops/hermes-cron/tokmo_v3_hyundai_rotation_evaluation.sh
+
+# ---- optional -------------------------------------------------------------------------------
+# */15 13-17 * * 1-5     $PROJECT/.venv/bin/python $PROJECT/ops/hermes-cron/tokmo_yt_12man_fetch.py
+# 10 4 * * 1             $PROJECT/ops/hermes-cron/tokmo_youtube_weekly_review.sh

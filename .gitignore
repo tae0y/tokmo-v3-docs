@@ -27,3 +27,6 @@ ops/opportunity-rotation-product-approval.json
 
 # Owner-issued NEWS product approval (private, host-specific).
 ops/news-product-approval.json
+
+# Docker: container environment values (Telegram tokens).
+docker/tokmo.env
