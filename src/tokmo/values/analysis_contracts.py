@@ -1,18 +1,20 @@
 """Closed, immutable Slice E analysis contracts and bounded model parsers."""
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
-from enum import Enum
 import hashlib
 import re
+from collections.abc import Mapping
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
+from enum import Enum
 from types import MappingProxyType
-from typing import Mapping
 
 from tokmo.values import canonical_decimal
 from tokmo.values.material_pack import canonical_decode, canonical_encode
 from tokmo.values.ops_kernel import (
-    AuditCompletionV1,
+    AuditCompletionV1 as AuditCompletionV1,  # re-export
+)
+from tokmo.values.ops_kernel import (
     CandidateAssignment,
     DispositionAction,
     DispositionV1,
@@ -218,82 +220,147 @@ class AnalysisRunOutcomeV1:
             r"[0-9a-f]{32}", self.invocation_id
         ):
             raise ValueError("invalid invocation id")
-        if any(type(value) is not int or value < 0 for value in (
-            self.tick_id, self.candidate_count, self.disposition_count,
-        )):
+        if any(
+            type(value) is not int or value < 0
+            for value in (
+                self.tick_id,
+                self.candidate_count,
+                self.disposition_count,
+            )
+        ):
             raise ValueError("invalid analysis run counts")
 
 
-ALLOWED_REASONS_V1 = MappingProxyType({
-    DispositionAction.SEND: frozenset({"evidence_verified_send"}),
-    DispositionAction.DEFER: frozenset({
-        "market_closed_defer", "model_unavailable_defer", "capacity_defer",
-        "glm_failure_defer", "sol_failure_defer", "next_session_defer",
-        "snapshot_incomplete_defer", "evidence_stale_defer",
-        "proposal_invalid_defer", "carryover_defer",
-    }),
-    DispositionAction.MERGE: frozenset({"same_subject_session_merge"}),
-    DispositionAction.SKIP: frozenset({"glm_screened_none", "subject_unchanged"}),
-    DispositionAction.ESCALATE: frozenset({
-        "critical_model_failure", "judgment_unavailable", "stop_signal",
-        "capacity_exceeded", "quarantine_conflict", "evidence_unverifiable",
-    }),
-})
-CRITICAL_DEFER_REASONS_V1 = frozenset({
-    "market_closed_defer", "model_unavailable_defer", "sol_failure_defer",
-})
-VALIDATOR_FALLBACK_REASONS_V1 = frozenset({
-    "evidence_stale_defer", "proposal_invalid_defer", "carryover_defer",
-    "evidence_unverifiable",
-})
-CRITICAL_CONFLICT_KINDS_V1 = frozenset({
-    "execution-identity-conflict", "execution-quarantine",
-    "trades-quarantine-observed",
-})
-CRITICAL_STOP_KINDS_V1 = frozenset({
-    "holdings-identity-collision", "holdings_material_unavailable",
-    "quotes_material_unavailable", "trades_material_unavailable",
-    "kr_holdings_unavailable", "us_holdings_unavailable",
-})
-CRITICAL_MISSING_KINDS_V1 = frozenset({
-    "kr_holdings_missing", "us_holdings_missing",
-})
+ALLOWED_REASONS_V1 = MappingProxyType(
+    {
+        DispositionAction.SEND: frozenset({"evidence_verified_send"}),
+        DispositionAction.DEFER: frozenset(
+            {
+                "market_closed_defer",
+                "model_unavailable_defer",
+                "capacity_defer",
+                "glm_failure_defer",
+                "sol_failure_defer",
+                "next_session_defer",
+                "snapshot_incomplete_defer",
+                "evidence_stale_defer",
+                "proposal_invalid_defer",
+                "carryover_defer",
+            }
+        ),
+        DispositionAction.MERGE: frozenset({"same_subject_session_merge"}),
+        DispositionAction.SKIP: frozenset({"glm_screened_none", "subject_unchanged"}),
+        DispositionAction.ESCALATE: frozenset(
+            {
+                "critical_model_failure",
+                "judgment_unavailable",
+                "stop_signal",
+                "capacity_exceeded",
+                "quarantine_conflict",
+                "evidence_unverifiable",
+            }
+        ),
+    }
+)
+CRITICAL_DEFER_REASONS_V1 = frozenset(
+    {
+        "market_closed_defer",
+        "model_unavailable_defer",
+        "sol_failure_defer",
+    }
+)
+VALIDATOR_FALLBACK_REASONS_V1 = frozenset(
+    {
+        "evidence_stale_defer",
+        "proposal_invalid_defer",
+        "carryover_defer",
+        "evidence_unverifiable",
+    }
+)
+CRITICAL_CONFLICT_KINDS_V1 = frozenset(
+    {
+        "execution-identity-conflict",
+        "execution-quarantine",
+        "trades-quarantine-observed",
+    }
+)
+CRITICAL_STOP_KINDS_V1 = frozenset(
+    {
+        "holdings-identity-collision",
+        "holdings_material_unavailable",
+        "quotes_material_unavailable",
+        "trades_material_unavailable",
+        "kr_holdings_unavailable",
+        "us_holdings_unavailable",
+    }
+)
+CRITICAL_MISSING_KINDS_V1 = frozenset(
+    {
+        "kr_holdings_missing",
+        "us_holdings_missing",
+    }
+)
 CRITICAL_INCIDENT_KINDS_V1 = (
-    CRITICAL_CONFLICT_KINDS_V1
-    | CRITICAL_STOP_KINDS_V1
-    | CRITICAL_MISSING_KINDS_V1
+    CRITICAL_CONFLICT_KINDS_V1 | CRITICAL_STOP_KINDS_V1 | CRITICAL_MISSING_KINDS_V1
 )
-NON_CRITICAL_INCIDENT_KINDS_V1 = frozenset({
-    "kr_holdings_stale", "us_holdings_stale", "market-classification-unknown",
-    "execution-incomplete", "execution-market-pending",
-    "trades-incomplete-observed", "holdings-snapshot-incomplete",
-    "analysis-capacity-exceeded", "audit-capacity-exceeded",
-    "glm-failure-streak", "model-failure-both", "model-call-unknown",
-    "model-rate-limited", "model-auth-unavailable",
-    "validator-proposal-rejected", "manifest-material-drift",
-    "unknown-incident-kind",
-})
-KNOWN_INCIDENT_KINDS_V1 = (
-    CRITICAL_INCIDENT_KINDS_V1 | NON_CRITICAL_INCIDENT_KINDS_V1
+NON_CRITICAL_INCIDENT_KINDS_V1 = frozenset(
+    {
+        "kr_holdings_stale",
+        "us_holdings_stale",
+        "market-classification-unknown",
+        "execution-incomplete",
+        "execution-market-pending",
+        "trades-incomplete-observed",
+        "holdings-snapshot-incomplete",
+        "analysis-capacity-exceeded",
+        "audit-capacity-exceeded",
+        "glm-failure-streak",
+        "model-failure-both",
+        "model-call-unknown",
+        "model-rate-limited",
+        "model-auth-unavailable",
+        "validator-proposal-rejected",
+        "manifest-material-drift",
+        "unknown-incident-kind",
+    }
 )
-VALIDATOR_REJECTION_FALLBACK_V1 = MappingProxyType({
-    (ValidatorRejection.CRITICAL_SKIP_OR_MERGE, True):
-        (DispositionAction.ESCALATE, "judgment_unavailable"),
-    (ValidatorRejection.EVIDENCE_EMPTY, True):
-        (DispositionAction.ESCALATE, "evidence_unverifiable"),
-    (ValidatorRejection.EVIDENCE_EMPTY, False):
-        (DispositionAction.DEFER, "evidence_stale_defer"),
-    (ValidatorRejection.EVIDENCE_STALE, True):
-        (DispositionAction.ESCALATE, "evidence_unverifiable"),
-    (ValidatorRejection.EVIDENCE_STALE, False):
-        (DispositionAction.DEFER, "evidence_stale_defer"),
-    (ValidatorRejection.MERGE_PRIOR_MISMATCH, False):
-        (DispositionAction.DEFER, "proposal_invalid_defer"),
-})
+KNOWN_INCIDENT_KINDS_V1 = CRITICAL_INCIDENT_KINDS_V1 | NON_CRITICAL_INCIDENT_KINDS_V1
+VALIDATOR_REJECTION_FALLBACK_V1 = MappingProxyType(
+    {
+        (ValidatorRejection.CRITICAL_SKIP_OR_MERGE, True): (
+            DispositionAction.ESCALATE,
+            "judgment_unavailable",
+        ),
+        (ValidatorRejection.EVIDENCE_EMPTY, True): (
+            DispositionAction.ESCALATE,
+            "evidence_unverifiable",
+        ),
+        (ValidatorRejection.EVIDENCE_EMPTY, False): (
+            DispositionAction.DEFER,
+            "evidence_stale_defer",
+        ),
+        (ValidatorRejection.EVIDENCE_STALE, True): (
+            DispositionAction.ESCALATE,
+            "evidence_unverifiable",
+        ),
+        (ValidatorRejection.EVIDENCE_STALE, False): (
+            DispositionAction.DEFER,
+            "evidence_stale_defer",
+        ),
+        (ValidatorRejection.MERGE_PRIOR_MISMATCH, False): (
+            DispositionAction.DEFER,
+            "proposal_invalid_defer",
+        ),
+    }
+)
 
 
 def _aware(value: datetime, name: str) -> None:
-    if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+    if (
+        not isinstance(value, datetime)
+        or value.tzinfo is None
+        or value.utcoffset() is None
+    ):
         raise ValueError(f"{name} must be aware")
 
 
@@ -309,26 +376,41 @@ def _digest(value) -> str:
 def subject_id_for(kind: MaterialKindV1, key) -> str:
     if not isinstance(kind, MaterialKindV1):
         raise ValueError("invalid material kind")
-    return _digest({"v": 1, "domain": "tokmo-v3:subject", "kind": kind.value, "key": key})[:16]
+    return _digest(
+        {"v": 1, "domain": "tokmo-v3:subject", "kind": kind.value, "key": key}
+    )[:16]
 
 
 def candidate_id_for(tick_id: int, kind: MaterialKindV1, subject_id: str) -> str:
     if type(tick_id) is not int or tick_id < 0:
         raise ValueError("invalid tick")
     require_token(subject_id, "subject_id")
-    return _digest({
-        "v": 1, "domain": "tokmo-v3:candidate", "tick_id": tick_id,
-        "kind": kind.value, "subject_id": subject_id,
-    })[:16]
+    return _digest(
+        {
+            "v": 1,
+            "domain": "tokmo-v3:candidate",
+            "tick_id": tick_id,
+            "kind": kind.value,
+            "subject_id": subject_id,
+        }
+    )[:16]
 
 
-def evidence_id_for(kind: MaterialKindV1, source: str, record: str, content_hash: str) -> str:
+def evidence_id_for(
+    kind: MaterialKindV1, source: str, record: str, content_hash: str
+) -> str:
     if not _HASH64.fullmatch(content_hash):
         raise ValueError("invalid content hash")
-    return _digest({
-        "v": 1, "domain": "tokmo-v3:evidence", "kind": kind.value,
-        "source": source, "record": record, "content_hash": content_hash,
-    })[:16]
+    return _digest(
+        {
+            "v": 1,
+            "domain": "tokmo-v3:evidence",
+            "kind": kind.value,
+            "source": source,
+            "record": record,
+            "content_hash": content_hash,
+        }
+    )[:16]
 
 
 @dataclass(frozen=True)
@@ -352,12 +434,18 @@ class EvidenceRefV1:
         require_token(self.evidence_id, "evidence_id")
         if not isinstance(self.kind, MaterialKindV1):
             raise ValueError("invalid evidence kind")
-        if (type(self.source) is not str or type(self.source_record_key) is not str
-                or _ACCOUNT_SCOPE.search(self.source) or _ACCOUNT_SCOPE.search(self.source_record_key)):
+        if (
+            type(self.source) is not str
+            or type(self.source_record_key) is not str
+            or _ACCOUNT_SCOPE.search(self.source)
+            or _ACCOUNT_SCOPE.search(self.source_record_key)
+        ):
             raise ValueError("private identity forbidden")
         for value, name in (
-            (self.observed_at, "observed_at"), (self.fetched_at, "fetched_at"),
-            (self.stored_at, "stored_at"), (self.acquired_at, "acquired_at"),
+            (self.observed_at, "observed_at"),
+            (self.fetched_at, "fetched_at"),
+            (self.stored_at, "stored_at"),
+            (self.acquired_at, "acquired_at"),
             (self.expires_at, "expires_at"),
         ):
             _aware(value, name)
@@ -366,32 +454,82 @@ class EvidenceRefV1:
         if type(self.schema_version) is not int or self.schema_version < 1:
             raise ValueError("invalid schema version")
         require_token(self.parser_version, "parser_version")
-        if not isinstance(self.trust_class, TrustClass) or not isinstance(self.freshness_state, FreshnessState):
+        if not isinstance(self.trust_class, TrustClass) or not isinstance(
+            self.freshness_state, FreshnessState
+        ):
             raise ValueError("invalid evidence enum")
 
 
-FIELD_KEYS = MappingProxyType({
-    MaterialKindV1.HOLDINGS_CHANGE: frozenset({
-        "market", "account_type_label", "portfolio_relation", "ordinal", "symbol", "change_kind",
-        "baseline_tick_id", "current_quantity", "current_avg_price",
-        "baseline_quantity", "baseline_avg_price", "quantity_delta_ratio", "currency",
-    }),
-    MaterialKindV1.QUOTE_STATE: frozenset({
-        "market", "symbol", "portfolio_relation", "last_price", "currency_raw", "provider_timestamp",
-        "fetched_at", "change_basis", "baseline_price", "price_delta_ratio",
-        "numeric_state", "trigger_kind", "trigger_reference_price",
-        "trigger_horizon", "price_delta_ratio_5m", "price_delta_ratio_15m",
-        "price_delta_ratio_30m", "velocity_per_min", "acceleration_per_min2",
-        "reversal", "persistent_drift_ticks", "money_impact",
-    }),
-    MaterialKindV1.COMPLETED_EXECUTION: frozenset({
-        "market", "symbol", "source_record_key", "trade_date", "transaction_type_raw",
-        "quantity", "unit_price", "amount", "currency_raw", "filled_at",
-    }),
-    MaterialKindV1.OPERATIONAL_INCIDENT: frozenset({
-        "incident_kind", "incident_subject", "transition", "count", "impact_ref",
-    }),
-})
+FIELD_KEYS = MappingProxyType(
+    {
+        MaterialKindV1.HOLDINGS_CHANGE: frozenset(
+            {
+                "market",
+                "account_type_label",
+                "portfolio_relation",
+                "ordinal",
+                "symbol",
+                "change_kind",
+                "baseline_tick_id",
+                "current_quantity",
+                "current_avg_price",
+                "baseline_quantity",
+                "baseline_avg_price",
+                "quantity_delta_ratio",
+                "currency",
+            }
+        ),
+        MaterialKindV1.QUOTE_STATE: frozenset(
+            {
+                "market",
+                "symbol",
+                "portfolio_relation",
+                "last_price",
+                "currency_raw",
+                "provider_timestamp",
+                "fetched_at",
+                "change_basis",
+                "baseline_price",
+                "price_delta_ratio",
+                "numeric_state",
+                "trigger_kind",
+                "trigger_reference_price",
+                "trigger_horizon",
+                "price_delta_ratio_5m",
+                "price_delta_ratio_15m",
+                "price_delta_ratio_30m",
+                "velocity_per_min",
+                "acceleration_per_min2",
+                "reversal",
+                "persistent_drift_ticks",
+                "money_impact",
+            }
+        ),
+        MaterialKindV1.COMPLETED_EXECUTION: frozenset(
+            {
+                "market",
+                "symbol",
+                "source_record_key",
+                "trade_date",
+                "transaction_type_raw",
+                "quantity",
+                "unit_price",
+                "amount",
+                "currency_raw",
+                "filled_at",
+            }
+        ),
+        MaterialKindV1.OPERATIONAL_INCIDENT: frozenset(
+            {
+                "incident_kind",
+                "incident_subject",
+                "transition",
+                "count",
+                "impact_ref",
+            }
+        ),
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -422,14 +560,20 @@ class CandidateEnvelopeV1:
     def __post_init__(self):
         require_token(self.candidate_id, "candidate_id")
         require_token(self.subject_id, "subject_id")
-        if not isinstance(self.kind, MaterialKindV1) or self.market not in {"KR", "US", "GLOBAL"}:
+        if not isinstance(self.kind, MaterialKindV1) or self.market not in {
+            "KR",
+            "US",
+            "GLOBAL",
+        }:
             raise ValueError("invalid candidate domain")
         if type(self.tick_id) is not int or self.tick_id < 0:
             raise ValueError("invalid candidate tick")
         if not isinstance(self.assignment, CandidateAssignment):
             raise ValueError("invalid assignment")
-        if type(self.evidence_refs) is not tuple or not self.evidence_refs or any(
-            not isinstance(item, EvidenceRefV1) for item in self.evidence_refs
+        if (
+            type(self.evidence_refs) is not tuple
+            or not self.evidence_refs
+            or any(not isinstance(item, EvidenceRefV1) for item in self.evidence_refs)
         ):
             raise ValueError("invalid evidence refs")
         _exact(self.fields, FIELD_KEYS[self.kind], "candidate fields")
@@ -482,10 +626,17 @@ class UntrustedTextV1:
     instruction_authority: str = "NONE"
 
     def __post_init__(self):
-        if type(self.text) is not str or len(self.text) > 8192 or _has_controls(self.text, True):
+        if (
+            type(self.text) is not str
+            or len(self.text) > 8192
+            or _has_controls(self.text, True)
+        ):
             raise ValueError("invalid untrusted text")
         require_token(self.provenance, "provenance")
-        if not isinstance(self.trust_class, TrustClass) or self.instruction_authority != "NONE":
+        if (
+            not isinstance(self.trust_class, TrustClass)
+            or self.instruction_authority != "NONE"
+        ):
             raise ValueError("invalid untrusted text metadata")
 
 
@@ -512,18 +663,22 @@ def validate_disposition(
     ):
         raise AnalysisContractError("invalid validator input")
     if proposal.candidate_id != value.candidate.candidate_id or (
-        proposal.tick_id, proposal.subject_id
+        proposal.tick_id,
+        proposal.subject_id,
     ) != (value.candidate.tick_id, value.candidate.subject_id):
         raise AnalysisContractError("validator identity invariant")
     if proposal.reason_code not in ALLOWED_REASONS_V1.get(proposal.action, ()):
         raise AnalysisContractError("validator reason invariant")
     critical = value.candidate.assignment is CandidateAssignment.CRITICAL
     if critical and proposal.action in {
-        DispositionAction.SKIP, DispositionAction.MERGE
+        DispositionAction.SKIP,
+        DispositionAction.MERGE,
     }:
         return ValidatorRejection.CRITICAL_SKIP_OR_MERGE
-    if critical and proposal.action is DispositionAction.DEFER and (
-        proposal.reason_code not in CRITICAL_DEFER_REASONS_V1
+    if (
+        critical
+        and proposal.action is DispositionAction.DEFER
+        and (proposal.reason_code not in CRITICAL_DEFER_REASONS_V1)
     ):
         raise AnalysisContractError("validator critical defer invariant")
     if proposal.action is DispositionAction.SEND:
@@ -541,8 +696,12 @@ def validate_disposition(
             return ValidatorRejection.EVIDENCE_STALE
     if proposal.action is DispositionAction.MERGE:
         prior = value.prior_subject_disposition
-        if prior is None or prior.subject_id != value.candidate.subject_id or (
-            prior.action not in {DispositionAction.SEND, DispositionAction.ESCALATE}
+        if (
+            prior is None
+            or prior.subject_id != value.candidate.subject_id
+            or (
+                prior.action not in {DispositionAction.SEND, DispositionAction.ESCALATE}
+            )
         ):
             return ValidatorRejection.MERGE_PRIOR_MISMATCH
     if proposal.action is DispositionAction.SKIP and (
@@ -554,8 +713,10 @@ def validate_disposition(
 
 
 def _has_controls(value: str, allow_lines: bool) -> bool:
-    return any((ord(char) < 32 and not (allow_lines and char in "\n\t")) or ord(char) == 127
-               for char in value)
+    return any(
+        (ord(char) < 32 and not (allow_lines and char in "\n\t")) or ord(char) == 127
+        for char in value
+    )
 
 
 def _bounded(value, depth=0):
@@ -582,7 +743,9 @@ def parse_model_json(raw: bytes, max_bytes: int):
 
 
 def _strings(value, name: str, limit: int | None = None) -> tuple[str, ...]:
-    if type(value) is not list or any(type(item) is not str or _has_controls(item, True) for item in value):
+    if type(value) is not list or any(
+        type(item) is not str or _has_controls(item, True) for item in value
+    ):
         raise ValueError(f"invalid {name}")
     if limit is not None and len(value) > limit:
         raise ValueError(f"invalid {name}")
@@ -597,18 +760,34 @@ def parse_glm_batch(raw: bytes, candidate_ids: tuple[str, ...]) -> GlmBatchV1:
             raise ValueError("invalid glm batch")
         annotations = []
         for row in value["annotations"]:
-            _exact(row, frozenset({
-                "candidate_id", "relevance", "materiality", "urgency",
-                "evidence_unknowns", "summary",
-            }), "glm annotation")
+            _exact(
+                row,
+                frozenset(
+                    {
+                        "candidate_id",
+                        "relevance",
+                        "materiality",
+                        "urgency",
+                        "evidence_unknowns",
+                        "summary",
+                    }
+                ),
+                "glm annotation",
+            )
             if type(row["summary"]) is not str or len(row["summary"]) > 1000:
                 raise ValueError("invalid summary")
-            annotations.append(GlmAnnotationV1(
-                candidate_id=row["candidate_id"], relevance=GlmRelevance(row["relevance"]),
-                materiality=GlmMateriality(row["materiality"]), urgency=GlmUrgency(row["urgency"]),
-                evidence_unknowns=_strings(row["evidence_unknowns"], "evidence unknowns"),
-                summary=row["summary"],
-            ))
+            annotations.append(
+                GlmAnnotationV1(
+                    candidate_id=row["candidate_id"],
+                    relevance=GlmRelevance(row["relevance"]),
+                    materiality=GlmMateriality(row["materiality"]),
+                    urgency=GlmUrgency(row["urgency"]),
+                    evidence_unknowns=_strings(
+                        row["evidence_unknowns"], "evidence unknowns"
+                    ),
+                    summary=row["summary"],
+                )
+            )
         actual = [item.candidate_id for item in annotations]
         if len(actual) != len(set(actual)) or set(actual) != set(candidate_ids):
             raise ValueError("candidate coverage")
@@ -624,15 +803,21 @@ def _confidence(value) -> str:
         parsed = Decimal(value)
     except InvalidOperation as error:
         raise ValueError("invalid confidence") from error
-    if not parsed.is_finite() or parsed < 0 or parsed > 1 or canonical_decimal(parsed) != value:
+    if (
+        not parsed.is_finite()
+        or parsed < 0
+        or parsed > 1
+        or canonical_decimal(parsed) != value
+    ):
         raise ValueError("invalid confidence")
     if max(0, -parsed.as_tuple().exponent) > 4:
         raise ValueError("invalid confidence")
     return value
 
 
-def parse_sol_batch(raw: bytes, candidate_ids: tuple[str, ...],
-                    evidence_ids: frozenset[str]) -> SolBatchV1:
+def parse_sol_batch(
+    raw: bytes, candidate_ids: tuple[str, ...], evidence_ids: frozenset[str]
+) -> SolBatchV1:
     try:
         value = parse_model_json(raw, MODEL_RESPONSE_MAX_BYTES)
         _exact(value, frozenset({"schema_version", "analyses"}), "sol batch")
@@ -640,22 +825,42 @@ def parse_sol_batch(raw: bytes, candidate_ids: tuple[str, ...],
             raise ValueError("invalid sol batch")
         analyses = []
         for row in value["analyses"]:
-            _exact(row, frozenset({
-                "candidate_id", "verdict", "proposed_action", "rationale",
-                "cited_evidence_ids", "confidence", "disagreements_with_glm",
-            }), "sol analysis")
+            _exact(
+                row,
+                frozenset(
+                    {
+                        "candidate_id",
+                        "verdict",
+                        "proposed_action",
+                        "rationale",
+                        "cited_evidence_ids",
+                        "confidence",
+                        "disagreements_with_glm",
+                    }
+                ),
+                "sol analysis",
+            )
             if type(row["rationale"]) is not str or len(row["rationale"]) > 2000:
                 raise ValueError("invalid rationale")
             citations = _strings(row["cited_evidence_ids"], "citations", 64)
-            if len(citations) != len(set(citations)) or not set(citations) <= evidence_ids:
+            if (
+                len(citations) != len(set(citations))
+                or not set(citations) <= evidence_ids
+            ):
                 raise ValueError("citation coverage")
-            analyses.append(SolAnalysisV1(
-                candidate_id=row["candidate_id"], verdict=SolVerdict(row["verdict"]),
-                proposed_action=SolProposedAction(row["proposed_action"]),
-                rationale=row["rationale"], cited_evidence_ids=citations,
-                confidence=_confidence(row["confidence"]),
-                disagreements_with_glm=_strings(row["disagreements_with_glm"], "disagreements"),
-            ))
+            analyses.append(
+                SolAnalysisV1(
+                    candidate_id=row["candidate_id"],
+                    verdict=SolVerdict(row["verdict"]),
+                    proposed_action=SolProposedAction(row["proposed_action"]),
+                    rationale=row["rationale"],
+                    cited_evidence_ids=citations,
+                    confidence=_confidence(row["confidence"]),
+                    disagreements_with_glm=_strings(
+                        row["disagreements_with_glm"], "disagreements"
+                    ),
+                )
+            )
         actual = [item.candidate_id for item in analyses]
         if len(actual) != len(set(actual)) or set(actual) != set(candidate_ids):
             raise ValueError("candidate coverage")
@@ -691,9 +896,9 @@ class ExpectedAnalysisCoverageV1:
             "symbol": self.symbol,
             "evidence_id": self.evidence_id,
             "material_tick_id": self.material_tick_id,
-            "material_observed_at": self.material_observed_at.astimezone(
-                timezone.utc
-            ).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+            "material_observed_at": self.material_observed_at.astimezone(UTC).strftime(
+                "%Y-%m-%dT%H:%M:%S.%fZ"
+            ),
         }
 
 
@@ -736,10 +941,14 @@ class AnalysisRequestV1:
         require_token(self.admission_policy_version, "admission_policy_version")
         if len(self.admission_policy_digest) != 64:
             raise ValueError("invalid admission_policy_digest")
-        if (type(self.admission_reason_codes) is not tuple
-                or not self.admission_reason_codes
-                or any(type(item) is not str or not item
-                       for item in self.admission_reason_codes)):
+        if (
+            type(self.admission_reason_codes) is not tuple
+            or not self.admission_reason_codes
+            or any(
+                type(item) is not str or not item
+                for item in self.admission_reason_codes
+            )
+        ):
             raise ValueError("invalid admission reason codes")
         _aware(self.requested_at, "requested_at")
         if type(self.expected_coverage) is not tuple or any(
@@ -752,8 +961,14 @@ class AnalysisRequestV1:
             raise ValueError("expected coverage must be unique and sorted")
 
     @staticmethod
-    def compute_request_id(*, analysis_kind, tick_id, candidate_id,
-                           material_binding_digest, admission_policy_digest):
+    def compute_request_id(
+        *,
+        analysis_kind,
+        tick_id,
+        candidate_id,
+        material_binding_digest,
+        admission_policy_digest,
+    ):
         """Domain-separated request identity (§6.6).
 
         ``sha256(canonical_encode({domain, analysis_kind, tick_id,
@@ -780,27 +995,29 @@ class AnalysisRequestV1:
     @property
     def request_digest(self) -> str:
         """Deterministic payload digest for replay/duplicate detection."""
-        return _digest({
-            "v": 1,
-            "domain": "tokmo-v3:analysis-request-payload:v1",
-            "request_id": self.request_id,
-            "analysis_kind": self.analysis_kind.value,
-            "trigger_kind": self.trigger_kind.value,
-            "tick_id": self.tick_id,
-            "candidate_id": self.candidate_id,
-            "delta_id": self.delta_id,
-            "subject_id": self.subject_id,
-            "material_binding_digest": self.material_binding_digest,
-            "admission_policy_version": self.admission_policy_version,
-            "admission_policy_digest": self.admission_policy_digest,
-            "admission_reason_codes": list(self.admission_reason_codes),
-            "requested_at": self.requested_at.astimezone(timezone.utc).strftime(
-                "%Y-%m-%dT%H:%M:%S.%fZ"
-            ),
-            "expected_coverage": [
-                row.canonical_payload for row in self.expected_coverage
-            ],
-        })
+        return _digest(
+            {
+                "v": 1,
+                "domain": "tokmo-v3:analysis-request-payload:v1",
+                "request_id": self.request_id,
+                "analysis_kind": self.analysis_kind.value,
+                "trigger_kind": self.trigger_kind.value,
+                "tick_id": self.tick_id,
+                "candidate_id": self.candidate_id,
+                "delta_id": self.delta_id,
+                "subject_id": self.subject_id,
+                "material_binding_digest": self.material_binding_digest,
+                "admission_policy_version": self.admission_policy_version,
+                "admission_policy_digest": self.admission_policy_digest,
+                "admission_reason_codes": list(self.admission_reason_codes),
+                "requested_at": self.requested_at.astimezone(UTC).strftime(
+                    "%Y-%m-%dT%H:%M:%S.%fZ"
+                ),
+                "expected_coverage": [
+                    row.canonical_payload for row in self.expected_coverage
+                ],
+            }
+        )
 
 
 @dataclass(frozen=True)

@@ -1,28 +1,46 @@
 """Typed frozen operations receipts."""
 
+import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-import re
-from typing import Mapping
 
-from tokmo.values.account_scope_patterns import ACCOUNT_SCOPE_RE  # N1: leaf re-export
+from tokmo.values.account_scope_patterns import (  # N1: leaf re-export
+    ACCOUNT_SCOPE_RE as ACCOUNT_SCOPE_RE,
+)
 from tokmo.values.material_pack import JobKind, canonical_encode
 
 RECEIPT_SCHEMA_VERSION = 1
-RECEIPT_REASON_TOKENS = frozenset({
-    "saved",
-    "skipped_holdings_absent", "skipped_market_closed",
-    "skipped_lock_contention", "skipped_zero_holdings", "skipped_stale",
-    "skipped_zero_quote_targets", "failed_watchlist_contract",
-    "failed_store", "failed_pack", "failed_receipt", "failed_parse",
-    "failed_calendar", "cache_corrupt", "cache_stale",
-    "failed_provider_auth", "failed_provider_rate_limit",
-    "failed_provider_contract", "failed_provider_other", "failed_ceiling",
-    "partial_accounts", "partial_pagination",
-    "partial_incomplete", "partial_quarantine",
-    "failed_pension_source",  # M7: PENSION source missing/corrupt
-})
+RECEIPT_REASON_TOKENS = frozenset(
+    {
+        "saved",
+        "skipped_holdings_absent",
+        "skipped_market_closed",
+        "skipped_lock_contention",
+        "skipped_zero_holdings",
+        "skipped_stale",
+        "skipped_zero_quote_targets",
+        "failed_watchlist_contract",
+        "failed_store",
+        "failed_pack",
+        "failed_receipt",
+        "failed_parse",
+        "failed_calendar",
+        "cache_corrupt",
+        "cache_stale",
+        "failed_provider_auth",
+        "failed_provider_rate_limit",
+        "failed_provider_contract",
+        "failed_provider_other",
+        "failed_ceiling",
+        "partial_accounts",
+        "partial_pagination",
+        "partial_incomplete",
+        "partial_quarantine",
+        "failed_pension_source",  # M7: PENSION source missing/corrupt
+    }
+)
 # N1: ACCOUNT_SCOPE_RE re-exported from account_scope_patterns.py above.
 
 
@@ -38,8 +56,11 @@ def _aware(value: datetime | None, name: str, *, nullable: bool = False) -> None
         if nullable:
             return
         raise ValueError(f"{name} must be timezone-aware")
-    if (not isinstance(value, datetime)
-            or value.tzinfo is None or value.utcoffset() is None):
+    if (
+        not isinstance(value, datetime)
+        or value.tzinfo is None
+        or value.utcoffset() is None
+    ):
         raise ValueError(f"{name} must be timezone-aware")
 
 
@@ -91,7 +112,10 @@ class MarketFreshness:
     def __post_init__(self):
         if type(self.market) is not str or type(self.status) is not str:
             raise ValueError("invalid market freshness")
-        if self.last_success_tick_id is not None and type(self.last_success_tick_id) is not int:
+        if (
+            self.last_success_tick_id is not None
+            and type(self.last_success_tick_id) is not int
+        ):
             raise ValueError("invalid market tick_id")
         _aware(self.captured_at, "captured_at", nullable=True)
 
@@ -105,12 +129,25 @@ class CompletenessV1:
     incomplete_count: int
 
     def __post_init__(self):
-        if any(type(value) is not int for value in (
-                self.accounts_ok, self.accounts_failed,
-                self.quarantine_count, self.incomplete_count)):
+        if any(
+            type(value) is not int
+            for value in (
+                self.accounts_ok,
+                self.accounts_failed,
+                self.quarantine_count,
+                self.incomplete_count,
+            )
+        ):
             raise ValueError("invalid account counts")
-        if min(self.accounts_ok, self.accounts_failed,
-               self.quarantine_count, self.incomplete_count) < 0:
+        if (
+            min(
+                self.accounts_ok,
+                self.accounts_failed,
+                self.quarantine_count,
+                self.incomplete_count,
+            )
+            < 0
+        ):
             raise ValueError("account counts must be non-negative")
         if type(self.pagination_pending) is not bool:
             raise ValueError("pagination_pending must be bool")
@@ -130,9 +167,11 @@ class ReceiptV1:
     mask_digest: str | None = None
 
     def __post_init__(self):
-        if (type(self.schema_version) is not int
-                or self.schema_version != RECEIPT_SCHEMA_VERSION
-                or not isinstance(self.job, JobKind)):
+        if (
+            type(self.schema_version) is not int
+            or self.schema_version != RECEIPT_SCHEMA_VERSION
+            or not isinstance(self.job, JobKind)
+        ):
             raise ValueError("unsupported receipt")
         if not isinstance(self.attempt, AttemptV1):
             raise ValueError("invalid attempt")
@@ -141,13 +180,18 @@ class ReceiptV1:
         if type(self.markets) is not dict:
             raise ValueError("markets must be a dict")
         for key, value in self.markets.items():
-            if type(key) is not str or not isinstance(value, MarketFreshness) or key != value.market:
+            if (
+                type(key) is not str
+                or not isinstance(value, MarketFreshness)
+                or key != value.market
+            ):
                 raise ValueError("invalid markets")
         if (self.completeness is not None) != (self.job is JobKind.TRADES):
             raise ValueError("completeness is required only for trades")
         if self.mask_digest is not None and (
-                type(self.mask_digest) is not str
-                or not re.fullmatch(r"[0-9a-f]{64}", self.mask_digest)):
+            type(self.mask_digest) is not str
+            or not re.fullmatch(r"[0-9a-f]{64}", self.mask_digest)
+        ):
             raise ValueError("invalid mask_digest")
 
 
@@ -159,23 +203,32 @@ def receipt_dict(receipt: ReceiptV1):
         "schema_version": receipt.schema_version,
         "job": receipt.job,
         "attempt": {
-            "tick_id": attempt.tick_id, "status": attempt.status,
-            "reason": attempt.reason, "completed_at": attempt.completed_at,
+            "tick_id": attempt.tick_id,
+            "status": attempt.status,
+            "reason": attempt.reason,
+            "completed_at": attempt.completed_at,
         },
-        "last_success": None if success is None else {
-            "tick_id": success.tick_id, "pack_path": success.pack_path,
-            "pack_sha256": success.pack_sha256, "captured_at": success.captured_at,
+        "last_success": None
+        if success is None
+        else {
+            "tick_id": success.tick_id,
+            "pack_path": success.pack_path,
+            "pack_sha256": success.pack_sha256,
+            "captured_at": success.captured_at,
             "completed_at": success.completed_at,
         },
         "markets": {
             key: {
-                "market": value.market, "status": value.status,
+                "market": value.market,
+                "status": value.status,
                 "last_success_tick_id": value.last_success_tick_id,
                 "captured_at": value.captured_at,
             }
             for key, value in receipt.markets.items()
         },
-        "completeness": None if completeness is None else {
+        "completeness": None
+        if completeness is None
+        else {
             "accounts_ok": completeness.accounts_ok,
             "accounts_failed": completeness.accounts_failed,
             "pagination_pending": completeness.pagination_pending,

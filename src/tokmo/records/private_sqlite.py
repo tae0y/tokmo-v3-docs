@@ -2,15 +2,16 @@
 
 import errno
 import os
-from contextlib import contextmanager
-from dataclasses import dataclass
-from pathlib import Path
 import sqlite3
 import stat
 import threading
 import time
+from contextlib import contextmanager
+from dataclasses import dataclass
+from pathlib import Path
 
-from tokmo.records.durability import fsync_directory
+# Re-exported for callers that import it from this module.
+from tokmo.records.durability import fsync_directory as fsync_directory
 
 MIN_SQLITE_VERSION = (3, 37, 0)
 BUSY_TIMEOUT_MS = 1000
@@ -39,8 +40,9 @@ def _uid() -> int:
     return os.getuid()
 
 
-def _check_stat(value: os.stat_result, *, directory: bool,
-                expected_mode: int) -> PathSafetyResult:
+def _check_stat(
+    value: os.stat_result, *, directory: bool, expected_mode: int
+) -> PathSafetyResult:
     if directory and not stat.S_ISDIR(value.st_mode):
         return PathSafetyResult(True, "unsafe_nonregular")
     if not directory and not stat.S_ISREG(value.st_mode):
@@ -81,8 +83,7 @@ def prepare_private_path(path: Path) -> PathSafetyResult:
     fd = None
     try:
         parent_fd = os.open(parent, os.O_RDONLY | os.O_NOFOLLOW)
-        fd = os.open(
-            path.name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent_fd)
+        fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent_fd)
         opened = os.fstat(fd)
         if (value.st_dev, value.st_ino) != (opened.st_dev, opened.st_ino):
             return PathSafetyResult(True, "unsafe_path_swap")
@@ -105,8 +106,7 @@ def check_private_path_without_open(path: Path) -> PathSafetyResult:
     descriptor for that file drops every POSIX lock the process holds on it.
     """
     try:
-        values = ((os.lstat(path.parent), True, 0o700),
-                  (os.lstat(path), False, 0o600))
+        values = ((os.lstat(path.parent), True, 0o700), (os.lstat(path), False, 0o600))
     except FileNotFoundError:
         return PathSafetyResult(True, "unsafe_nonregular")
     for value, directory, mode in values:
@@ -130,26 +130,22 @@ def connect_private(path: Path, *, mode: str = "rwc") -> sqlite3.Connection:
         pre = None
     uri = f"{path.resolve().as_uri()}?mode={mode}"
     connection = sqlite3.connect(
-        uri, uri=True, timeout=BUSY_TIMEOUT_MS / 1000, isolation_level=None)
+        uri, uri=True, timeout=BUSY_TIMEOUT_MS / 1000, isolation_level=None
+    )
     try:
         post = os.lstat(path)
-        if pre is not None and (
-            pre.st_ino != post.st_ino or pre.st_dev != post.st_dev
-        ):
+        if pre is not None and (pre.st_ino != post.st_ino or pre.st_dev != post.st_dev):
             raise OSError("unsafe_path_swap")
         connection.execute("PRAGMA busy_timeout=0")
         connection.execute("PRAGMA foreign_keys=ON")
         if mode != "ro":
             journal = connection.execute("PRAGMA journal_mode").fetchone()
             if journal != ("delete",):
-                journal = connection.execute(
-                    "PRAGMA journal_mode=DELETE").fetchone()
-            synchronous = connection.execute(
-                "PRAGMA synchronous").fetchone()
+                journal = connection.execute("PRAGMA journal_mode=DELETE").fetchone()
+            synchronous = connection.execute("PRAGMA synchronous").fetchone()
             if synchronous != (2,):
                 connection.execute("PRAGMA synchronous=FULL")
-                synchronous = connection.execute(
-                    "PRAGMA synchronous").fetchone()
+                synchronous = connection.execute("PRAGMA synchronous").fetchone()
             if journal != ("delete",) or synchronous != (2,):
                 raise OSError("sqlite_pragma_mismatch")
         connection.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
@@ -161,7 +157,8 @@ def connect_private(path: Path, *, mode: str = "rwc") -> sqlite3.Connection:
 
 def sqlite_locked(error: sqlite3.Error) -> bool:
     return getattr(error, "sqlite_errorcode", None) in {
-        sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED,
+        sqlite3.SQLITE_BUSY,
+        sqlite3.SQLITE_LOCKED,
     }
 
 
@@ -170,7 +167,9 @@ class ImmediateTransactionTimeout(sqlite3.OperationalError):
 
 
 def acquire_immediate_transaction(
-    connection: sqlite3.Connection, *, timeout_seconds: float = 1.0,
+    connection: sqlite3.Connection,
+    *,
+    timeout_seconds: float = 1.0,
     poll_interval: float = 0.01,
 ) -> None:
     """Acquire a write transaction against one monotonic operation deadline."""
@@ -186,16 +185,19 @@ def acquire_immediate_transaction(
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise ImmediateTransactionTimeout(
-                        "immediate transaction deadline expired") from error
+                        "immediate transaction deadline expired"
+                    ) from error
                 time.sleep(min(poll_interval, remaining))
                 if time.monotonic() >= deadline:
                     raise ImmediateTransactionTimeout(
-                        "immediate transaction deadline expired") from error
+                        "immediate transaction deadline expired"
+                    ) from error
                 continue
             if time.monotonic() > deadline:
                 connection.execute("ROLLBACK")
                 raise ImmediateTransactionTimeout(
-                    "immediate transaction deadline expired")
+                    "immediate transaction deadline expired"
+                )
             return
     finally:
         connection.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
@@ -210,7 +212,8 @@ def table_is_strict(connection: sqlite3.Connection, table: str) -> bool:
 
 def _sidecars(path: Path) -> list[Path]:
     return [
-        Path(f"{path}{suffix}") for suffix in ("-journal", "-wal", "-shm")
+        Path(f"{path}{suffix}")
+        for suffix in ("-journal", "-wal", "-shm")
         if Path(f"{path}{suffix}").exists()
     ]
 
@@ -219,9 +222,11 @@ def assert_private_sidecars_while_open(path: Path) -> list[Path]:
     paths = _sidecars(path)
     for sidecar in paths:
         value = os.lstat(sidecar)
-        if (not stat.S_ISREG(value.st_mode)
-                or stat.S_IMODE(value.st_mode) != 0o600
-                or value.st_uid != _uid()):
+        if (
+            not stat.S_ISREG(value.st_mode)
+            or stat.S_IMODE(value.st_mode) != 0o600
+            or value.st_uid != _uid()
+        ):
             raise OSError("unsafe_sidecar")
     return paths
 
