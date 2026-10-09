@@ -10,21 +10,26 @@ Every store lives under ``tmp_path``; the production runtime root is never
 touched.
 """
 
-from datetime import datetime, timezone
 import json
+from datetime import UTC, datetime
 
 import pytest
 
-from tokmo.records.ops_kernel import OpsKernelStore
-from tokmo.programs.youtube_tracking import TrackingCandidateParseError
 from tokmo.programs.youtube_report_admission import (
     admit_archived_report,
     observed_at_from_archive_meta,
 )
+from tokmo.programs.youtube_tracking import TrackingCandidateParseError
+from tokmo.records.ops_kernel import OpsKernelStore
 
 
-def make_meta(*, video_id="YlVhQO-Fkc8", published="2026-08-13T04:21:51+00:00",
-              fetched_at="2026-08-13T05:15:02+00:00", digest="a" * 64):
+def make_meta(
+    *,
+    video_id="YlVhQO-Fkc8",
+    published="2026-08-13T04:21:51+00:00",
+    fetched_at="2026-08-13T05:15:02+00:00",
+    digest="a" * 64,
+):
     meta = {
         "video_id": video_id,
         "url": f"https://www.youtube.com/watch?v={video_id}",
@@ -52,7 +57,9 @@ KEYS: entity:{entity}
 === TRACKING_CANDIDATE END ==="""
 
 
-SEED_STATEMENT = "싱가포르 국부펀드의 삼성전자 장기 지분 보유는 반도체 장기 성장 베팅의 지속 신호다"
+SEED_STATEMENT = (
+    "싱가포르 국부펀드의 삼성전자 장기 지분 보유는 반도체 장기 성장 베팅의 지속 신호다"
+)
 
 MALFORMED_BLOCK = """=== TRACKING_CANDIDATE BEGIN ===
 STATEMENT: THESIS_UNARTICULATED
@@ -75,8 +82,10 @@ def store(tmp_path):
 def seed_day_one(store):
     """Admit the day-one report so one hypothesis already exists."""
     meta = make_meta(
-        video_id="seedvideo001", published="2026-08-12T04:20:00+00:00",
-        fetched_at="2026-08-12T05:10:00+00:00", digest="b" * 64,
+        video_id="seedvideo001",
+        published="2026-08-12T04:20:00+00:00",
+        fetched_at="2026-08-12T05:10:00+00:00",
+        digest="b" * 64,
     )
     report = make_block(SEED_STATEMENT, "005930")
     result = admit_archived_report(store, meta=meta, report_text=report)
@@ -89,12 +98,12 @@ def seed_day_one(store):
 
 def test_observed_at_prefers_fetched_at_over_published():
     observed = observed_at_from_archive_meta(make_meta())
-    assert observed == datetime(2026, 8, 13, 5, 15, 2, tzinfo=timezone.utc)
+    assert observed == datetime(2026, 8, 13, 5, 15, 2, tzinfo=UTC)
 
 
 def test_observed_at_falls_back_to_published_only_when_fetched_absent():
     observed = observed_at_from_archive_meta(make_meta(fetched_at=None))
-    assert observed == datetime(2026, 8, 13, 4, 21, 51, tzinfo=timezone.utc)
+    assert observed == datetime(2026, 8, 13, 4, 21, 51, tzinfo=UTC)
 
 
 def test_observed_at_present_but_invalid_fetched_fails_closed():
@@ -110,24 +119,33 @@ def test_observed_at_present_but_invalid_fetched_fails_closed():
 def test_mixed_report_two_new_plus_one_revision_against_seeded_store(store):
     seed_day_one(store)
     meta = make_meta()
-    report = "\n".join((
-        make_block(SEED_STATEMENT, "005930",
-                   invalidate="disclosure:005930:exit;metric:005930:drop"),
-        make_block("현대차 미국 관세 유예는 완성차 마진 회복 신호다", "005380"),
-        make_block("하이닉스 HBM 증설은 장비주 수주 선행 신호다", "000660"),
-    ))
+    report = "\n".join(
+        (
+            make_block(
+                SEED_STATEMENT,
+                "005930",
+                invalidate="disclosure:005930:exit;metric:005930:drop",
+            ),
+            make_block("현대차 미국 관세 유예는 완성차 마진 회복 신호다", "005380"),
+            make_block("하이닉스 HBM 증설은 장비주 수주 선행 신호다", "000660"),
+        )
+    )
     result = admit_archived_report(store, meta=meta, report_text=report)
     assert result["source_ref"] == "YlVhQO-Fkc8"
     assert result["parsed"] == {"valid_candidates": 3, "malformed_blocks": 0}
     assert result["admission"]["created"] == 2
-    assert (result["admission"]["revisions"]
-            + result["admission"]["semantic_sightings"]) == 1
+    assert (
+        result["admission"]["revisions"] + result["admission"]["semantic_sightings"]
+    ) == 1
     assert result["admission"]["duplicates"] == 0
     assert result["admission"]["admission_failures"] == 0
     statuses = sorted(entry["status"] for entry in result["candidates"])
     assert statuses == ["NEW", "NEW", "NEW_SIGHTING_OR_REVISION"]
-    revision_entry = next(entry for entry in result["candidates"]
-                          if entry["status"] == "NEW_SIGHTING_OR_REVISION")
+    revision_entry = next(
+        entry
+        for entry in result["candidates"]
+        if entry["status"] == "NEW_SIGHTING_OR_REVISION"
+    )
     assert revision_entry["statement_excerpt"].startswith("싱가포르 국부펀드")
     # durable read-back, not a draft claim (delta contract §4)
     assert result["read_back"]["sightings_for_revision"] == 3
@@ -141,12 +159,17 @@ def test_mixed_report_two_new_plus_one_revision_against_seeded_store(store):
 def test_identical_replay_reports_duplicates_and_writes_no_new_rows(store):
     seed_day_one(store)
     meta = make_meta()
-    report = "\n".join((
-        make_block(SEED_STATEMENT, "005930",
-                   invalidate="disclosure:005930:exit;metric:005930:drop"),
-        make_block("현대차 미국 관세 유예는 완성차 마진 회복 신호다", "005380"),
-        make_block("하이닉스 HBM 증설은 장비주 수주 선행 신호다", "000660"),
-    ))
+    report = "\n".join(
+        (
+            make_block(
+                SEED_STATEMENT,
+                "005930",
+                invalidate="disclosure:005930:exit;metric:005930:drop",
+            ),
+            make_block("현대차 미국 관세 유예는 완성차 마진 회복 신호다", "005380"),
+            make_block("하이닉스 HBM 증설은 장비주 수주 선행 신호다", "000660"),
+        )
+    )
     admit_archived_report(store, meta=meta, report_text=report)
 
     def snapshot():
@@ -168,8 +191,7 @@ def test_identical_replay_reports_duplicates_and_writes_no_new_rows(store):
     assert replay["admission"]["revisions"] == 0
     assert replay["admission"]["semantic_sightings"] == 0
     assert replay["admission"]["duplicates"] == 3
-    assert all(entry["status"] == "DUPLICATE"
-               for entry in replay["candidates"])
+    assert all(entry["status"] == "DUPLICATE" for entry in replay["candidates"])
     assert replay["read_back"]["source_revision_registered"] is True
     assert snapshot() == before
 
@@ -179,8 +201,13 @@ def test_identical_replay_reports_duplicates_and_writes_no_new_rows(store):
 
 def test_malformed_sibling_is_quarantined_and_valid_sibling_admitted(store):
     meta = make_meta()
-    report = MALFORMED_BLOCK + "\n" + make_block(
-        "정상 형제 블록 가설", "005380",
+    report = (
+        MALFORMED_BLOCK
+        + "\n"
+        + make_block(
+            "정상 형제 블록 가설",
+            "005380",
+        )
     )
     result = admit_archived_report(store, meta=meta, report_text=report)
     assert result["parsed"] == {"valid_candidates": 1, "malformed_blocks": 1}
@@ -202,7 +229,8 @@ def test_malformed_sibling_is_quarantined_and_valid_sibling_admitted(store):
 
 def test_zero_candidate_report_registers_nothing(store):
     result = admit_archived_report(
-        store, meta=make_meta(),
+        store,
+        meta=make_meta(),
         report_text="❓ 오늘 물어볼 질문 3개\n... 추적 후보 없음 ...",
     )
     assert result["parsed"] == {"valid_candidates": 0, "malformed_blocks": 0}
@@ -229,7 +257,9 @@ def test_malformed_meta_fails_closed_before_store_access():
     del broken["transcript_sha256"]
     with pytest.raises(TrackingCandidateParseError):
         admit_archived_report(
-            _ExplodingStore(), meta=broken, report_text=MALFORMED_BLOCK,
+            _ExplodingStore(),
+            meta=broken,
+            report_text=MALFORMED_BLOCK,
         )
 
 
@@ -245,7 +275,8 @@ def test_naive_fetched_at_fails_closed_before_store_access():
 def test_non_mapping_meta_fails_closed_before_store_access():
     with pytest.raises(TrackingCandidateParseError):
         admit_archived_report(
-            _ExplodingStore(), meta="not-a-mapping",
+            _ExplodingStore(),
+            meta="not-a-mapping",
             report_text=make_block("정상 가설", "005380"),
         )
 
@@ -260,7 +291,9 @@ def test_readback_json_is_bounded_and_never_leaks_private_identifiers(store):
         for index in range(20)
     ]
     result = admit_archived_report(
-        store, meta=make_meta(), report_text="\n".join(blocks),
+        store,
+        meta=make_meta(),
+        report_text="\n".join(blocks),
     )
     assert result["parsed"]["valid_candidates"] == 20
     assert len(result["candidates"]) == 16
@@ -269,10 +302,20 @@ def test_readback_json_is_bounded_and_never_leaks_private_identifiers(store):
         assert len(entry["statement_excerpt"]) <= 80
         assert set(entry) == {"status", "statement_excerpt"}
     dumped = json.dumps(result, ensure_ascii=False)
-    for forbidden in ("/Users", "tokmo", "~/", ".local",
-                      "hypothesis:", "hypothesis_id", "sqlite"):
+    for forbidden in (
+        "/Users",
+        "tokmo",
+        "~/",
+        ".local",
+        "hypothesis:",
+        "hypothesis_id",
+        "sqlite",
+    ):
         assert forbidden not in dumped
     # the JSON is renderer-ready: only closed status tokens appear
     assert {entry["status"] for entry in result["candidates"]} <= {
-        "NEW", "NEW_SIGHTING_OR_REVISION", "DUPLICATE", "FAILURE",
+        "NEW",
+        "NEW_SIGHTING_OR_REVISION",
+        "DUPLICATE",
+        "FAILURE",
     }

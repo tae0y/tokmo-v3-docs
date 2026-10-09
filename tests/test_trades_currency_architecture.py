@@ -4,7 +4,7 @@ import ast
 from pathlib import Path
 from types import MappingProxyType
 
-import tokmo.composition as composition
+from tokmo import composition
 from tokmo.programs import (
     cadence_fixture_deps,
     integrated_fake_cadence,
@@ -25,8 +25,7 @@ def test_no_market_resolver_production_dependency_or_wiring():
         composition,
     )
     assert all(
-        "market_resolver" not in Path(module.__file__).read_text()
-        for module in scanned
+        "market_resolver" not in Path(module.__file__).read_text() for module in scanned
     )
 
 

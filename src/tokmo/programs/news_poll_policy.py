@@ -1,6 +1,6 @@
 """Versioned NEWS polling group and tick policy."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
 
 
@@ -18,14 +18,22 @@ NEWS_GROUPS_V1 = {
 _GROUP_OFFSET = {NewsGroup.A: 0, NewsGroup.B: 5, NewsGroup.C: 10}
 
 
-def news_tick_id(group: NewsGroup, scheduled_for: datetime, *, fast_primary=False) -> str:
-    if (not isinstance(scheduled_for, datetime)
-            or scheduled_for.tzinfo is None
-            or scheduled_for.utcoffset() is None):
+def news_tick_id(
+    group: NewsGroup, scheduled_for: datetime, *, fast_primary=False
+) -> str:
+    if (
+        not isinstance(scheduled_for, datetime)
+        or scheduled_for.tzinfo is None
+        or scheduled_for.utcoffset() is None
+    ):
         raise ValueError("scheduled_for must be timezone-aware")
-    scheduled_utc = scheduled_for.astimezone(timezone.utc)
+    scheduled_utc = scheduled_for.astimezone(UTC)
     interval = 5 if fast_primary else 15
-    offset = {NewsGroup.A: 0, NewsGroup.B: 1, NewsGroup.C: 2}[group] if fast_primary else _GROUP_OFFSET[group]
+    offset = (
+        {NewsGroup.A: 0, NewsGroup.B: 1, NewsGroup.C: 2}[group]
+        if fast_primary
+        else _GROUP_OFFSET[group]
+    )
     if scheduled_utc.minute % interval != offset:
         raise ValueError("group_offset mismatch")
     slot = scheduled_utc.replace(second=0, microsecond=0)

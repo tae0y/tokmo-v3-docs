@@ -11,7 +11,7 @@ import ast
 import itertools
 import sqlite3
 import stat
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -19,8 +19,7 @@ import pytest
 from tokmo.records.trade_ledger_store import TradeLedgerStore
 from tokmo.values.trade_ledger import ImportAuditMeta, TradeLedgerEvent
 
-
-NOW = datetime(2026, 7, 28, 1, 2, 3, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 28, 1, 2, 3, tzinfo=UTC)
 SOURCE = "retirement_excel_v1"
 SCOPE = "retirement_pension_1"
 
@@ -62,9 +61,7 @@ def observed_shape_batch():
     for number in range(65, 83):
         events.append(ledger_event(number, transaction_type_raw="ETF매도"))
     events.append(
-        ledger_event(
-            83, event_kind="CORRECTION", transaction_type_raw="매수정정*"
-        )
+        ledger_event(83, event_kind="CORRECTION", transaction_type_raw="매수정정*")
     )
     for number in (84, 85):
         events.append(
@@ -117,21 +114,18 @@ def read_order_key(event):
 
 # --- schema, permissions, reopen ---------------------------------------------
 
+
 def test_fresh_store_creates_strict_schema_with_private_permissions(tmp_path):
     path = tmp_path / "private" / "ledger.sqlite3"
     store = make_store(path)
 
-    receipt = store.append_batch(
-        (ledger_event(1),), import_audit=audit()
-    )
+    receipt = store.append_batch((ledger_event(1),), import_audit=audit())
 
     assert receipt.status == "SAVED"
     assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     with sqlite3.connect(path) as connection:
-        table_list = {
-            row[1]: row for row in connection.execute("PRAGMA table_list")
-        }
+        table_list = {row[1]: row for row in connection.execute("PRAGMA table_list")}
         assert table_list["trade_ledger_events"][5] == 1  # STRICT
         assert table_list["trade_ledger_import_batches"][5] == 1
         names = {
@@ -155,9 +149,9 @@ def test_fresh_store_creates_strict_schema_with_private_permissions(tmp_path):
 def test_strict_mode_rejects_wrongly_typed_column_values(tmp_path):
     path = tmp_path / "private" / "ledger.sqlite3"
     store = make_store(path)
-    assert store.append_batch(
-        (ledger_event(1),), import_audit=audit()
-    ).status == "SAVED"
+    assert (
+        store.append_batch((ledger_event(1),), import_audit=audit()).status == "SAVED"
+    )
 
     with sqlite3.connect(path) as connection:
         with pytest.raises(sqlite3.IntegrityError):
@@ -165,13 +159,9 @@ def test_strict_mode_rejects_wrongly_typed_column_values(tmp_path):
                 "UPDATE trade_ledger_events SET schema_version='fixture'"
             )
         with pytest.raises(sqlite3.IntegrityError):
-            connection.execute(
-                "UPDATE trade_ledger_events SET event_kind='REVERSAL'"
-            )
+            connection.execute("UPDATE trade_ledger_events SET event_kind='REVERSAL'")
         with pytest.raises(sqlite3.IntegrityError):
-            connection.execute(
-                "UPDATE trade_ledger_events SET schema_version=2"
-            )
+            connection.execute("UPDATE trade_ledger_events SET schema_version=2")
 
 
 def test_foreign_schema_is_schema_mismatch_and_untouched(tmp_path):
@@ -185,9 +175,7 @@ def test_foreign_schema_is_schema_mismatch_and_untouched(tmp_path):
     path.chmod(0o600)
     before = path.read_bytes()
 
-    receipt = make_store(path).append_batch(
-        (ledger_event(1),), import_audit=audit()
-    )
+    receipt = make_store(path).append_batch((ledger_event(1),), import_audit=audit())
 
     assert receipt.status == "FAILED"
     assert receipt.reason == "schema_mismatch"
@@ -196,6 +184,7 @@ def test_foreign_schema_is_schema_mismatch_and_untouched(tmp_path):
 
 
 # --- core append and read-back -----------------------------------------------
+
 
 def test_observed_shape_batch_saves_in_one_commit_and_reads_back_exactly(
     tmp_path,
@@ -212,24 +201,21 @@ def test_observed_shape_batch_saves_in_one_commit_and_reads_back_exactly(
 
     read_back = store.read_scope(source=SOURCE, account_scope=SCOPE)
     assert read_back == tuple(sorted(events, key=read_order_key))
-    corrections = [
-        event for event in read_back if event.event_kind == "CORRECTION"
-    ]
+    corrections = [event for event in read_back if event.event_kind == "CORRECTION"]
     assert len(corrections) == 3
-    assert all(
-        event.supersedes_source_record_key is None for event in corrections
-    )
+    assert all(event.supersedes_source_record_key is None for event in corrections)
     assert {event.transaction_type_raw for event in corrections} == {
-        "매수정정*", "매도정정*"
+        "매수정정*",
+        "매도정정*",
     }
 
 
 def test_nullable_fields_round_trip_as_null_never_defaulted(tmp_path):
     path = tmp_path / "private" / "ledger.sqlite3"
     store = make_store(path)
-    assert store.append_batch(
-        (ledger_event(1),), import_audit=audit()
-    ).status == "SAVED"
+    assert (
+        store.append_batch((ledger_event(1),), import_audit=audit()).status == "SAVED"
+    )
 
     (read_back,) = store.read_scope(source=SOURCE, account_scope=SCOPE)
     assert read_back.currency_raw is None
@@ -238,8 +224,7 @@ def test_nullable_fields_round_trip_as_null_never_defaulted(tmp_path):
     assert read_back.tax is None
     with sqlite3.connect(path) as connection:
         row = connection.execute(
-            "SELECT currency_raw, settlement_date, fee, tax "
-            "FROM trade_ledger_events"
+            "SELECT currency_raw, settlement_date, fee, tax FROM trade_ledger_events"
         ).fetchone()
     assert row == (None, None, None, None)
 
@@ -281,6 +266,7 @@ def test_stored_at_is_storage_metadata_from_the_injected_clock(tmp_path):
 
 
 # --- duplicate / tail / prefix re-imports ------------------------------------
+
 
 def test_same_export_reimport_is_duplicate_noop(tmp_path):
     path = tmp_path / "private" / "ledger.sqlite3"
@@ -369,17 +355,14 @@ def test_unordered_but_complete_tuple_has_identical_outcome(tmp_path):
     )
 
     assert ordered_receipt.status == shuffled_receipt.status == "SAVED"
-    assert counts(ordered_receipt) == counts(shuffled_receipt) == (
-        5, 5, 5, 0, 0, 0
-    )
+    assert counts(ordered_receipt) == counts(shuffled_receipt) == (5, 5, 5, 0, 0, 0)
     assert make_store(ordered_path).read_scope(
         source=SOURCE, account_scope=SCOPE
-    ) == make_store(shuffled_path).read_scope(
-        source=SOURCE, account_scope=SCOPE
-    )
+    ) == make_store(shuffled_path).read_scope(source=SOURCE, account_scope=SCOPE)
 
 
 # --- fail-closed conflicts ---------------------------------------------------
+
 
 def test_prefix_drift_edited_value_fails_whole_batch_with_zero_mutation(
     tmp_path,
@@ -414,9 +397,12 @@ def test_deleted_row_sequence_shift_fails_whole_batch(tmp_path):
     # Row 2 deleted at the source: old row 3 shifts under key row-000002.
     shifted = (
         stored[0],
-        ledger_event(2, unit_price=stored[2].unit_price,
-                     amount=stored[2].amount,
-                     quantity=stored[2].quantity),
+        ledger_event(
+            2,
+            unit_price=stored[2].unit_price,
+            amount=stored[2].amount,
+            quantity=stored[2].quantity,
+        ),
     )
     receipt = store.append_batch(shifted, import_audit=audit())
 
@@ -434,12 +420,18 @@ def test_inserted_and_reordered_rows_fail_whole_batch(tmp_path):
     before = event_rows(path)
 
     reordered = (
-        ledger_event(1, quantity=stored[1].quantity,
-                     unit_price=stored[1].unit_price,
-                     amount=stored[1].amount),
-        ledger_event(2, quantity=stored[0].quantity,
-                     unit_price=stored[0].unit_price,
-                     amount=stored[0].amount),
+        ledger_event(
+            1,
+            quantity=stored[1].quantity,
+            unit_price=stored[1].unit_price,
+            amount=stored[1].amount,
+        ),
+        ledger_event(
+            2,
+            quantity=stored[0].quantity,
+            unit_price=stored[0].unit_price,
+            amount=stored[0].amount,
+        ),
     )
     receipt = store.append_batch(reordered, import_audit=audit())
 
@@ -473,6 +465,7 @@ def test_conflicted_import_never_deletes_or_rewrites_rows(tmp_path):
 
 # --- worked count examples (frozen in the closed plan) -----------------------
 
+
 def test_worked_example_1_three_new_events(tmp_path):
     path = tmp_path / "private" / "ledger.sqlite3"
     receipt = make_store(path).append_batch(
@@ -489,9 +482,7 @@ def test_worked_example_2_identical_prefix_plus_tail(tmp_path):
     prefix = tuple(ledger_event(number) for number in (1, 2))
     assert store.append_batch(prefix, import_audit=audit()).status == "SAVED"
 
-    receipt = store.append_batch(
-        prefix + (ledger_event(3),), import_audit=audit()
-    )
+    receipt = store.append_batch(prefix + (ledger_event(3),), import_audit=audit())
     assert receipt.status == "SAVED"
     assert counts(receipt) == (3, 1, 1, 2, 0, 0)
 
@@ -542,11 +533,10 @@ def test_worked_example_5_invalid_member_fails_batch_with_no_earlier_row(
 
 # --- source-contract preflight -----------------------------------------------
 
+
 def test_fresh_store_batch_not_starting_at_one_fails_closed(tmp_path):
     path = tmp_path / "private" / "ledger.sqlite3"
-    receipt = make_store(path).append_batch(
-        (ledger_event(50),), import_audit=audit()
-    )
+    receipt = make_store(path).append_batch((ledger_event(50),), import_audit=audit())
     assert receipt.status == "FAILED"
     assert receipt.reason == "source_contract_violation"
     assert counts(receipt) == (1, 0, 0, 0, 0, 1)
@@ -560,12 +550,8 @@ def test_gap_and_detached_tail_fail_closed_with_zero_mutation(tmp_path):
     assert store.append_batch(stored, import_audit=audit()).status == "SAVED"
     before = event_rows(path)
 
-    detached = store.append_batch(
-        (ledger_event(100),), import_audit=audit()
-    )
-    gapped = store.append_batch(
-        stored + (ledger_event(5),), import_audit=audit()
-    )
+    detached = store.append_batch((ledger_event(100),), import_audit=audit())
+    gapped = store.append_batch(stored + (ledger_event(5),), import_audit=audit())
 
     for receipt in (detached, gapped):
         assert receipt.status == "FAILED"
@@ -619,9 +605,9 @@ def test_linked_supersession_is_a_contract_violation_for_the_excel_source(
 ):
     path = tmp_path / "private" / "ledger.sqlite3"
     store = make_store(path)
-    assert store.append_batch(
-        (ledger_event(1),), import_audit=audit()
-    ).status == "SAVED"
+    assert (
+        store.append_batch((ledger_event(1),), import_audit=audit()).status == "SAVED"
+    )
     before = event_rows(path)
 
     linked = ledger_event(
@@ -630,9 +616,7 @@ def test_linked_supersession_is_a_contract_violation_for_the_excel_source(
         transaction_type_raw="매수정정*",
         supersedes_source_record_key="row-000001",
     )
-    receipt = store.append_batch(
-        (ledger_event(1), linked), import_audit=audit()
-    )
+    receipt = store.append_batch((ledger_event(1), linked), import_audit=audit())
 
     assert receipt.status == "FAILED"
     assert receipt.reason == "source_contract_violation"
@@ -640,6 +624,7 @@ def test_linked_supersession_is_a_contract_violation_for_the_excel_source(
 
 
 # --- structural invalid batches (no store touch) -----------------------------
+
 
 @pytest.mark.parametrize(
     "batch",
@@ -649,9 +634,7 @@ def test_linked_supersession_is_a_contract_violation_for_the_excel_source(
         ("not-an-event",),
     ],
 )
-def test_structurally_invalid_batches_fail_without_creating_a_store(
-    tmp_path, batch
-):
+def test_structurally_invalid_batches_fail_without_creating_a_store(tmp_path, batch):
     path = tmp_path / "private" / "ledger.sqlite3"
     receipt = make_store(path).append_batch(batch, import_audit=audit())
     assert receipt.status == "FAILED"
@@ -723,7 +706,7 @@ def test_naive_clock_and_bad_audit_meta_fail_without_creating_a_store(
         dict(unit_price="1e3"),
         dict(amount="+5"),
         dict(fee="01"),
-        dict(trade_date=datetime(2026, 1, 1, tzinfo=timezone.utc)),
+        dict(trade_date=datetime(2026, 1, 1, tzinfo=UTC)),
         dict(transaction_type_raw=""),
         dict(instrument_raw=""),
         dict(medium_raw=""),
@@ -731,14 +714,12 @@ def test_naive_clock_and_bad_audit_meta_fail_without_creating_a_store(
         dict(supersedes_source_record_key="row-000001"),
     ],
 )
-def test_syntactically_invalid_members_fail_the_whole_batch(
-    tmp_path, overrides
-):
+def test_syntactically_invalid_members_fail_the_whole_batch(tmp_path, overrides):
     path = tmp_path / "private" / "ledger.sqlite3"
     store = make_store(path)
-    assert store.append_batch(
-        (ledger_event(1),), import_audit=audit()
-    ).status == "SAVED"
+    assert (
+        store.append_batch((ledger_event(1),), import_audit=audit()).status == "SAVED"
+    )
     before = event_rows(path)
 
     receipt = store.append_batch(
@@ -754,6 +735,7 @@ def test_syntactically_invalid_members_fail_the_whole_batch(
 
 # --- read path ---------------------------------------------------------------
 
+
 def test_read_scope_is_read_only_and_never_creates_a_store(tmp_path):
     from tokmo.records.trade_ledger_privacy import StoreReadError
 
@@ -768,20 +750,16 @@ def test_read_scope_is_read_only_and_never_creates_a_store(tmp_path):
 def test_read_scope_of_an_absent_scope_returns_empty(tmp_path):
     path = tmp_path / "private" / "ledger.sqlite3"
     store = make_store(path)
-    assert store.append_batch(
-        (ledger_event(1),), import_audit=audit()
-    ).status == "SAVED"
-    assert store.read_scope(
-        source=SOURCE, account_scope="fixture_other_scope"
-    ) == ()
+    assert (
+        store.append_batch((ledger_event(1),), import_audit=audit()).status == "SAVED"
+    )
+    assert store.read_scope(source=SOURCE, account_scope="fixture_other_scope") == ()
 
 
 def test_separate_process_reopen_reads_exact_equality(tmp_path):
     path = tmp_path / "private" / "ledger.sqlite3"
     events = observed_shape_batch()
-    assert make_store(path).append_batch(
-        events, import_audit=audit()
-    ).status == "SAVED"
+    assert make_store(path).append_batch(events, import_audit=audit()).status == "SAVED"
 
     fresh = make_store(path)
     assert fresh.read_scope(source=SOURCE, account_scope=SCOPE) == tuple(
@@ -790,6 +768,7 @@ def test_separate_process_reopen_reads_exact_equality(tmp_path):
 
 
 # --- architecture boundaries -------------------------------------------------
+
 
 def test_trade_ledger_modules_import_no_forbidden_layers():
     root = Path(__file__).parents[1] / "src" / "tokmo"
@@ -811,8 +790,14 @@ def test_trade_ledger_modules_import_no_forbidden_layers():
         return found
 
     forbidden_prefixes = (
-        "tokmo.facts", "tokmo.programs", "tokmo.runtime",
-        "tokmo.composition", "urllib", "http", "socket", "ssl",
+        "tokmo.facts",
+        "tokmo.programs",
+        "tokmo.runtime",
+        "tokmo.composition",
+        "urllib",
+        "http",
+        "socket",
+        "ssl",
     )
     for module in modules:
         for name in imports(root / module):
@@ -823,8 +808,15 @@ def test_trade_ledger_modules_import_no_forbidden_layers():
     # "excel" appears only inside the frozen identity label; forbid the
     # parser/provider/judgment surfaces instead.
     forbidden_text = (
-        "openpyxl", "xlrd", ".xlsx", "holding", "portfolio",
-        "alert", "calendar", "scheduler", "telegram",
+        "openpyxl",
+        "xlrd",
+        ".xlsx",
+        "holding",
+        "portfolio",
+        "alert",
+        "calendar",
+        "scheduler",
+        "telegram",
     )
     for module in modules:
         text = (root / module).read_text().lower()

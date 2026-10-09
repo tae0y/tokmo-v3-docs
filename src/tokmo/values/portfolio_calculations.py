@@ -7,7 +7,6 @@ from enum import Enum
 
 from tokmo.values.analysis_barrier import MarketReadiness
 from tokmo.values.material_pack import JobKind
-from tokmo.values.session_gate import Market
 
 # T1: PortfolioScope, ScopeUnresolved, and friends are now owned by
 # portfolio_scope.py.  Re-export for backward compatibility.
@@ -18,6 +17,7 @@ from tokmo.values.portfolio_scope import (  # noqa: F401
     ScopeUnresolved,
     resolve_account_scope_pattern,
 )
+from tokmo.values.session_gate import Market
 
 
 class SnapshotStatus(str, Enum):
@@ -65,7 +65,9 @@ class TradeGlobalQualityState(str, Enum):
     COMPLETE = "COMPLETE"
     UNATTRIBUTED_PARTIAL = "UNATTRIBUTED_PARTIAL"
     PAGINATION_PENDING = "PAGINATION_PENDING"
-    PAGINATION_PENDING_AND_UNATTRIBUTED_PARTIAL = "PAGINATION_PENDING_AND_UNATTRIBUTED_PARTIAL"
+    PAGINATION_PENDING_AND_UNATTRIBUTED_PARTIAL = (
+        "PAGINATION_PENDING_AND_UNATTRIBUTED_PARTIAL"
+    )
 
 
 class ConcentrationBasis(str, Enum):

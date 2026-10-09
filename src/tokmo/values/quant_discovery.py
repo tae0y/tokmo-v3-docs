@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from enum import Enum
-import json
 from pathlib import Path
 from typing import Any
 
@@ -56,7 +56,11 @@ class QuantUnavailableCode(ScalarEnum):
 def _decimal(value: Decimal | None, name: str, *, nonnegative: bool = False) -> None:
     if value is None:
         return
-    if isinstance(value, bool) or not isinstance(value, Decimal) or not value.is_finite():
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, Decimal)
+        or not value.is_finite()
+    ):
         raise ValueError(f"{name} must be a finite Decimal or None")
     if nonnegative and value < 0:
         raise ValueError(f"{name} must be non-negative")
@@ -115,7 +119,11 @@ class FactorValueV1:
 
     def __post_init__(self) -> None:
         _decimal(self.raw_value, "raw_value")
-        if not self.name or isinstance(self.observed_count, bool) or isinstance(self.minimum_count, bool):
+        if (
+            not self.name
+            or isinstance(self.observed_count, bool)
+            or isinstance(self.minimum_count, bool)
+        ):
             raise ValueError("invalid factor metadata")
         if self.observed_count < 0 or self.minimum_count < 1:
             raise ValueError("invalid observation counts")
@@ -159,7 +167,9 @@ class FactorStandingV1:
         _decimal(self.percentile, "percentile")
         if self.sample_size < 1 or self.ordinal < 1 or self.ordinal > self.sample_size:
             raise ValueError("invalid standing")
-        if self.sample_size < 10 and (self.percentile is not None or self.percentile_label is not None):
+        if self.sample_size < 10 and (
+            self.percentile is not None or self.percentile_label is not None
+        ):
             raise ValueError("percentile requires ten peers")
         if (self.percentile is None) != (self.percentile_label is None):
             raise ValueError("percentile and label must agree")
@@ -237,7 +247,9 @@ class QuantRunReceiptV1:
     delivery_state: str = "NOT_ACTIVATED"
 
     def __post_init__(self) -> None:
-        if len(self.report_sha256) != 64 or any(c not in "0123456789abcdef" for c in self.report_sha256):
+        if len(self.report_sha256) != 64 or any(
+            c not in "0123456789abcdef" for c in self.report_sha256
+        ):
             raise ValueError("invalid report digest")
 
 
@@ -262,8 +274,27 @@ class PeerRegistryV1:
     groups: tuple[PeerGroupV1, ...]
 
 
-_REQUIRED = {"group_id", "product_kind", "market", "instrument_type", "reference_symbol", "peer_symbols", "provenance_note", "last_reviewed"}
-_OPTIONAL = {"industry", "exposure", "index", "region", "theme", "hedge", "leverage_factor", "inverse", "duration"}
+_REQUIRED = {
+    "group_id",
+    "product_kind",
+    "market",
+    "instrument_type",
+    "reference_symbol",
+    "peer_symbols",
+    "provenance_note",
+    "last_reviewed",
+}
+_OPTIONAL = {
+    "industry",
+    "exposure",
+    "index",
+    "region",
+    "theme",
+    "hedge",
+    "leverage_factor",
+    "inverse",
+    "duration",
+}
 
 
 _REQUIRED_TEXT = ("group_id", "instrument_type", "reference_symbol", "provenance_note")
@@ -285,7 +316,9 @@ def _immutable_label(key: str, value: object) -> object:
     scalar_types = (str, int, float, bool, type(None))
 
     def safe_scalar(item: object) -> bool:
-        return isinstance(item, scalar_types) and not (isinstance(item, float) and not Decimal(str(item)).is_finite())
+        return isinstance(item, scalar_types) and not (
+            isinstance(item, float) and not Decimal(str(item)).is_finite()
+        )
 
     if safe_scalar(value):
         return value
@@ -309,37 +342,90 @@ def load_peer_registry(path: str | Path) -> PeerRegistryV1:
         data = json.loads(raw)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("invalid registry JSON") from exc
-    canonical = (json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n").encode()
+    canonical = (
+        json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        + "\n"
+    ).encode()
     if raw != canonical:
         raise ValueError("registry must use canonical JSON bytes")
-    if not isinstance(data, dict) or set(data) != {"schema", "revision", "reviewed_at", "groups"}:
+    if not isinstance(data, dict) or set(data) != {
+        "schema",
+        "revision",
+        "reviewed_at",
+        "groups",
+    }:
         raise ValueError("unknown or missing top-level registry field")
-    if data["schema"] != "quant-peer-registry-v1" or not isinstance(data["revision"], str) or not data["revision"]:
+    if (
+        data["schema"] != "quant-peer-registry-v1"
+        or not isinstance(data["revision"], str)
+        or not data["revision"]
+    ):
         raise ValueError("invalid registry identity")
     if not isinstance(data["groups"], list):
         raise ValueError("groups must be a list")
     groups = []
     identities = set()
     for item in data["groups"]:
-        if not isinstance(item, dict) or not _REQUIRED <= set(item) or set(item) - _REQUIRED - _OPTIONAL:
+        if (
+            not isinstance(item, dict)
+            or not _REQUIRED <= set(item)
+            or set(item) - _REQUIRED - _OPTIONAL
+        ):
             raise ValueError("unknown or missing group field")
-        if any(not isinstance(item[field], str) or not item[field] for field in _REQUIRED_TEXT):
+        if any(
+            not isinstance(item[field], str) or not item[field]
+            for field in _REQUIRED_TEXT
+        ):
             raise ValueError("required scalar fields must be non-empty strings")
         peers = item["peer_symbols"]
-        if not isinstance(peers, list) or not peers or peers != sorted(peers) or any(not isinstance(x, str) or not x for x in peers) or len(peers) != len(set(peers)):
+        if (
+            not isinstance(peers, list)
+            or not peers
+            or peers != sorted(peers)
+            or any(not isinstance(x, str) or not x for x in peers)
+            or len(peers) != len(set(peers))
+        ):
             raise ValueError("peer symbols must be non-empty, unique, and sorted")
         if item["reference_symbol"] in peers:
             raise ValueError("reference symbol cannot be a peer")
-        product = QuantProductKind(item["product_kind"] + ("_PEER" if item["product_kind"] == "PERSONAL" else "_EFFICIENCY"))
-        if product not in (QuantProductKind.PERSONAL_PEER, QuantProductKind.PENSION_EFFICIENCY):
+        product = QuantProductKind(
+            item["product_kind"]
+            + ("_PEER" if item["product_kind"] == "PERSONAL" else "_EFFICIENCY")
+        )
+        if product not in (
+            QuantProductKind.PERSONAL_PEER,
+            QuantProductKind.PENSION_EFFICIENCY,
+        ):
             raise ValueError("invalid peer namespace")
         market = QuantMarketProfileV1(item["market"])
         identity = (product, market, item["group_id"])
         if identity in identities:
             raise ValueError("duplicate peer group identity")
         identities.add(identity)
-        labels = tuple((key, _immutable_label(key, item[key])) for key in sorted(_OPTIONAL & set(item)))
-        groups.append(PeerGroupV1(item["group_id"], product, market, item["instrument_type"], item["reference_symbol"], tuple(peers), item["provenance_note"], _iso_date(item["last_reviewed"], "last_reviewed"), labels))
-    if [group.group_id for group in groups] != sorted(group.group_id for group in groups):
+        labels = tuple(
+            (key, _immutable_label(key, item[key]))
+            for key in sorted(_OPTIONAL & set(item))
+        )
+        groups.append(
+            PeerGroupV1(
+                item["group_id"],
+                product,
+                market,
+                item["instrument_type"],
+                item["reference_symbol"],
+                tuple(peers),
+                item["provenance_note"],
+                _iso_date(item["last_reviewed"], "last_reviewed"),
+                labels,
+            )
+        )
+    if [group.group_id for group in groups] != sorted(
+        group.group_id for group in groups
+    ):
         raise ValueError("groups must be sorted")
-    return PeerRegistryV1(data["schema"], data["revision"], _iso_date(data["reviewed_at"], "reviewed_at"), tuple(groups))
+    return PeerRegistryV1(
+        data["schema"],
+        data["revision"],
+        _iso_date(data["reviewed_at"], "reviewed_at"),
+        tuple(groups),
+    )

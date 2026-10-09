@@ -1,12 +1,12 @@
 """Closed, immutable values for the Slice D operations kernel."""
 
-from dataclasses import dataclass
-from datetime import date, datetime, timezone
-from enum import Enum
 import hashlib
 import re
+from collections.abc import Mapping
+from dataclasses import dataclass
+from datetime import UTC, date, datetime
+from enum import Enum
 from types import MappingProxyType
-from typing import Mapping
 from urllib.parse import urlsplit
 
 from tokmo.values.material_pack import JobKind, canonical_encode
@@ -33,7 +33,6 @@ class OpsKernelMigrationRequiredError(OpsKernelCorruptError):
     fail-closed OpsKernelCorruptError handling while migration tooling can
     distinguish "migration required" from corruption.
     """
-    pass
 
 
 class OpsKernelConflictError(OpsKernelError):
@@ -111,8 +110,9 @@ class CalendarStartReceiptV1:
         _aware(self.scheduled_for_utc, "scheduled_for_utc")
         if not isinstance(self.market, Market):
             raise ValueError("unknown market")
-        if (type(self.market_local_date) is not date
-                or isinstance(self.market_local_date, datetime)):
+        if type(self.market_local_date) is not date or isinstance(
+            self.market_local_date, datetime
+        ):
             raise ValueError("market local date must be a date")
         if type(self.attempt_ordinal) is not int or not 0 <= self.attempt_ordinal <= 5:
             raise ValueError("invalid attempt ordinal")
@@ -222,6 +222,7 @@ class MaterialKindV1(str, Enum):
 
 # --- YouTube long-term hypothesis tracking (2026-08-16 wiring) -------------
 
+
 class HypothesisState(str, Enum):
     CANDIDATE = "CANDIDATE"
     WATCHING = "WATCHING"
@@ -231,19 +232,30 @@ class HypothesisState(str, Enum):
     ARCHIVED = "ARCHIVED"
 
 
-_HYPOTHESIS_TERMINAL_STATES = frozenset({
-    HypothesisState.RESOLVED, HypothesisState.INVALIDATED,
-    HypothesisState.EXPIRED, HypothesisState.ARCHIVED,
-})
+_HYPOTHESIS_TERMINAL_STATES = frozenset(
+    {
+        HypothesisState.RESOLVED,
+        HypothesisState.INVALIDATED,
+        HypothesisState.EXPIRED,
+        HypothesisState.ARCHIVED,
+    }
+)
 
 _HYPOTHESIS_TRANSITIONS = {
-    HypothesisState.CANDIDATE: frozenset({
-        HypothesisState.WATCHING, HypothesisState.ARCHIVED,
-    }),
-    HypothesisState.WATCHING: frozenset({
-        HypothesisState.RESOLVED, HypothesisState.INVALIDATED,
-        HypothesisState.EXPIRED, HypothesisState.ARCHIVED,
-    }),
+    HypothesisState.CANDIDATE: frozenset(
+        {
+            HypothesisState.WATCHING,
+            HypothesisState.ARCHIVED,
+        }
+    ),
+    HypothesisState.WATCHING: frozenset(
+        {
+            HypothesisState.RESOLVED,
+            HypothesisState.INVALIDATED,
+            HypothesisState.EXPIRED,
+            HypothesisState.ARCHIVED,
+        }
+    ),
 }
 
 
@@ -281,7 +293,10 @@ _UNARTICULATED = "THESIS_UNARTICULATED"
 # The ordinary word 'secret' alone is NOT blocked (legitimate vocabulary);
 # key-shaped tokens (sk-…, ghp_…, AKIA…) are blocked by shape below.
 _FORBIDDEN_STATEMENT_MARKERS = (
-    "/users/", "~/.local", "tokmo", "/hermes",
+    "/users/",
+    "~/.local",
+    "tokmo",
+    "/hermes",
 )
 _SECRET_SHAPES = (
     re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b"),
@@ -314,7 +329,8 @@ class HypothesisIndexKeyV1:
     def __eq__(self, other):
         return (
             isinstance(other, HypothesisIndexKeyV1)
-            and self.kind is other.kind and self.value == other.value
+            and self.kind is other.kind
+            and self.value == other.value
         )
 
     def __hash__(self):
@@ -369,20 +385,38 @@ def _require_token_tuple(value, name, *, minimum, maximum) -> None:
 
 
 _TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
-_FAILURE_REASONS = frozenset({
-    "provider_failure", "parser_failure", "budget_exceeded",
-    "material_unavailable", "policy_failure", "internal_failure",
-})
-_RESOLUTION_REASONS = frozenset({
-    "provider_failure", "provider_failed", "provider_timeout", "operator_checked",
-    "operator_confirmed", "operator_requeue", "checked",
-    "settle_failed_after_delivery", "canary_cap_consumed",
-    "redaction_rejected",
-})
+_FAILURE_REASONS = frozenset(
+    {
+        "provider_failure",
+        "parser_failure",
+        "budget_exceeded",
+        "material_unavailable",
+        "policy_failure",
+        "internal_failure",
+    }
+)
+_RESOLUTION_REASONS = frozenset(
+    {
+        "provider_failure",
+        "provider_failed",
+        "provider_timeout",
+        "operator_checked",
+        "operator_confirmed",
+        "operator_requeue",
+        "checked",
+        "settle_failed_after_delivery",
+        "canary_cap_consumed",
+        "redaction_rejected",
+    }
+)
 
 
 def _aware(value: datetime, name: str) -> None:
-    if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+    if (
+        not isinstance(value, datetime)
+        or value.tzinfo is None
+        or value.utcoffset() is None
+    ):
         raise ValueError(f"{name} must be timezone-aware")
 
 
@@ -390,7 +424,7 @@ def iso(value: datetime | None) -> str | None:
     if value is None:
         return None
     _aware(value, "datetime")
-    return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 def parse_iso(value: str | None) -> datetime | None:
@@ -445,15 +479,21 @@ class AuditCompletionV1:
             raise ValueError("invalid audited count")
 
 
-def canonical_job_ticks(value: Mapping[JobKind, int | None]) -> Mapping[JobKind, int | None]:
+def canonical_job_ticks(
+    value: Mapping[JobKind, int | None],
+) -> Mapping[JobKind, int | None]:
     if not isinstance(value, Mapping):
         raise ValueError("material ticks must be a mapping")
     result = {}
     for job, tick in value.items():
-        if not isinstance(job, JobKind) or (tick is not None and (type(tick) is not int or tick < 0)):
+        if not isinstance(job, JobKind) or (
+            tick is not None and (type(tick) is not int or tick < 0)
+        ):
             raise ValueError("invalid material tick")
         result[job] = tick
-    return MappingProxyType(dict(sorted(result.items(), key=lambda item: item[0].value)))
+    return MappingProxyType(
+        dict(sorted(result.items(), key=lambda item: item[0].value))
+    )
 
 
 @dataclass(frozen=True)
@@ -467,13 +507,19 @@ class CandidateManifestV1:
     created_at: datetime
 
     def __post_init__(self):
-        for value, name in ((self.candidate_id, "candidate_id"), (self.subject_id, "subject_id"),
-                            (self.kind, "kind")):
+        for value, name in (
+            (self.candidate_id, "candidate_id"),
+            (self.subject_id, "subject_id"),
+            (self.kind, "kind"),
+        ):
             require_token(value, name)
-        if (type(self.evidence_refs) is not tuple
-                or any(type(item) is not str or not item for item in self.evidence_refs)):
+        if type(self.evidence_refs) is not tuple or any(
+            type(item) is not str or not item for item in self.evidence_refs
+        ):
             raise ValueError("invalid evidence refs")
-        if not isinstance(self.assignment, CandidateAssignment) or not isinstance(self.state, CandidateState):
+        if not isinstance(self.assignment, CandidateAssignment) or not isinstance(
+            self.state, CandidateState
+        ):
             raise ValueError("invalid candidate enum")
         _aware(self.created_at, "created_at")
 
@@ -508,19 +554,28 @@ class DispositionV1:
 
     def __post_init__(self):
         for value, name in (
-            (self.decision_id, "decision_id"), (self.candidate_id, "candidate_id"),
-            (self.subject_id, "subject_id"), (self.reason_code, "reason_code"),
-            (self.glm_status, "glm_status"), (self.sol_status, "sol_status"),
+            (self.decision_id, "decision_id"),
+            (self.candidate_id, "candidate_id"),
+            (self.subject_id, "subject_id"),
+            (self.reason_code, "reason_code"),
+            (self.glm_status, "glm_status"),
+            (self.sol_status, "sol_status"),
             (self.policy_version, "policy_version"),
         ):
             require_token(value, name)
-        if type(self.tick_id) is not int or self.tick_id < 0 or not isinstance(self.action, DispositionAction):
+        if (
+            type(self.tick_id) is not int
+            or self.tick_id < 0
+            or not isinstance(self.action, DispositionAction)
+        ):
             raise ValueError("invalid disposition")
         if type(self.cited_evidence_ids) is not tuple or any(
             type(item) is not str or not item for item in self.cited_evidence_ids
         ):
             raise ValueError("invalid cited evidence")
-        object.__setattr__(self, "material_ticks", canonical_job_ticks(self.material_ticks))
+        object.__setattr__(
+            self, "material_ticks", canonical_job_ticks(self.material_ticks)
+        )
         _aware(self.decided_at, "decided_at")
 
 
@@ -569,32 +624,57 @@ class AlertOutboxV1:
         if type(self.tick_id) is not int or self.tick_id < 0:
             raise ValueError("invalid alert tick")
         if self.origin is AlertOrigin.DISPOSITION:
-            if self.decision_id is None or self.incident_kind is not None or self.incident_subject is not None:
+            if (
+                self.decision_id is None
+                or self.incident_kind is not None
+                or self.incident_subject is not None
+            ):
                 raise ValueError("invalid disposition origin")
         elif self.origin is AlertOrigin.INCIDENT:
-            if self.decision_id is not None or self.incident_kind is None or self.incident_subject is None:
+            if (
+                self.decision_id is not None
+                or self.incident_kind is None
+                or self.incident_subject is None
+            ):
                 raise ValueError("invalid incident origin")
         elif self.origin is AlertOrigin.NEWS_EVENT:
-            if self.decision_id is not None or self.incident_kind is not None or self.incident_subject is not None:
+            if (
+                self.decision_id is not None
+                or self.incident_kind is not None
+                or self.incident_subject is not None
+            ):
                 raise ValueError("invalid news event origin")
             if not self.dedupe_key.startswith("news:"):
                 raise ValueError("invalid news event dedupe")
         elif self.origin is AlertOrigin.NEWS_OPS:
-            if (self.decision_id is not None or self.incident_kind is not None
-                    or self.incident_subject is not None or self.severity != "OPS_FAILURE"
-                    or self.dedupe_key != "newsops:" + self.subject_id):
+            if (
+                self.decision_id is not None
+                or self.incident_kind is not None
+                or self.incident_subject is not None
+                or self.severity != "OPS_FAILURE"
+                or self.dedupe_key != "newsops:" + self.subject_id
+            ):
                 raise ValueError("invalid news ops origin")
         elif self.origin is AlertOrigin.QUANT_MARKET_CLOSE:
-            if (self.decision_id is not None or self.incident_kind is not None
-                    or self.incident_subject is not None
-                    or not self.dedupe_key.startswith("quant-close:")):
+            if (
+                self.decision_id is not None
+                or self.incident_kind is not None
+                or self.incident_subject is not None
+                or not self.dedupe_key.startswith("quant-close:")
+            ):
                 raise ValueError("invalid quant market close origin")
         else:
             raise ValueError("invalid alert origin")
         if self.channel is AlertChannel.SHADOW:
-            if any(value is not None for value in (
-                self.status, self.attempted_at, self.delivered_at, self.provider_message_id
-            )):
+            if any(
+                value is not None
+                for value in (
+                    self.status,
+                    self.attempted_at,
+                    self.delivered_at,
+                    self.provider_message_id,
+                )
+            ):
                 raise ValueError("shadow delivery fields must be null")
         elif self.channel is AlertChannel.TELEGRAM and self.status is None:
             raise ValueError("telegram status required")
@@ -603,34 +683,74 @@ class AlertOutboxV1:
         _aware(self.created_at, "created_at")
 
     @classmethod
-    def for_disposition(cls, *, alert_id, decision_id, tick_id, subject_id,
-                        channel, severity, body_evidence, created_at):
+    def for_disposition(
+        cls,
+        *,
+        alert_id,
+        decision_id,
+        tick_id,
+        subject_id,
+        channel,
+        severity,
+        body_evidence,
+        created_at,
+    ):
         return cls(
-            alert_id, AlertOrigin.DISPOSITION, decision_id, None, None, None,
-            tick_id, subject_id,
+            alert_id,
+            AlertOrigin.DISPOSITION,
+            decision_id,
+            None,
+            None,
+            None,
+            tick_id,
+            subject_id,
             alert_dedupe_key(AlertOrigin.DISPOSITION, subject_id, severity),
-            channel, severity, body_evidence, created_at,
+            channel,
+            severity,
+            body_evidence,
+            created_at,
             status=AlertStatus.PENDING if channel is AlertChannel.TELEGRAM else None,
         )
 
     @classmethod
-    def for_incident(cls, *, alert_id, key, tick_id, subject_id,
-                     severity, body_evidence, created_at):
+    def for_incident(
+        cls, *, alert_id, key, tick_id, subject_id, severity, body_evidence, created_at
+    ):
         identity = f"{key.kind}\0{key.subject}"
         return cls(
-            alert_id, AlertOrigin.INCIDENT, None, key.kind, key.subject, None,
-            tick_id, subject_id,
+            alert_id,
+            AlertOrigin.INCIDENT,
+            None,
+            key.kind,
+            key.subject,
+            None,
+            tick_id,
+            subject_id,
             alert_dedupe_key(AlertOrigin.INCIDENT, identity, severity),
-            AlertChannel.SHADOW, severity, body_evidence, created_at,
+            AlertChannel.SHADOW,
+            severity,
+            body_evidence,
+            created_at,
         )
 
     @classmethod
-    def for_quant_market_close(cls, *, alert_id, tick_id, subject_id,
-                               body_evidence, created_at):
+    def for_quant_market_close(
+        cls, *, alert_id, tick_id, subject_id, body_evidence, created_at
+    ):
         return cls(
-            alert_id, AlertOrigin.QUANT_MARKET_CLOSE, None, None, None, None,
-            tick_id, subject_id, "quant-close:" + subject_id,
-            AlertChannel.SHADOW, "QUANT_CLOSE", body_evidence, created_at,
+            alert_id,
+            AlertOrigin.QUANT_MARKET_CLOSE,
+            None,
+            None,
+            None,
+            None,
+            tick_id,
+            subject_id,
+            "quant-close:" + subject_id,
+            AlertChannel.SHADOW,
+            "QUANT_CLOSE",
+            body_evidence,
+            created_at,
         )
 
 
@@ -672,11 +792,15 @@ class DeferredCandidateV1:
             raise ValueError("invalid evidence refs")
         for item in self.evidence_refs:
             require_token(item, "evidence_ref")
-        object.__setattr__(self, "material_ticks", canonical_job_ticks(self.material_ticks))
-        if (type(self.first_seen_tick) is not int
-                or type(self.last_attempt_tick) is not int
-                or not 0 <= self.first_seen_tick <= 2_147_483_647
-                or not self.first_seen_tick <= self.last_attempt_tick <= 2_147_483_647):
+        object.__setattr__(
+            self, "material_ticks", canonical_job_ticks(self.material_ticks)
+        )
+        if (
+            type(self.first_seen_tick) is not int
+            or type(self.last_attempt_tick) is not int
+            or not 0 <= self.first_seen_tick <= 2_147_483_647
+            or not self.first_seen_tick <= self.last_attempt_tick <= 2_147_483_647
+        ):
             raise ValueError("invalid deferred tick")
         if type(self.attempts) is not int or not 1 <= self.attempts <= 8640:
             raise ValueError("invalid attempts")
@@ -688,12 +812,20 @@ class DeferredCandidateV1:
         _aware(self.updated_at, "updated_at")
 
 
-_DEFER_REASONS = frozenset({
-    "market_closed_defer", "model_unavailable_defer", "capacity_defer",
-    "glm_failure_defer", "sol_failure_defer", "next_session_defer",
-    "snapshot_incomplete_defer", "evidence_stale_defer",
-    "proposal_invalid_defer", "carryover_defer",
-})
+_DEFER_REASONS = frozenset(
+    {
+        "market_closed_defer",
+        "model_unavailable_defer",
+        "capacity_defer",
+        "glm_failure_defer",
+        "sol_failure_defer",
+        "next_session_defer",
+        "snapshot_incomplete_defer",
+        "evidence_stale_defer",
+        "proposal_invalid_defer",
+        "carryover_defer",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -716,17 +848,21 @@ class DeferredAttemptV1:
         if not isinstance(self.market, Market):
             raise ValueError("invalid market")
         require_token(self.candidate_id, "candidate_id")
-        if (type(self.first_seen_tick) is not int
-                or type(self.attempt_tick) is not int
-                or type(self.candidate_tick) is not int
-                or not 0 <= self.first_seen_tick <= self.attempt_tick <= 2_147_483_647
-                or not 0 <= self.candidate_tick <= self.attempt_tick):
+        if (
+            type(self.first_seen_tick) is not int
+            or type(self.attempt_tick) is not int
+            or type(self.candidate_tick) is not int
+            or not 0 <= self.first_seen_tick <= self.attempt_tick <= 2_147_483_647
+            or not 0 <= self.candidate_tick <= self.attempt_tick
+        ):
             raise ValueError("invalid deferred tick")
         if type(self.evidence_refs) is not tuple:
             raise ValueError("invalid evidence refs")
         for item in self.evidence_refs:
             require_token(item, "evidence_ref")
-        object.__setattr__(self, "material_ticks", canonical_job_ticks(self.material_ticks))
+        object.__setattr__(
+            self, "material_ticks", canonical_job_ticks(self.material_ticks)
+        )
         if self.reason_code not in _DEFER_REASONS:
             raise ValueError("invalid defer reason")
         if not isinstance(self.assignment, CandidateAssignment):
@@ -761,11 +897,20 @@ class RequestEndpointV1:
         if any(ord(char) < 32 or ord(char) == 127 for char in host + path):
             raise ValueError("control character")
         parsed = urlsplit("//" + host)
-        if (not host or parsed.username is not None or parsed.password is not None
-                or parsed.hostname != host or "@" in host):
+        if (
+            not host
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.hostname != host
+            or "@" in host
+        ):
             raise ValueError("invalid host")
-        if (not path.startswith("/") or "?" in path or "#" in path
-                or any(part == ".." for part in path.split("/"))):
+        if (
+            not path.startswith("/")
+            or "?" in path
+            or "#" in path
+            or any(part == ".." for part in path.split("/"))
+        ):
             raise ValueError("invalid path")
         object.__setattr__(self, "method", method)
         object.__setattr__(self, "host", host)
@@ -794,27 +939,54 @@ class FeedbackInboundV1:
     event_kind: FeedbackEventKind
 
     @classmethod
-    def build(cls, feedback_id, provider, provider_update_id, provider_message_ref,
-              sender_ref, thread_ref, received_at, raw_text, context_ref,
-              capture_source, event_kind):
+    def build(
+        cls,
+        feedback_id,
+        provider,
+        provider_update_id,
+        provider_message_ref,
+        sender_ref,
+        thread_ref,
+        received_at,
+        raw_text,
+        context_ref,
+        capture_source,
+        event_kind,
+    ):
         if type(raw_text) is not str:
             raise ValueError("raw text must be string")
-        digest = hashlib.sha256(canonical_encode({
-            "raw_text": raw_text, "context_ref": context_ref,
-            "provider_message_ref": provider_message_ref,
-        })).hexdigest()
+        digest = hashlib.sha256(
+            canonical_encode(
+                {
+                    "raw_text": raw_text,
+                    "context_ref": context_ref,
+                    "provider_message_ref": provider_message_ref,
+                }
+            )
+        ).hexdigest()
         return cls(
-            feedback_id, provider, provider_update_id, provider_message_ref,
-            sender_ref, thread_ref, received_at, raw_text, context_ref,
-            capture_source, digest, event_kind,
+            feedback_id,
+            provider,
+            provider_update_id,
+            provider_message_ref,
+            sender_ref,
+            thread_ref,
+            received_at,
+            raw_text,
+            context_ref,
+            capture_source,
+            digest,
+            event_kind,
         )
 
     def __post_init__(self):
         for value, name in (
-            (self.feedback_id, "feedback_id"), (self.provider, "provider"),
+            (self.feedback_id, "feedback_id"),
+            (self.provider, "provider"),
             (self.provider_update_id, "provider_update_id"),
             (self.provider_message_ref, "provider_message_ref"),
-            (self.sender_ref, "sender_ref"), (self.capture_source, "capture_source"),
+            (self.sender_ref, "sender_ref"),
+            (self.capture_source, "capture_source"),
         ):
             require_token(value, name)
         if not re.fullmatch(r"[0-9a-f]{64}", self.raw_hash):
@@ -832,23 +1004,30 @@ def validate_failure_reason(reason: str) -> None:
 def validate_resolution_reason(reason: str) -> None:
     # NEWS transport diagnostics deliberately contain only a class and an
     # optional HTTP status. Raw exception URLs/bodies may contain credentials.
-    if isinstance(reason,str) and re.fullmatch(r'provider_failure:[A-Za-z_][A-Za-z0-9_]{0,47}(?::[1-5][0-9]{2})?',reason):
+    if isinstance(reason, str) and re.fullmatch(
+        r"provider_failure:[A-Za-z_][A-Za-z0-9_]{0,47}(?::[1-5][0-9]{2})?", reason
+    ):
         return
     if reason not in _RESOLUTION_REASONS:
         raise ValueError("invalid resolution reason")
 
 
-def hypothesis_identity_digest(statement: str, trigger_kind: TriggerKind,
-                               trigger_expression: str) -> str:
+def hypothesis_identity_digest(
+    statement: str, trigger_kind: TriggerKind, trigger_expression: str
+) -> str:
     """Deterministic same-hypothesis identity over the tracking core."""
-    return hashlib.sha256(canonical_encode({
-        "v": 1,
-        "domain": "tokmo-v3:youtube-hypothesis-identity:v1",
-        "origin": _HYPOTHESIS_ORIGIN,
-        "statement": statement.strip(),
-        "trigger_kind": trigger_kind.value,
-        "trigger_expression": trigger_expression.strip(),
-    })).hexdigest()
+    return hashlib.sha256(
+        canonical_encode(
+            {
+                "v": 1,
+                "domain": "tokmo-v3:youtube-hypothesis-identity:v1",
+                "origin": _HYPOTHESIS_ORIGIN,
+                "statement": statement.strip(),
+                "trigger_kind": trigger_kind.value,
+                "trigger_expression": trigger_expression.strip(),
+            }
+        )
+    ).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -871,34 +1050,48 @@ class TrackingCandidateV1:
 
     def __post_init__(self):
         object.__setattr__(
-            self, "statement", _require_statement(self.statement),
+            self,
+            "statement",
+            _require_statement(self.statement),
         )
         if not isinstance(self.trigger_kind, TriggerKind):
             raise ValueError("invalid trigger kind")
-        if (type(self.trigger_expression) is not str
-                or not self.trigger_expression.strip()
-                or len(self.trigger_expression.strip()) > 200):
+        if (
+            type(self.trigger_expression) is not str
+            or not self.trigger_expression.strip()
+            or len(self.trigger_expression.strip()) > 200
+        ):
             raise ValueError("invalid trigger expression")
-        _require_token_tuple(self.supporting_evidence, "supporting evidence",
-                             minimum=1, maximum=8)
-        _require_token_tuple(self.counter_evidence, "counter evidence",
-                             minimum=0, maximum=8)
-        _require_token_tuple(self.invalidation_conditions,
-                             "invalidation conditions", minimum=1, maximum=8)
+        _require_token_tuple(
+            self.supporting_evidence, "supporting evidence", minimum=1, maximum=8
+        )
+        _require_token_tuple(
+            self.counter_evidence, "counter evidence", minimum=0, maximum=8
+        )
+        _require_token_tuple(
+            self.invalidation_conditions,
+            "invalidation conditions",
+            minimum=1,
+            maximum=8,
+        )
         if self.next_check_at is not None:
             _aware(self.next_check_at, "next_check_at")
         if self.portfolio_touch not in _PORTFOLIO_TOUCH:
             raise ValueError("invalid portfolio touch")
         object.__setattr__(
-            self, "index_keys", canonical_index_keys(self.index_keys),
+            self,
+            "index_keys",
+            canonical_index_keys(self.index_keys),
         )
         if not 1 <= len(self.index_keys) <= 8:
             raise ValueError("invalid index keys")
         require_token(self.source_ref, "source_ref")
-        if (type(self.revision) is not str
-                or not 1 <= len(self.revision.strip()) <= 128
-                or self.revision != self.revision.strip()
-                or any(ch in self.revision for ch in " \t\n\r")):
+        if (
+            type(self.revision) is not str
+            or not 1 <= len(self.revision.strip()) <= 128
+            or self.revision != self.revision.strip()
+            or any(ch in self.revision for ch in " \t\n\r")
+        ):
             raise ValueError("invalid revision")
         if not re.fullmatch(r"[0-9a-f]{64}", self.payload_digest):
             raise ValueError("invalid payload digest")
@@ -907,7 +1100,9 @@ class TrackingCandidateV1:
     @property
     def identity_digest(self) -> str:
         return hypothesis_identity_digest(
-            self.statement, self.trigger_kind, self.trigger_expression,
+            self.statement,
+            self.trigger_kind,
+            self.trigger_expression,
         )
 
 
@@ -932,26 +1127,38 @@ class HypothesisV1:
     updated_at: datetime
 
     def __post_init__(self):
-        if not (type(self.hypothesis_id) is str
-                and self.hypothesis_id.startswith("hypothesis:")
-                and _HYPOTHESIS_ID_RE.fullmatch(self.hypothesis_id)):
+        if not (
+            type(self.hypothesis_id) is str
+            and self.hypothesis_id.startswith("hypothesis:")
+            and _HYPOTHESIS_ID_RE.fullmatch(self.hypothesis_id)
+        ):
             raise ValueError("invalid hypothesis id")
         if not isinstance(self.state, HypothesisState):
             raise ValueError("invalid hypothesis state")
         object.__setattr__(
-            self, "statement", _require_statement(self.statement),
+            self,
+            "statement",
+            _require_statement(self.statement),
         )
         if not isinstance(self.trigger_kind, TriggerKind):
             raise ValueError("invalid trigger kind")
-        if (type(self.trigger_expression) is not str
-                or not self.trigger_expression.strip()):
+        if (
+            type(self.trigger_expression) is not str
+            or not self.trigger_expression.strip()
+        ):
             raise ValueError("invalid trigger expression")
-        _require_token_tuple(self.supporting_evidence, "supporting evidence",
-                             minimum=1, maximum=8)
-        _require_token_tuple(self.counter_evidence, "counter evidence",
-                             minimum=0, maximum=8)
-        _require_token_tuple(self.invalidation_conditions,
-                             "invalidation conditions", minimum=1, maximum=8)
+        _require_token_tuple(
+            self.supporting_evidence, "supporting evidence", minimum=1, maximum=8
+        )
+        _require_token_tuple(
+            self.counter_evidence, "counter evidence", minimum=0, maximum=8
+        )
+        _require_token_tuple(
+            self.invalidation_conditions,
+            "invalidation conditions",
+            minimum=1,
+            maximum=8,
+        )
         if self.next_check_at is not None:
             _aware(self.next_check_at, "next_check_at")
         if self.portfolio_touch not in _PORTFOLIO_TOUCH:
@@ -987,24 +1194,31 @@ class HypothesisSightingV1:
         if self.source_kind not in {"REPORT", "TRANSCRIPT", "MATERIAL"}:
             raise ValueError("invalid source kind")
         require_token(self.source_ref, "source_ref")
-        if (type(self.revision) is not str
-                or not 1 <= len(self.revision.strip()) <= 128
-                or self.revision != self.revision.strip()
-                or any(ch in self.revision for ch in " \t\n\r")):
+        if (
+            type(self.revision) is not str
+            or not 1 <= len(self.revision.strip()) <= 128
+            or self.revision != self.revision.strip()
+            or any(ch in self.revision for ch in " \t\n\r")
+        ):
             raise ValueError("invalid revision")
         if not re.fullmatch(r"[0-9a-f]{64}", self.payload_digest):
             raise ValueError("invalid payload digest")
-        _require_token_tuple(self.evidence_delta, "evidence delta",
-                             minimum=0, maximum=8)
+        _require_token_tuple(
+            self.evidence_delta, "evidence delta", minimum=0, maximum=8
+        )
         _aware(self.observed_at, "observed_at")
-        computed = hashlib.sha256(canonical_encode({
-            "v": 1,
-            "domain": "tokmo-v3:youtube-hypothesis-sighting:v1",
-            "hypothesis_id": self.hypothesis_id,
-            "source_ref": self.source_ref,
-            "revision": self.revision,
-            "payload_digest": self.payload_digest,
-        })).hexdigest()[:32]
+        computed = hashlib.sha256(
+            canonical_encode(
+                {
+                    "v": 1,
+                    "domain": "tokmo-v3:youtube-hypothesis-sighting:v1",
+                    "hypothesis_id": self.hypothesis_id,
+                    "source_ref": self.source_ref,
+                    "revision": self.revision,
+                    "payload_digest": self.payload_digest,
+                }
+            )
+        ).hexdigest()[:32]
         if self.sighting_id and self.sighting_id != computed:
             raise ValueError("sighting id mismatch")
         object.__setattr__(self, "sighting_id", computed)
@@ -1029,7 +1243,9 @@ class RecallCandidateV1:
         if not isinstance(self.state, HypothesisState):
             raise ValueError("invalid state")
         object.__setattr__(
-            self, "matched_keys", canonical_index_keys(self.matched_keys),
+            self,
+            "matched_keys",
+            canonical_index_keys(self.matched_keys),
         )
         if not self.matched_keys:
             raise ValueError("recall requires at least one matched key")
@@ -1062,7 +1278,9 @@ class ShadowRecallRecordV1:
         ):
             raise ValueError("invalid material delta ids")
         object.__setattr__(
-            self, "matched_keys", canonical_index_keys(self.matched_keys),
+            self,
+            "matched_keys",
+            canonical_index_keys(self.matched_keys),
         )
         if not self.matched_keys:
             raise ValueError("shadow record requires matched keys")
@@ -1078,15 +1296,19 @@ class ShadowRecallRecordV1:
             if marker in lowered:
                 raise ValueError("payload contains private path marker")
         _aware(self.recorded_at, "recorded_at")
-        key_material = hashlib.sha256(canonical_encode({
-            "v": 1,
-            "domain": "tokmo-v3:youtube-shadow-recall:v1",
-            "hypothesis_id": self.hypothesis_id,
-            "material_delta_ids": list(self.material_delta_ids),
-            "matched_keys": [
-                [key.kind.value, key.value] for key in self.matched_keys
-            ],
-        })).hexdigest()[:32]
+        key_material = hashlib.sha256(
+            canonical_encode(
+                {
+                    "v": 1,
+                    "domain": "tokmo-v3:youtube-shadow-recall:v1",
+                    "hypothesis_id": self.hypothesis_id,
+                    "material_delta_ids": list(self.material_delta_ids),
+                    "matched_keys": [
+                        [key.kind.value, key.value] for key in self.matched_keys
+                    ],
+                }
+            )
+        ).hexdigest()[:32]
         if self.shadow_id and self.shadow_id != key_material:
             raise ValueError("shadow id mismatch")
         object.__setattr__(self, "shadow_id", key_material)
@@ -1112,24 +1334,35 @@ class HypothesisLifecycleV1:
             raise ValueError("invalid to state")
         require_token(self.reason_token, "reason_token")
         _aware(self.transitioned_at, "transitioned_at")
-        computed = hashlib.sha256(canonical_encode({
-            "v": 1,
-            "domain": "tokmo-v3:youtube-hypothesis-lifecycle:v1",
-            "hypothesis_id": self.hypothesis_id,
-            "from_state": self.from_state.value,
-            "to_state": self.to_state.value,
-            "reason_token": self.reason_token,
-        })).hexdigest()[:32]
+        computed = hashlib.sha256(
+            canonical_encode(
+                {
+                    "v": 1,
+                    "domain": "tokmo-v3:youtube-hypothesis-lifecycle:v1",
+                    "hypothesis_id": self.hypothesis_id,
+                    "from_state": self.from_state.value,
+                    "to_state": self.to_state.value,
+                    "reason_token": self.reason_token,
+                }
+            )
+        ).hexdigest()[:32]
         if self.lifecycle_id and self.lifecycle_id != computed:
             raise ValueError("lifecycle id mismatch")
         object.__setattr__(self, "lifecycle_id", computed)
 
 
-_CANDIDATE_FAILURE_KINDS = frozenset({
-    "missing_fields", "bad_field", "unarticulated_statement",
-    "bad_statement", "bad_trigger", "bad_keys", "duplicate_field",
-    "unterminated_block",
-})
+_CANDIDATE_FAILURE_KINDS = frozenset(
+    {
+        "missing_fields",
+        "bad_field",
+        "unarticulated_statement",
+        "bad_statement",
+        "bad_trigger",
+        "bad_keys",
+        "duplicate_field",
+        "unterminated_block",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -1150,10 +1383,12 @@ class CandidateFailureV1:
 
     def __post_init__(self):
         require_token(self.source_ref, "source_ref")
-        if (type(self.revision) is not str
-                or not 1 <= len(self.revision.strip()) <= 128
-                or self.revision != self.revision.strip()
-                or any(ch in self.revision for ch in " \t\n\r")):
+        if (
+            type(self.revision) is not str
+            or not 1 <= len(self.revision.strip()) <= 128
+            or self.revision != self.revision.strip()
+            or any(ch in self.revision for ch in " \t\n\r")
+        ):
             raise ValueError("invalid revision")
         if self.error_kind not in _CANDIDATE_FAILURE_KINDS:
             raise ValueError("invalid failure kind")
@@ -1162,14 +1397,18 @@ class CandidateFailureV1:
         _aware(self.recorded_at, "recorded_at")
         if self.detail_token is not None:
             require_token(self.detail_token, "detail_token")
-        computed = hashlib.sha256(canonical_encode({
-            "v": 1,
-            "domain": "tokmo-v3:youtube-candidate-failure:v1",
-            "source_ref": self.source_ref,
-            "revision": self.revision,
-            "block_digest": self.block_digest,
-            "error_kind": self.error_kind,
-        })).hexdigest()[:32]
+        computed = hashlib.sha256(
+            canonical_encode(
+                {
+                    "v": 1,
+                    "domain": "tokmo-v3:youtube-candidate-failure:v1",
+                    "source_ref": self.source_ref,
+                    "revision": self.revision,
+                    "block_digest": self.block_digest,
+                    "error_kind": self.error_kind,
+                }
+            )
+        ).hexdigest()[:32]
         if self.failure_id and self.failure_id != computed:
             raise ValueError("failure id mismatch")
         object.__setattr__(self, "failure_id", computed)
@@ -1177,12 +1416,23 @@ class CandidateFailureV1:
 
 # --- YouTube semantic dedupe + weekly review (2026-08-16 wiring) -----------
 
-_SEMANTIC_HORIZONS = frozenset({
-    "none", "short", "medium", "long", "indefinite",
-})
-_SEMANTIC_CONFLICT_FIELDS = frozenset({
-    "trigger", "invalidation", "horizon", "touch",
-})
+_SEMANTIC_HORIZONS = frozenset(
+    {
+        "none",
+        "short",
+        "medium",
+        "long",
+        "indefinite",
+    }
+)
+_SEMANTIC_CONFLICT_FIELDS = frozenset(
+    {
+        "trigger",
+        "invalidation",
+        "horizon",
+        "touch",
+    }
+)
 # Overlap bands over the union of entity/metric/effect/source-event keys.
 _SEMANTIC_HIGH_OVERLAP = 0.5
 
@@ -1284,9 +1534,17 @@ class SemanticProfileV1:
         )
 
     @classmethod
-    def _build(cls, *, index_keys, trigger_kind, trigger_expression,
-               invalidation_conditions, next_check_at, observed_at,
-               portfolio_touch):
+    def _build(
+        cls,
+        *,
+        index_keys,
+        trigger_kind,
+        trigger_expression,
+        invalidation_conditions,
+        next_check_at,
+        observed_at,
+        portfolio_touch,
+    ):
         entities, metrics, effects, source_events = set(), set(), set(), set()
         for item in index_keys:
             if not isinstance(item, HypothesisIndexKeyV1):
@@ -1311,10 +1569,7 @@ class SemanticProfileV1:
 
     def key_overlap(self, other) -> float:
         own = self.entities | self.metrics | self.effects | self.source_events
-        theirs = (
-            other.entities | other.metrics | other.effects
-            | other.source_events
-        )
+        theirs = other.entities | other.metrics | other.effects | other.source_events
         if not own and not theirs:
             return 0.0
         return len(own & theirs) / len(own | theirs)
@@ -1356,9 +1611,14 @@ class SemanticDecisionV1:
             raise ValueError("invalid hint flag")
 
 
-_MERGE_REVIEW_STATUSES = frozenset({
-    "OPEN", "APPROVED", "REJECTED", "SUPERSEDED",
-})
+_MERGE_REVIEW_STATUSES = frozenset(
+    {
+        "OPEN",
+        "APPROVED",
+        "REJECTED",
+        "SUPERSEDED",
+    }
+)
 _WEEK_IDENTITY_RE = re.compile(r"^[0-9]{4}-W[0-9]{2}$")
 
 
@@ -1391,13 +1651,17 @@ class HypothesisRelationV1:
         if self.origin not in {"ADMISSION", "WEEKLY_REVIEW"}:
             raise ValueError("invalid origin")
         _aware(self.created_at, "created_at")
-        computed = hashlib.sha256(canonical_encode({
-            "v": 1,
-            "domain": "tokmo-v3:youtube-hypothesis-relation:v1",
-            "a": self.hypothesis_a,
-            "b": self.hypothesis_b,
-            "kind": self.relation_kind,
-        })).hexdigest()[:32]
+        computed = hashlib.sha256(
+            canonical_encode(
+                {
+                    "v": 1,
+                    "domain": "tokmo-v3:youtube-hypothesis-relation:v1",
+                    "a": self.hypothesis_a,
+                    "b": self.hypothesis_b,
+                    "kind": self.relation_kind,
+                }
+            )
+        ).hexdigest()[:32]
         if self.relation_id and self.relation_id != computed:
             raise ValueError("relation id mismatch")
         object.__setattr__(self, "relation_id", computed)
@@ -1431,17 +1695,21 @@ class MergeReviewV1:
         # two resolution events of the SAME status for the same pair (e.g.
         # rejected this month, re-queued and rejected again later) are
         # distinct durable events and may never overwrite each other.
-        computed = hashlib.sha256(canonical_encode({
-            "v": 1,
-            "domain": "tokmo-v3:youtube-merge-review-event:v1",
-            "a": self.hypothesis_a,
-            "b": self.hypothesis_b,
-            "status": self.status,
-            "origin": self.origin,
-            "queued_at": self.created_at.astimezone(
-                timezone.utc
-            ).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
-        })).hexdigest()[:32]
+        computed = hashlib.sha256(
+            canonical_encode(
+                {
+                    "v": 1,
+                    "domain": "tokmo-v3:youtube-merge-review-event:v1",
+                    "a": self.hypothesis_a,
+                    "b": self.hypothesis_b,
+                    "status": self.status,
+                    "origin": self.origin,
+                    "queued_at": self.created_at.astimezone(UTC).strftime(
+                        "%Y-%m-%dT%H:%M:%S.%fZ"
+                    ),
+                }
+            )
+        ).hexdigest()[:32]
         if self.review_id and self.review_id != computed:
             raise ValueError("review id mismatch")
         object.__setattr__(self, "review_id", computed)
@@ -1466,8 +1734,13 @@ class WeeklyReviewRunV1:
             raise ValueError("invalid week identity")
         if self.status not in {"RESERVED", "COMPLETE"}:
             raise ValueError("invalid run status")
-        for name in ("open_count", "pairs_scanned", "new_related_edges",
-                     "new_merge_reviews", "same_hypothesis_findings"):
+        for name in (
+            "open_count",
+            "pairs_scanned",
+            "new_related_edges",
+            "new_merge_reviews",
+            "same_hypothesis_findings",
+        ):
             if type(getattr(self, name)) is not int or getattr(self, name) < 0:
                 raise ValueError(f"invalid {name}")
         _aware(self.reserved_at, "reserved_at")
@@ -1491,9 +1764,7 @@ class WeeklyReviewPairV1:
             raise ValueError("invalid week identity")
         if self.hypothesis_a >= self.hypothesis_b:
             raise ValueError("pair must be ordered a<b")
-        if self.classification not in {
-            item.value for item in SemanticClassification
-        }:
+        if self.classification not in {item.value for item in SemanticClassification}:
             raise ValueError("invalid classification")
         require_token(self.reason_code, "reason_code")
         _aware(self.adjudicated_at, "adjudicated_at")
@@ -1515,9 +1786,7 @@ class AdmissionDecisionV1:
     def __post_init__(self):
         if not re.fullmatch(r"[0-9a-f]{64}", self.candidate_digest):
             raise ValueError("invalid candidate digest")
-        if self.classification not in {
-            item.value for item in SemanticClassification
-        }:
+        if self.classification not in {item.value for item in SemanticClassification}:
             raise ValueError("invalid classification")
         require_token(self.reason_code, "reason_code")
         if type(self.conflicts) is not tuple or any(
@@ -1525,13 +1794,17 @@ class AdmissionDecisionV1:
         ):
             raise ValueError("invalid conflicts")
         _aware(self.decided_at, "decided_at")
-        computed = hashlib.sha256(canonical_encode({
-            "v": 1,
-            "domain": "tokmo-v3:youtube-admission-decision:v1",
-            "candidate_digest": self.candidate_digest,
-            "matched": self.matched_hypothesis_id or "",
-            "classification": self.classification,
-        })).hexdigest()[:32]
+        computed = hashlib.sha256(
+            canonical_encode(
+                {
+                    "v": 1,
+                    "domain": "tokmo-v3:youtube-admission-decision:v1",
+                    "candidate_digest": self.candidate_digest,
+                    "matched": self.matched_hypothesis_id or "",
+                    "classification": self.classification,
+                }
+            )
+        ).hexdigest()[:32]
         if self.decision_id and self.decision_id != computed:
             raise ValueError("decision id mismatch")
         object.__setattr__(self, "decision_id", computed)

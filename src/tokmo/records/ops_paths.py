@@ -22,11 +22,19 @@ def receipt_path(home: Path, job: JobKind) -> Path:
 
 
 def calendar_cache_path(home: Path) -> Path:
-    return (Path(home) / ".local" / "share" / "tokmo-v3").resolve() / "toss" / "market_calendar_cache.json"
+    return (
+        (Path(home) / ".local" / "share" / "tokmo-v3").resolve()
+        / "toss"
+        / "market_calendar_cache.json"
+    )
 
 
 def current_holdings_path(home: Path) -> Path:
-    return (Path(home) / ".local" / "share" / "tokmo-v3").resolve() / "toss" / "current_holdings.json"
+    return (
+        (Path(home) / ".local" / "share" / "tokmo-v3").resolve()
+        / "toss"
+        / "current_holdings.json"
+    )
 
 
 def lock_path(home: Path, job: JobKind) -> Path:

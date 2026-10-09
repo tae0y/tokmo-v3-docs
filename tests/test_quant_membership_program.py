@@ -1,13 +1,15 @@
 from dataclasses import replace
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from hashlib import sha256
 
 import pytest
 
 from tokmo.facts.quant_membership import (
-    parse_nasdaqlisted, parse_otherlisted, parse_sec_issuer, parse_sec_registry,
+    parse_nasdaqlisted,
+    parse_otherlisted,
+    parse_sec_issuer,
+    parse_sec_registry,
 )
-
 from tokmo.programs.quant_membership import (
     assemble_us_personal_membership_material,
     describe_us_personal_membership_cohort,
@@ -32,8 +34,7 @@ from tokmo.values.official_membership_observation import (
     SecurityClassV1,
 )
 
-
-AS_OF = datetime(2026, 8, 13, 1, 30, tzinfo=timezone.utc)
+AS_OF = datetime(2026, 8, 13, 1, 30, tzinfo=UTC)
 
 
 def holdings(symbols, *, captured_at=AS_OF, markets=None, scopes=None):
@@ -89,7 +90,13 @@ def listing(
     )
 
 
-def registry(symbol, *, exchange="NASDAQ", cik="0000320193", observed_at=AS_OF - timedelta(minutes=4)):
+def registry(
+    symbol,
+    *,
+    exchange="NASDAQ",
+    cik="0000320193",
+    observed_at=AS_OF - timedelta(minutes=4),
+):
     return SecRegistryObservationV1(
         symbol=symbol,
         cik=cik,
@@ -201,19 +208,60 @@ def test_variable_exact_cohort_cardinality_and_deduped_personal_scope_succeed():
 
 
 def test_real_parsers_feed_mixed_nasdaq_nyse_assembler_with_canonical_exchange_tokens():
-    from pathlib import Path
     import json
+    from pathlib import Path
+
     fixtures = Path(__file__).parent / "fixtures" / "quant_membership"
     parsed_listings = (
-        *parse_nasdaqlisted((fixtures / "nasdaqlisted_sample.txt").read_bytes(), observed_at=AS_OF - timedelta(minutes=5), expected_symbols=("AAPL", "IBM")),
-        *parse_otherlisted((fixtures / "otherlisted_sample.txt").read_bytes(), observed_at=AS_OF - timedelta(minutes=5), expected_symbols=("AAPL", "IBM")),
+        *parse_nasdaqlisted(
+            (fixtures / "nasdaqlisted_sample.txt").read_bytes(),
+            observed_at=AS_OF - timedelta(minutes=5),
+            expected_symbols=("AAPL", "IBM"),
+        ),
+        *parse_otherlisted(
+            (fixtures / "otherlisted_sample.txt").read_bytes(),
+            observed_at=AS_OF - timedelta(minutes=5),
+            expected_symbols=("AAPL", "IBM"),
+        ),
     )
-    registry_body = {"fields": ["cik", "name", "ticker", "exchange"], "data": [[320193, "Apple", "AAPL", "Nasdaq"], [51143, "IBM", "IBM", "NYSE"]]}
-    parsed_registry = parse_sec_registry(json.dumps(registry_body).encode(), observed_at=AS_OF - timedelta(minutes=4), expected_symbols=("AAPL", "IBM"))
-    issuers = tuple(parse_sec_issuer(json.dumps({"cik": cik, "sic": "3571", "tickers": [symbol], "exchanges": [exchange]}).encode(), observed_at=AS_OF - timedelta(minutes=3), expected_symbol=symbol, expected_cik=normalized, expected_exchange=canonical) for symbol, cik, normalized, exchange, canonical in (("AAPL", 320193, "0000320193", "Nasdaq", "NASDAQ"), ("IBM", 51143, "0000051143", "NYSE", "NYSE")))
+    registry_body = {
+        "fields": ["cik", "name", "ticker", "exchange"],
+        "data": [[320193, "Apple", "AAPL", "Nasdaq"], [51143, "IBM", "IBM", "NYSE"]],
+    }
+    parsed_registry = parse_sec_registry(
+        json.dumps(registry_body).encode(),
+        observed_at=AS_OF - timedelta(minutes=4),
+        expected_symbols=("AAPL", "IBM"),
+    )
+    issuers = tuple(
+        parse_sec_issuer(
+            json.dumps(
+                {
+                    "cik": cik,
+                    "sic": "3571",
+                    "tickers": [symbol],
+                    "exchanges": [exchange],
+                }
+            ).encode(),
+            observed_at=AS_OF - timedelta(minutes=3),
+            expected_symbol=symbol,
+            expected_cik=normalized,
+            expected_exchange=canonical,
+        )
+        for symbol, cik, normalized, exchange, canonical in (
+            ("AAPL", 320193, "0000320193", "Nasdaq", "NASDAQ"),
+            ("IBM", 51143, "0000051143", "NYSE", "NYSE"),
+        )
+    )
     result = assemble_us_personal_membership_material(
-        holdings=holdings(("AAPL", "IBM")), evaluation_as_of=AS_OF,
-        acquisition=acquisition(("AAPL", "IBM"), listings=parsed_listings, registry_rows=parsed_registry, issuer_rows=issuers),
+        holdings=holdings(("AAPL", "IBM")),
+        evaluation_as_of=AS_OF,
+        acquisition=acquisition(
+            ("AAPL", "IBM"),
+            listings=parsed_listings,
+            registry_rows=parsed_registry,
+            issuer_rows=issuers,
+        ),
     )
     assert tuple(item.symbol for item in result.materials) == ("AAPL", "IBM")
     assert result.unavailable_reasons == ()
@@ -250,7 +298,9 @@ def test_future_stale_skew_and_conflicting_market_holdings_fail_closed():
         acquisition=acquisition(
             ("AAPL",),
             listings=(listing("AAPL", observed_at=AS_OF - timedelta(minutes=30)),),
-            registry_rows=(registry("AAPL", observed_at=AS_OF - timedelta(minutes=25)),),
+            registry_rows=(
+                registry("AAPL", observed_at=AS_OF - timedelta(minutes=25)),
+            ),
             issuer_rows=(issuer("AAPL", observed_at=AS_OF - timedelta(minutes=20)),),
         ),
     )
@@ -401,15 +451,21 @@ def test_duplicate_and_extra_supplied_rows_fail_whole_cohort():
 
 
 def test_observation_market_date_must_match_evaluation_market_date():
-    boundary_as_of = datetime(2026, 8, 13, 4, 10, tzinfo=timezone.utc)
+    boundary_as_of = datetime(2026, 8, 13, 4, 10, tzinfo=UTC)
     result = assemble_us_personal_membership_material(
         holdings=holdings(("AAPL",), captured_at=boundary_as_of),
         evaluation_as_of=boundary_as_of,
         acquisition=acquisition(
             ("AAPL",),
-            listings=(listing("AAPL", observed_at=datetime(2026, 8, 13, 3, 50, tzinfo=timezone.utc)),),
-            registry_rows=(registry("AAPL", observed_at=datetime(2026, 8, 13, 3, 51, tzinfo=timezone.utc)),),
-            issuer_rows=(issuer("AAPL", observed_at=datetime(2026, 8, 13, 3, 52, tzinfo=timezone.utc)),),
+            listings=(
+                listing("AAPL", observed_at=datetime(2026, 8, 13, 3, 50, tzinfo=UTC)),
+            ),
+            registry_rows=(
+                registry("AAPL", observed_at=datetime(2026, 8, 13, 3, 51, tzinfo=UTC)),
+            ),
+            issuer_rows=(
+                issuer("AAPL", observed_at=datetime(2026, 8, 13, 3, 52, tzinfo=UTC)),
+            ),
         ),
     )
 
@@ -421,15 +477,15 @@ def test_observation_market_date_must_match_evaluation_market_date():
 @pytest.mark.parametrize(
     ("instant", "expected_market_date"),
     (
-        (datetime(2026, 3, 8, 6, 59, tzinfo=timezone.utc), date(2026, 3, 8)),
-        (datetime(2026, 3, 8, 7, 0, tzinfo=timezone.utc), date(2026, 3, 8)),
-        (datetime(2026, 11, 1, 5, 30, tzinfo=timezone.utc), date(2026, 11, 1)),
-        (datetime(2026, 11, 1, 6, 30, tzinfo=timezone.utc), date(2026, 11, 1)),
-        (datetime(2026, 8, 14, 3, 59, tzinfo=timezone.utc), date(2026, 8, 13)),
-        (datetime(2026, 8, 14, 4, 0, tzinfo=timezone.utc), date(2026, 8, 14)),
+        (datetime(2026, 3, 8, 6, 59, tzinfo=UTC), date(2026, 3, 8)),
+        (datetime(2026, 3, 8, 7, 0, tzinfo=UTC), date(2026, 3, 8)),
+        (datetime(2026, 11, 1, 5, 30, tzinfo=UTC), date(2026, 11, 1)),
+        (datetime(2026, 11, 1, 6, 30, tzinfo=UTC), date(2026, 11, 1)),
+        (datetime(2026, 8, 14, 3, 59, tzinfo=UTC), date(2026, 8, 13)),
+        (datetime(2026, 8, 14, 4, 0, tzinfo=UTC), date(2026, 8, 14)),
         # Before the 2007 US DST rule change, IANA history differs from a
         # hand-coded modern rule: 23:30 EST is still the prior market date.
-        (datetime(2005, 11, 1, 4, 30, tzinfo=timezone.utc), date(2005, 10, 31)),
+        (datetime(2005, 11, 1, 4, 30, tzinfo=UTC), date(2005, 10, 31)),
     ),
 )
 def test_membership_as_of_uses_canonical_us_market_timezone(
@@ -514,9 +570,7 @@ def test_sic_membership_precedes_sector_mapping_and_digest_changes_with_policy_i
         ),
     )
 
-    assert {
-        material.symbol: material.sector for material in boundary.materials
-    } == {
+    assert {material.symbol: material.sector for material in boundary.materials} == {
         "JPM": MembershipSectorV1.FINANCIALS,
         "BAC": MembershipSectorV1.FINANCIALS,
         "MMM": MembershipSectorV1.NON_FINANCIALS,
@@ -526,11 +580,16 @@ def test_sic_membership_precedes_sector_mapping_and_digest_changes_with_policy_i
         ("GE", MembershipUnavailableReasonV1.MISSING_SIC),
         ("MMM", MembershipUnavailableReasonV1.MISSING_SIC),
     )
-    assert changed_policy.proofs[0].source_ref != assemble_us_personal_membership_material(
-        holdings=holdings(("AAPL",)),
-        evaluation_as_of=AS_OF,
-        acquisition=acquisition(("AAPL",)),
-    ).proofs[0].source_ref
+    assert (
+        changed_policy.proofs[0].source_ref
+        != assemble_us_personal_membership_material(
+            holdings=holdings(("AAPL",)),
+            evaluation_as_of=AS_OF,
+            acquisition=acquisition(("AAPL",)),
+        )
+        .proofs[0]
+        .source_ref
+    )
 
 
 def test_proof_digest_is_permutation_invariant_but_changes_with_source_hash_mutations():

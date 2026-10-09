@@ -19,8 +19,14 @@ from tokmo.facts.toss import (
     build_holdings_request,
 )
 from tokmo.facts.toss_live import (
-    ACCOUNTS_PATH, ACCOUNT_HEADER, HOLDINGS_PATH, MAX_BODY_BYTES, METHOD,
-    TOSS_HOST, TossDataLiveTransport, build_live_opener,
+    ACCOUNT_HEADER,
+    ACCOUNTS_PATH,
+    HOLDINGS_PATH,
+    MAX_BODY_BYTES,
+    METHOD,
+    TOSS_HOST,
+    TossDataLiveTransport,
+    build_live_opener,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -71,6 +77,7 @@ def headers_of(request):
 
 # --- the two authorized operations -------------------------------------------
 
+
 def test_accounts_is_a_get_without_the_account_header():
     transport = transport_with()
 
@@ -85,7 +92,9 @@ def test_accounts_is_a_get_without_the_account_header():
     assert timeout == REQUEST_TIMEOUT_SECONDS
     assert request.data is None
     assert headers_of(request) == {
-        "authorization": f"Bearer {TOKEN}", "accept-encoding": "identity"}
+        "authorization": f"Bearer {TOKEN}",
+        "accept-encoding": "identity",
+    }
     assert ACCOUNT_HEADER.lower() not in headers_of(request)
 
 
@@ -120,25 +129,41 @@ def test_the_opener_registers_no_proxy_and_follows_no_redirect():
     from the handler chain is exactly the evidence that no proxy is consulted."""
     opener = build_live_opener()
 
-    assert not any(type(handler).__name__ == "ProxyHandler"
-                   for handler in opener.handlers)
-    redirect = next(h for h in opener.handlers
-                    if isinstance(h, urllib.request.HTTPRedirectHandler))
+    assert not any(
+        type(handler).__name__ == "ProxyHandler" for handler in opener.handlers
+    )
+    redirect = next(
+        h for h in opener.handlers if isinstance(h, urllib.request.HTTPRedirectHandler)
+    )
     assert redirect.redirect_request(None, None, 302, "", None, "https://evil") is None
 
 
 # --- write paths and header misuse are unreachable before I/O ----------------
 
-@pytest.mark.parametrize("endpoint_id", [
-    "toss_orders", "toss_conditional_orders", "toss_oauth_token",
-    "toss_buying_power", "", "TOSS_ACCOUNTS", "toss_accounts/../orders",
-])
+
+@pytest.mark.parametrize(
+    "endpoint_id",
+    [
+        "toss_orders",
+        "toss_conditional_orders",
+        "toss_oauth_token",
+        "toss_buying_power",
+        "",
+        "TOSS_ACCOUNTS",
+        "toss_accounts/../orders",
+    ],
+)
 def test_no_operation_outside_the_two_reads_can_be_constructed(endpoint_id):
     transport = transport_with()
 
-    result = transport(TossDataRequest(
-        endpoint_id=endpoint_id, timeout_seconds=REQUEST_TIMEOUT_SECONDS,
-        token=TOKEN, account_seq=None))
+    result = transport(
+        TossDataRequest(
+            endpoint_id=endpoint_id,
+            timeout_seconds=REQUEST_TIMEOUT_SECONDS,
+            token=TOKEN,
+            account_seq=None,
+        )
+    )
 
     assert result == _TossTransportFailure(code="protocol_failure")
     assert transport.opener.calls == []
@@ -147,9 +172,14 @@ def test_no_operation_outside_the_two_reads_can_be_constructed(endpoint_id):
 def test_accounts_with_an_account_sequence_is_refused_before_any_wire_call():
     transport = transport_with()
 
-    result = transport(TossDataRequest(
-        endpoint_id=ACCOUNTS_ENDPOINT_ID, timeout_seconds=REQUEST_TIMEOUT_SECONDS,
-        token=TOKEN, account_seq=SEQ))
+    result = transport(
+        TossDataRequest(
+            endpoint_id=ACCOUNTS_ENDPOINT_ID,
+            timeout_seconds=REQUEST_TIMEOUT_SECONDS,
+            token=TOKEN,
+            account_seq=SEQ,
+        )
+    )
 
     assert result == _TossTransportFailure(code="protocol_failure")
     assert transport.opener.calls == []
@@ -158,24 +188,43 @@ def test_accounts_with_an_account_sequence_is_refused_before_any_wire_call():
 def test_holdings_without_an_account_sequence_is_refused_before_any_wire_call():
     transport = transport_with()
 
-    result = transport(TossDataRequest(
-        endpoint_id=HOLDINGS_ENDPOINT_ID, timeout_seconds=REQUEST_TIMEOUT_SECONDS,
-        token=TOKEN, account_seq=None))
+    result = transport(
+        TossDataRequest(
+            endpoint_id=HOLDINGS_ENDPOINT_ID,
+            timeout_seconds=REQUEST_TIMEOUT_SECONDS,
+            token=TOKEN,
+            account_seq=None,
+        )
+    )
 
     assert result == _TossTransportFailure(code="protocol_failure")
     assert transport.opener.calls == []
 
 
-@pytest.mark.parametrize("seq", [
-    "", "seq with space", "seq\nX-Injected: 1", "seq\rX: 1", "s" * 65,
-    " seq", 12345, None,
-])
+@pytest.mark.parametrize(
+    "seq",
+    [
+        "",
+        "seq with space",
+        "seq\nX-Injected: 1",
+        "seq\rX: 1",
+        "s" * 65,
+        " seq",
+        12345,
+        None,
+    ],
+)
 def test_unusable_account_sequences_never_reach_a_header(seq):
     transport = transport_with()
 
-    result = transport(TossDataRequest(
-        endpoint_id=HOLDINGS_ENDPOINT_ID, timeout_seconds=REQUEST_TIMEOUT_SECONDS,
-        token=TOKEN, account_seq=seq))
+    result = transport(
+        TossDataRequest(
+            endpoint_id=HOLDINGS_ENDPOINT_ID,
+            timeout_seconds=REQUEST_TIMEOUT_SECONDS,
+            token=TOKEN,
+            account_seq=seq,
+        )
+    )
 
     assert result == _TossTransportFailure(code="protocol_failure")
     assert transport.opener.calls == []
@@ -185,9 +234,14 @@ def test_unusable_account_sequences_never_reach_a_header(seq):
 def test_unusable_tokens_never_reach_a_header(token):
     transport = transport_with()
 
-    result = transport(TossDataRequest(
-        endpoint_id=ACCOUNTS_ENDPOINT_ID, timeout_seconds=REQUEST_TIMEOUT_SECONDS,
-        token=token, account_seq=None))
+    result = transport(
+        TossDataRequest(
+            endpoint_id=ACCOUNTS_ENDPOINT_ID,
+            timeout_seconds=REQUEST_TIMEOUT_SECONDS,
+            token=token,
+            account_seq=None,
+        )
+    )
 
     assert result == _TossTransportFailure(code="protocol_failure")
     assert transport.opener.calls == []
@@ -196,9 +250,14 @@ def test_unusable_tokens_never_reach_a_header(token):
 def test_a_deviating_timeout_is_refused_before_any_wire_call():
     transport = transport_with()
 
-    result = transport(TossDataRequest(
-        endpoint_id=ACCOUNTS_ENDPOINT_ID, timeout_seconds=600.0,
-        token=TOKEN, account_seq=None))
+    result = transport(
+        TossDataRequest(
+            endpoint_id=ACCOUNTS_ENDPOINT_ID,
+            timeout_seconds=600.0,
+            token=TOKEN,
+            account_seq=None,
+        )
+    )
 
     assert result == _TossTransportFailure(code="protocol_failure")
     assert transport.opener.calls == []
@@ -206,11 +265,20 @@ def test_a_deviating_timeout_is_refused_before_any_wire_call():
 
 # --- closed failure mapping --------------------------------------------------
 
-@pytest.mark.parametrize("status,expected", [
-    (400, "bad_request"), (401, "auth_rejection"), (403, "forbidden"),
-    (404, "bad_request"), (409, "bad_request"), (500, "http_5xx"),
-    (302, "redirect"), (308, "redirect"),
-])
+
+@pytest.mark.parametrize(
+    "status,expected",
+    [
+        (400, "bad_request"),
+        (401, "auth_rejection"),
+        (403, "forbidden"),
+        (404, "bad_request"),
+        (409, "bad_request"),
+        (500, "http_5xx"),
+        (302, "redirect"),
+        (308, "redirect"),
+    ],
+)
 def test_http_status_maps_to_a_closed_code(status, expected):
     error = urllib.error.HTTPError("masked", status, "masked", Message(), None)
 
@@ -245,7 +313,8 @@ def test_a_malformed_rate_limit_header_is_dropped_not_propagated():
     headers["X-RateLimit-Remaining"] = "many"
 
     result = transport_with(Response(ACCOUNTS_BODY, headers))(
-        build_accounts_request(token=TOKEN))
+        build_accounts_request(token=TOKEN)
+    )
 
     assert result.rate_limit_remaining is None
 
@@ -275,17 +344,20 @@ def test_a_declared_oversize_content_length_is_refused_before_reading():
     headers["Content-Length"] = str(MAX_BODY_BYTES + 1)
 
     result = transport_with(Response(ACCOUNTS_BODY, headers))(
-        build_accounts_request(token=TOKEN))
+        build_accounts_request(token=TOKEN)
+    )
 
     assert result.code == "body_too_large"
 
 
 # --- redaction ---------------------------------------------------------------
 
+
 def test_token_and_account_sequence_stay_out_of_representations():
     request = build_holdings_request(token=TOKEN, account_seq=SEQ)
-    error = urllib.error.HTTPError("masked", 403, '{"code":"forbidden"}',
-                                   Message(), None)
+    error = urllib.error.HTTPError(
+        "masked", 403, '{"code":"forbidden"}', Message(), None
+    )
     failure = transport_with(error)(request)
 
     for text in (repr(request), str(request), repr(failure), str(failure)):

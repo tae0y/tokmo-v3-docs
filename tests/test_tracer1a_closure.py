@@ -8,10 +8,10 @@ Each section pins one MATERIAL finding's resolution:
 - N3: store-success/journal-failure surfaces a typed fail-closed program error
 - plus OS config load-error secrecy and same-value/different-units conflict
 """
+
 import json
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal, localcontext
-from pathlib import Path
 
 import pytest
 
@@ -22,7 +22,7 @@ from tokmo.records.fact_store import FactStore
 from tokmo.runtime.config import ConfigError, load_config
 from tokmo.values import SaveStatus, UnavailableFact, WtiFact, canonical_decimal
 
-NOW = datetime(2026, 7, 27, 1, 2, 3, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 27, 1, 2, 3, tzinfo=UTC)
 POLICY = "tracer1-v1"
 
 
@@ -31,7 +31,9 @@ def fact(value="78.420", *, period=date(2026, 7, 24), units="$/BBL"):
 
 
 def make_store(root, record_id="rec-1"):
-    return FactStore(root / "facts.json", clock=lambda: NOW, id_factory=lambda: record_id)
+    return FactStore(
+        root / "facts.json", clock=lambda: NOW, id_factory=lambda: record_id
+    )
 
 
 def stored_records(root):
@@ -40,24 +42,28 @@ def stored_records(root):
 
 # --- M3: canonical decimal serialization -------------------------------------
 
+
 def test_canonical_decimal_is_scale_and_exponent_independent():
     assert canonical_decimal(Decimal("78.420")) == "78.42"
     assert canonical_decimal(Decimal("78.42")) == "78.42"
     assert canonical_decimal(Decimal("7.842E+1")) == "78.42"
-    assert canonical_decimal(Decimal("100")) == "100"
+    assert canonical_decimal(Decimal(100)) == "100"
     assert canonical_decimal(Decimal("1E+2")) == "100"
     assert canonical_decimal(Decimal("-78.420")) == "-78.42"
     assert canonical_decimal(Decimal("0.00")) == "0"
 
 
-@pytest.mark.parametrize("raw,expected", [
-    ("1E-7", "0.0000001"),
-    ("1.2300E-7", "0.000000123"),
-    ("1E-20", "0.00000000000000000001"),
-    ("1E+100", "1" + "0" * 100),
-    ("-0", "0"),
-    ("-0.000E+999999", "0"),
-])
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("1E-7", "0.0000001"),
+        ("1.2300E-7", "0.000000123"),
+        ("1E-20", "0.00000000000000000001"),
+        ("1E+100", "1" + "0" * 100),
+        ("-0", "0"),
+        ("-0.000E+999999", "0"),
+    ],
+)
 def test_canonical_decimal_expands_boundary_exponents_and_signed_zero(raw, expected):
     assert canonical_decimal(Decimal(raw)) == expected
 
@@ -72,16 +78,20 @@ def test_canonical_decimal_is_independent_of_decimal_context_precision():
     assert rendered == "123456789.123456789"
 
 
-@pytest.mark.parametrize("first,second,expected", [
-    ("1E-20", "0.0000000000000000000100", "0.00000000000000000001"),
-    ("0.0000000000000000000100", "1E-20", "0.00000000000000000001"),
-    ("1E+100", "10E+99", "1" + "0" * 100),
-    ("10E+99", "1E+100", "1" + "0" * 100),
-    ("-0", "0E+100", "0"),
-    ("0E+100", "-0", "0"),
-])
+@pytest.mark.parametrize(
+    "first,second,expected",
+    [
+        ("1E-20", "0.0000000000000000000100", "0.00000000000000000001"),
+        ("0.0000000000000000000100", "1E-20", "0.00000000000000000001"),
+        ("1E+100", "10E+99", "1" + "0" * 100),
+        ("10E+99", "1E+100", "1" + "0" * 100),
+        ("-0", "0E+100", "0"),
+        ("0E+100", "-0", "0"),
+    ],
+)
 def test_boundary_decimal_storage_is_insertion_order_independent(
-        tmp_path, first, second, expected):
+    tmp_path, first, second, expected
+):
     store = make_store(tmp_path)
 
     initial = store.save(fact(first), policy_version=POLICY)
@@ -99,7 +109,9 @@ def test_canonical_decimal_rejects_non_finite_values():
 
 
 @pytest.mark.parametrize("first,second", [("78.420", "78.42"), ("78.42", "78.420")])
-def test_stored_value_is_canonical_regardless_of_insertion_order(tmp_path, first, second):
+def test_stored_value_is_canonical_regardless_of_insertion_order(
+    tmp_path, first, second
+):
     store = make_store(tmp_path)
 
     initial = store.save(fact(first), policy_version=POLICY)
@@ -113,9 +125,20 @@ def test_stored_value_is_canonical_regardless_of_insertion_order(tmp_path, first
 
 @pytest.mark.parametrize("raw", ["NaN", "Infinity", "-Infinity"])
 def test_eia_non_finite_values_are_parse_error(raw):
-    body = json.dumps({"response": {"data": [
-        {"period": "2026-07-24", "series": "RWTC", "value": raw, "units": "$/BBL"},
-    ]}}).encode()
+    body = json.dumps(
+        {
+            "response": {
+                "data": [
+                    {
+                        "period": "2026-07-24",
+                        "series": "RWTC",
+                        "value": raw,
+                        "units": "$/BBL",
+                    },
+                ]
+            }
+        }
+    ).encode()
 
     result = parse_wti_response(body, observed_at=NOW)
 
@@ -124,6 +147,7 @@ def test_eia_non_finite_values_are_parse_error(raw):
 
 
 # --- M4: full-schema semantic validation, fail-closed -------------------------
+
 
 def stored_record(**overrides):
     record = {
@@ -141,26 +165,31 @@ def stored_record(**overrides):
     return record
 
 
-@pytest.mark.parametrize("overrides", [
-    {"record_id": ""},
-    {"source": ""},
-    {"source": "somewhere_else"},
-    {"series": "BAD"},
-    {"units": "BBL"},
-    {"period": "not-a-date"},
-    {"value": "not-a-decimal"},
-    {"value": "NaN"},
-    {"value": "78.420"},  # numerically fine but not the canonical serialization
-    {"observed_at": "yesterday"},
-    {"stored_at": ""},
-    {"policy_version": ""},
-])
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"record_id": ""},
+        {"source": ""},
+        {"source": "somewhere_else"},
+        {"series": "BAD"},
+        {"units": "BBL"},
+        {"period": "not-a-date"},
+        {"value": "not-a-decimal"},
+        {"value": "NaN"},
+        {"value": "78.420"},  # numerically fine but not the canonical serialization
+        {"observed_at": "yesterday"},
+        {"stored_at": ""},
+        {"policy_version": ""},
+    ],
+)
 def test_semantically_corrupt_full_schema_record_fails_closed(tmp_path, overrides):
     path = tmp_path / "facts.json"
     payload = json.dumps({"records": [stored_record(**overrides)]})
     path.write_text(payload)
 
-    result = make_store(tmp_path).save(fact(period=date(2026, 7, 25)), policy_version=POLICY)
+    result = make_store(tmp_path).save(
+        fact(period=date(2026, 7, 25)), policy_version=POLICY
+    )
 
     assert result.status is SaveStatus.FAILED
     assert result.reason == "store_corrupt"
@@ -177,7 +206,10 @@ def test_valid_full_schema_record_still_loads(tmp_path):
     )
 
     assert result.status is SaveStatus.SAVED
-    assert [record["record_id"] for record in stored_records(tmp_path)] == ["rec-0", "rec-2"]
+    assert [record["record_id"] for record in stored_records(tmp_path)] == [
+        "rec-0",
+        "rec-2",
+    ]
 
 
 def test_same_value_different_units_is_conflict_and_preserves_original(tmp_path):
@@ -201,8 +233,12 @@ LOG_FIELDS = ("run_id", "stage", "action", "reason", "source", "decision_id")
 
 def log_fields(**overrides):
     fields = {
-        "run_id": "run-1", "stage": "decision", "action": "SAVE",
-        "reason": "saved", "source": "eia_wti_rwtc", "decision_id": "dec-1",
+        "run_id": "run-1",
+        "stage": "decision",
+        "action": "SAVE",
+        "reason": "saved",
+        "source": "eia_wti_rwtc",
+        "decision_id": "dec-1",
     }
     fields.update(overrides)
     return fields
@@ -272,6 +308,7 @@ def test_logger_rejects_non_string_values_except_none_decision_id(tmp_path):
 
 # --- M6: flight recorder drain/preserve lifecycle -----------------------------
 
+
 def test_successful_flush_drains_and_incidents_stay_independent(tmp_path):
     logger = TracerLogger(tmp_path, clock=lambda: NOW)
     logger.debug(**log_fields(stage="first", action="A"))
@@ -279,11 +316,16 @@ def test_successful_flush_drains_and_incidents_stay_independent(tmp_path):
     logger.debug(**log_fields(stage="second", action="B"))
     logger.error(**log_fields(stage="second", action="FAIL"))
 
-    lines = [json.loads(line) for line in (tmp_path / "incident.jsonl").read_text().splitlines()]
+    lines = [
+        json.loads(line)
+        for line in (tmp_path / "incident.jsonl").read_text().splitlines()
+    ]
 
     assert [(line["stage"], line["action"]) for line in lines] == [
-        ("first", "A"), ("first", "FAIL"),
-        ("second", "B"), ("second", "FAIL"),
+        ("first", "A"),
+        ("first", "FAIL"),
+        ("second", "B"),
+        ("second", "FAIL"),
     ]
     assert len(logger.buffer) == 0
 
@@ -329,13 +371,16 @@ def test_partial_flush_retry_does_not_duplicate_persisted_prefix(tmp_path, monke
     monkeypatch.setattr(logger, "_append", real_append)
     logger.flush_rca("run-1")
 
-    lines = [json.loads(line) for line in
-             (tmp_path / "logs" / "rca.jsonl").read_text().splitlines()]
+    lines = [
+        json.loads(line)
+        for line in (tmp_path / "logs" / "rca.jsonl").read_text().splitlines()
+    ]
     assert [line["stage"] for line in lines] == ["first", "second", "rca"]
     assert len(logger.buffer) == 0
 
 
 # --- N3 / closure 7: store-success + journal-failure is typed and fail-closed -
+
 
 class ExplodingJournal:
     def append(self, record):
@@ -347,8 +392,12 @@ def test_journal_failure_after_save_raises_typed_error_and_logs(tmp_path):
 
     with pytest.raises(AuditJournalError) as caught:
         run_tracer(
-            fact(), store=make_store(tmp_path), journal=ExplodingJournal(),
-            clock=lambda: NOW, id_factory=lambda: "dec-1", run_id="run-1",
+            fact(),
+            store=make_store(tmp_path),
+            journal=ExplodingJournal(),
+            clock=lambda: NOW,
+            id_factory=lambda: "dec-1",
+            run_id="run-1",
             logger=logger,
         )
 
@@ -365,8 +414,11 @@ def test_journal_failure_without_logger_still_raises_typed_error(tmp_path):
     with pytest.raises(AuditJournalError):
         run_tracer(
             UnavailableFact("eia_wti_rwtc", "no_published_data", NOW),
-            store=make_store(tmp_path), journal=ExplodingJournal(),
-            clock=lambda: NOW, id_factory=lambda: "dec-1", run_id="run-1",
+            store=make_store(tmp_path),
+            journal=ExplodingJournal(),
+            clock=lambda: NOW,
+            id_factory=lambda: "dec-1",
+            run_id="run-1",
         )
 
     assert not (tmp_path / "facts.json").exists()
@@ -377,9 +429,13 @@ def test_journal_failure_is_not_masked_by_logger_validation_failure(tmp_path):
 
     with pytest.raises(AuditJournalError) as caught:
         run_tracer(
-            fact(), store=make_store(tmp_path), journal=ExplodingJournal(),
-            clock=lambda: NOW, id_factory=lambda: "dec-1",
-            run_id="https://prohibited.invalid", logger=logger,
+            fact(),
+            store=make_store(tmp_path),
+            journal=ExplodingJournal(),
+            clock=lambda: NOW,
+            id_factory=lambda: "dec-1",
+            run_id="https://prohibited.invalid",
+            logger=logger,
         )
 
     assert str(caught.value) == "journal_append_failed"
@@ -392,8 +448,12 @@ def test_journal_failure_is_not_masked_by_logger_io_failure(tmp_path):
 
     with pytest.raises(AuditJournalError) as caught:
         run_tracer(
-            fact(), store=make_store(tmp_path), journal=ExplodingJournal(),
-            clock=lambda: NOW, id_factory=lambda: "dec-1", run_id="run-1",
+            fact(),
+            store=make_store(tmp_path),
+            journal=ExplodingJournal(),
+            clock=lambda: NOW,
+            id_factory=lambda: "dec-1",
+            run_id="run-1",
             logger=logger,
         )
 
@@ -401,6 +461,7 @@ def test_journal_failure_is_not_masked_by_logger_io_failure(tmp_path):
 
 
 # --- config OS load-error secrecy ---------------------------------------------
+
 
 def test_config_os_load_error_is_typed_and_leaks_nothing(tmp_path):
     path = tmp_path / "tracer.env"

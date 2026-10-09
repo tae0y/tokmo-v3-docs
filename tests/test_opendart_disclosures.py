@@ -1,28 +1,37 @@
 import os
-import sqlite3
 import stat
 from dataclasses import fields
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
 from tokmo.facts.opendart_bulk import Disclosure
 from tokmo.records.opendart_disclosures import (
-    IMMUTABLE_FIELDS, PROVIDER_MUTABLE_FIELDS, DisclosureStore, UnsafeStore,
+    IMMUTABLE_FIELDS,
+    PROVIDER_MUTABLE_FIELDS,
+    DisclosureStore,
+    UnsafeStore,
 )
 
-
-NOW = datetime(2026, 8, 3, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 3, tzinfo=UTC)
 
 
 def disclosure(name="report"):
-    return Disclosure("00126380", "Samsung", "005930", "Y", name,
-                      "20260000000001", "filer", "20260701", None)
+    return Disclosure(
+        "00126380",
+        "Samsung",
+        "005930",
+        "Y",
+        name,
+        "20260000000001",
+        "filer",
+        "20260701",
+        None,
+    )
 
 
 def test_every_disclosure_field_is_classified():
-    classified = (set(IMMUTABLE_FIELDS) | set(PROVIDER_MUTABLE_FIELDS) |
-                  {"rcept_no"})
+    classified = set(IMMUTABLE_FIELDS) | set(PROVIDER_MUTABLE_FIELDS) | {"rcept_no"}
     assert classified == {field.name for field in fields(Disclosure)}
     assert not set(IMMUTABLE_FIELDS) & set(PROVIDER_MUTABLE_FIELDS)
 
@@ -36,9 +45,20 @@ def test_private_modes_duplicate_revision_and_conflict_are_distinct(tmp_path):
     assert store.observe(run, disclosure(), NOW) == "new"
     assert store.observe(run, disclosure(), NOW) == "duplicate"
     assert store.observe(run, disclosure("changed"), NOW) == "revision"
-    assert store.connection.execute("select report_nm from disclosures").fetchone() == ("changed",)
-    impostor = Disclosure("99999999", "Samsung", "005930", "Y", "changed",
-                          "20260000000001", "filer", "20260701", None)
+    assert store.connection.execute("select report_nm from disclosures").fetchone() == (
+        "changed",
+    )
+    impostor = Disclosure(
+        "99999999",
+        "Samsung",
+        "005930",
+        "Y",
+        "changed",
+        "20260000000001",
+        "filer",
+        "20260701",
+        None,
+    )
     assert store.observe(run, impostor, NOW) == "conflict"
     assert store.connection.execute("select count(*) from conflicts").fetchone() == (1,)
     store.close()
@@ -75,14 +95,23 @@ def test_recent_first_observed_is_a_bounded_read_only_candidate_scan(tmp_path):
     store = DisclosureStore.open(tmp_path / "p" / "d.sqlite3")
     rows = (
         ("20260000000001", "005930", NOW - timedelta(days=2)),
-        ("20260000000002", None, NOW),               # unlisted: excluded
+        ("20260000000002", None, NOW),  # unlisted: excluded
         ("20260000000003", "000660", NOW),
         ("20260000000004", "005930", NOW - timedelta(days=20)),  # too old
-        ("20260000000005", "005935", NOW),           # same instant: rcept order
+        ("20260000000005", "005935", NOW),  # same instant: rcept order
     )
     for rcept_no, stock, observed in rows:
-        item = Disclosure("00126380", "Samsung", stock, "Y", "report",
-                          rcept_no, "filer", "20260701", None)
+        item = Disclosure(
+            "00126380",
+            "Samsung",
+            stock,
+            "Y",
+            "report",
+            rcept_no,
+            "filer",
+            "20260701",
+            None,
+        )
         assert store.observe("scan-run", item, observed) == "new"
     before = store.connection.total_changes
     since = (NOW - timedelta(days=14)).isoformat()
@@ -98,4 +127,3 @@ def test_recent_first_observed_is_a_bounded_read_only_candidate_scan(tmp_path):
     assert store.recent_first_observed(since, 2) == scanned[:2]
     assert store.connection.total_changes == before
     store.close()
-

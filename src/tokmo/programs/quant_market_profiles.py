@@ -88,8 +88,8 @@ def profile_calendar_inputs(*, results, mask, cache_store) -> dict:
         result = results.get(market)
         if result is None:
             raise ValueError("profiles_calendar_input_missing")
-        entry = None if cache is None else (
-            cache.kr if market is Market.KR else cache.us
+        entry = (
+            None if cache is None else (cache.kr if market is Market.KR else cache.us)
         )
         trade_date = None
         close = None
@@ -115,8 +115,15 @@ def profile_calendar_inputs(*, results, mask, cache_store) -> dict:
 
 
 def _context(
-    profile, decision, *, ceiling, completed=None, local=None, predicted=(),
-    margin=0, plan=None,
+    profile,
+    decision,
+    *,
+    ceiling,
+    completed=None,
+    local=None,
+    predicted=(),
+    margin=0,
+    plan=None,
 ) -> QuantProfileDueContextV1:
     return QuantProfileDueContextV1(
         profile_id=profile.profile_id,
@@ -127,28 +134,33 @@ def _context(
         predicted_symbols=predicted,
         deadline_margin_seconds=margin,
         membership_plan_starts=(
-            profile.membership_plan_starts(len(predicted))
-            if plan is None else plan
+            profile.membership_plan_starts(len(predicted)) if plan is None else plan
         ),
         membership_starts_ceiling=ceiling,
     )
 
 
 def evaluate_profile_due(
-    *, root, deps, policy, tick, profile,
-    calendar: ProfileCalendarInputV1, receipts_loader,
+    *,
+    root,
+    deps,
+    policy,
+    tick,
+    profile,
+    calendar: ProfileCalendarInputV1,
+    receipts_loader,
 ) -> QuantProfileDueContextV1:
     """Generalized due evaluation (§6.1); zero wires, zero claims."""
     limits = policy.request_limits
     ceiling = limits.membership_starts
     if limits.membership_starts <= 0 or limits.quant_daily_candle_starts <= 0:
         return _context(
-            profile, QuantProfileDueDecisionV1.POLICY_ZERO, ceiling=ceiling,
+            profile,
+            QuantProfileDueDecisionV1.POLICY_ZERO,
+            ceiling=ceiling,
         )
     slot = tick.scheduled_for_utc
-    local_date = slot.astimezone(
-        ZoneInfo(MARKET_TIMEZONE[profile.market])
-    ).date()
+    local_date = slot.astimezone(ZoneInfo(MARKET_TIMEZONE[profile.market])).date()
     if (
         not calendar.refresh_succeeded
         or not calendar.mask_bound
@@ -157,8 +169,10 @@ def evaluate_profile_due(
         or slot < calendar.official_close
     ):
         return _context(
-            profile, QuantProfileDueDecisionV1.NO_COMPLETED_SESSION,
-            ceiling=ceiling, local=local_date,
+            profile,
+            QuantProfileDueDecisionV1.NO_COMPLETED_SESSION,
+            ceiling=ceiling,
+            local=local_date,
         )
     try:
         history = RegularSessionHistoryStore(
@@ -177,18 +191,26 @@ def evaluate_profile_due(
         completed = None
     if completed is None:
         return _context(
-            profile, QuantProfileDueDecisionV1.NO_COMPLETED_SESSION,
-            ceiling=ceiling, local=local_date,
+            profile,
+            QuantProfileDueDecisionV1.NO_COMPLETED_SESSION,
+            ceiling=ceiling,
+            local=local_date,
         )
     if completed != local_date:
         return _context(
-            profile, QuantProfileDueDecisionV1.LOCAL_DATE_MISMATCH,
-            ceiling=ceiling, completed=completed, local=local_date,
+            profile,
+            QuantProfileDueDecisionV1.LOCAL_DATE_MISMATCH,
+            ceiling=ceiling,
+            completed=completed,
+            local=local_date,
         )
     if not calendar.in_effective_mask:
         return _context(
-            profile, QuantProfileDueDecisionV1.NO_POST_CLOSE_OPEN_WINDOW,
-            ceiling=ceiling, completed=completed, local=local_date,
+            profile,
+            QuantProfileDueDecisionV1.NO_POST_CLOSE_OPEN_WINDOW,
+            ceiling=ceiling,
+            completed=completed,
+            local=local_date,
         )
     identity = QuantProfileDueIdentityV1(
         profile.profile_id,
@@ -205,12 +227,18 @@ def evaluate_profile_due(
         # in flight — neither re-claimed nor called terminal, zero wire.
         if row.state is QuantTerminalStateV1.CLAIMED:
             return _context(
-                profile, QuantProfileDueDecisionV1.CLAIM_IN_FLIGHT,
-                ceiling=ceiling, completed=completed, local=local_date,
+                profile,
+                QuantProfileDueDecisionV1.CLAIM_IN_FLIGHT,
+                ceiling=ceiling,
+                completed=completed,
+                local=local_date,
             )
         return _context(
-            profile, QuantProfileDueDecisionV1.ALREADY_TERMINAL,
-            ceiling=ceiling, completed=completed, local=local_date,
+            profile,
+            QuantProfileDueDecisionV1.ALREADY_TERMINAL,
+            ceiling=ceiling,
+            completed=completed,
+            local=local_date,
         )
     try:
         prior = CurrentHoldingsStore(
@@ -226,8 +254,11 @@ def evaluate_profile_due(
     )
     if len(predicted) < 1:
         return _context(
-            profile, QuantProfileDueDecisionV1.COHORT_UNPREDICTABLE,
-            ceiling=ceiling, completed=completed, local=local_date,
+            profile,
+            QuantProfileDueDecisionV1.COHORT_UNPREDICTABLE,
+            ceiling=ceiling,
+            completed=completed,
+            local=local_date,
         )
     if len(predicted) > profile.cohort_max:
         # Typed fail-closed overflow: zero planned starts, no cohort carried,
@@ -235,21 +266,24 @@ def evaluate_profile_due(
         return _context(
             profile,
             QuantProfileDueDecisionV1.PROFILE_COHORT_EXCEEDS_POLICY,
-            ceiling=ceiling, completed=completed, local=local_date, plan=0,
+            ceiling=ceiling,
+            completed=completed,
+            local=local_date,
+            plan=0,
         )
     plan_starts = profile.membership_plan_starts(len(predicted))
     if plan_starts > ceiling:
         return _context(
             profile,
             QuantProfileDueDecisionV1.MEMBERSHIP_BUDGET_UNSATISFIABLE,
-            ceiling=ceiling, completed=completed, local=local_date,
+            ceiling=ceiling,
+            completed=completed,
+            local=local_date,
             predicted=predicted,
         )
     planned_starts = profile.quant_due_max_increment(len(predicted))
     observed_now = deps.clock()
-    remaining = policy.child_timeout_seconds - (
-        observed_now - slot
-    ).total_seconds()
+    remaining = policy.child_timeout_seconds - (observed_now - slot).total_seconds()
     required = planned_starts * PER_START_BUDGET_SECONDS + DEADLINE_MARGIN_SECONDS
     margin = int(remaining - required)
     if not sufficient_deadline(
@@ -259,9 +293,13 @@ def evaluate_profile_due(
         planned_starts=planned_starts,
     ):
         return _context(
-            profile, QuantProfileDueDecisionV1.INSUFFICIENT_DEADLINE,
-            ceiling=ceiling, completed=completed, local=local_date,
-            predicted=predicted, margin=margin,
+            profile,
+            QuantProfileDueDecisionV1.INSUFFICIENT_DEADLINE,
+            ceiling=ceiling,
+            completed=completed,
+            local=local_date,
+            predicted=predicted,
+            margin=margin,
         )
     return QuantProfileDueContextV1(
         profile_id=profile.profile_id,
@@ -283,8 +321,17 @@ def _existing_profile_receipt_store(path: Path):
 
 
 def run_profiles_membership(
-    *, root, deps, policy, tick, executor, token, results, mask,
-    cache_store, now,
+    *,
+    root,
+    deps,
+    policy,
+    tick,
+    executor,
+    token,
+    results,
+    mask,
+    cache_store,
+    now,
 ) -> ProfilesMembershipOutcomeV1:
     """Evaluate KR then US; execute at most the first DUE profile (§6.2)."""
     path = Path(root) / "ops" / "quant_profile_receipts.sqlite3"
@@ -301,11 +348,18 @@ def run_profiles_membership(
 
     try:
         calendars = profile_calendar_inputs(
-            results=results, mask=mask, cache_store=cache_store,
+            results=results,
+            mask=mask,
+            cache_store=cache_store,
         )
     except ValueError:
         return ProfilesMembershipOutcomeV1(
-            "skipped", "calendar_binding_conflict", None, None, None, None,
+            "skipped",
+            "calendar_binding_conflict",
+            None,
+            None,
+            None,
+            None,
         )
     reasons = []
     for profile_id in QUANT_PROFILE_EXECUTION_ORDER:
@@ -340,8 +394,12 @@ def run_profiles_membership(
                 receipts=store,
             )
             return ProfilesMembershipOutcomeV1(
-                outcome.status, f"{prefix}:{outcome.reason}",
-                profile_id, outcome, None, store,
+                outcome.status,
+                f"{prefix}:{outcome.reason}",
+                profile_id,
+                outcome,
+                None,
+                store,
             )
         execution = run_us_profile_membership(
             root=root,
@@ -355,15 +413,29 @@ def run_profiles_membership(
         return ProfilesMembershipOutcomeV1(
             execution.membership.status,
             f"{prefix}:{execution.membership.reason}",
-            profile_id, None, execution, store,
+            profile_id,
+            None,
+            execution,
+            store,
         )
     return ProfilesMembershipOutcomeV1(
-        "skipped", ",".join(reasons), None, None, None, None,
+        "skipped",
+        ",".join(reasons),
+        None,
+        None,
+        None,
+        None,
     )
 
 
 def run_profiles_shadow(
-    *, root, deps, policy, tick, executor, token,
+    *,
+    root,
+    deps,
+    policy,
+    tick,
+    executor,
+    token,
     execution: ProfilesMembershipOutcomeV1,
 ) -> tuple[str, str]:
     """Complete the tick's one executed profile; profile-prefixed reasons."""

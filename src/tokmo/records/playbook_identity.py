@@ -45,8 +45,9 @@ def playbook_scope_dir(account_scope) -> "str | None":
     return None
 
 
-def scope_dir_document_path(playbook_root, *, scope_dir: str,
-                            market: str, symbol: str) -> "Path | None":
+def scope_dir_document_path(
+    playbook_root, *, scope_dir: str, market: str, symbol: str
+) -> "Path | None":
     """Scope kind → the one canonical document path, or None."""
     if playbook_root is None or scope_dir not in PLAYBOOK_SCOPE_DIRS:
         return None
@@ -57,29 +58,32 @@ def scope_dir_document_path(playbook_root, *, scope_dir: str,
     return Path(playbook_root) / scope_dir / market / f"{symbol}.md"
 
 
-def instrument_document_path(playbook_root, *, account_scope: str,
-                             market: str, symbol: str) -> "Path | None":
+def instrument_document_path(
+    playbook_root, *, account_scope: str, market: str, symbol: str
+) -> "Path | None":
     """The one canonical document path, or None when it cannot be formed."""
     scope_dir = playbook_scope_dir(account_scope)
     if scope_dir is None:
         return None
-    return scope_dir_document_path(playbook_root, scope_dir=scope_dir,
-                                   market=market, symbol=symbol)
+    return scope_dir_document_path(
+        playbook_root, scope_dir=scope_dir, market=market, symbol=symbol
+    )
 
 
 def _front_matter(text: str) -> str:
     if not text.startswith(_FRONT_MATTER_OPEN):
         return ""
     end = text.find("\n---", len(_FRONT_MATTER_OPEN))
-    return text[len(_FRONT_MATTER_OPEN):end] if end != -1 else ""
+    return text[len(_FRONT_MATTER_OPEN) : end] if end != -1 else ""
 
 
-def read_instrument_name(playbook_root, *, account_scope: str, market: str,
-                         symbol: str) -> "str | None":
+def read_instrument_name(
+    playbook_root, *, account_scope: str, market: str, symbol: str
+) -> "str | None":
     """The canonical ``instrument_name``; None whenever it is unavailable."""
     path = instrument_document_path(
-        playbook_root, account_scope=account_scope, market=market,
-        symbol=symbol)
+        playbook_root, account_scope=account_scope, market=market, symbol=symbol
+    )
     if path is None:
         return None
     try:

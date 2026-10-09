@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """Export collected evidence to a reusable case; source DBs are read-only."""
+
 import argparse
-from datetime import timedelta
 import json
+from datetime import timedelta
 from pathlib import Path
 
-from tokmo.records.news_decision_inputs import read_news_observations, read_disclosure_observations
-from tokmo.records.news_decision_store import timestamp
 from replay_news_alerts import safe_output
+
+from tokmo.records.news_decision_inputs import (
+    read_disclosure_observations,
+    read_news_observations,
+)
+from tokmo.records.news_decision_store import timestamp
 
 
 def main(argv=None):
@@ -24,7 +29,10 @@ def main(argv=None):
     if timestamp(args.until) <= timestamp(args.since):
         parser.error("until must be after since")
     observations, sources = [], []
-    for path, reader in ((args.news_db, read_news_observations), (args.disclosure_db, read_disclosure_observations)):
+    for path, reader in (
+        (args.news_db, read_news_observations),
+        (args.disclosure_db, read_disclosure_observations),
+    ):
         if path is None:
             continue
         cursor = args.since
@@ -39,17 +47,38 @@ def main(argv=None):
         sources.append(str(path))
     end = timestamp(args.until)
     # Enough virtual ticks to drain same-time batches without wall-clock wait.
-    checkpoints = [(end + timedelta(minutes=index)).isoformat() for index in range(1, (len(observations) + 19) // 20 + 1)]
-    case = {"version": 1, "id": args.id, "description": "Historical collection replay; manually review expected alerts before evaluation.",
-            "sources": sources, "availability_note": "Collection times only. Revised news lacks older body snapshots; only the latest revision's conservative availability is exported. Disclosure listings are not document bodies.",
-            "observations": sorted(observations, key=lambda row: (timestamp(row["observed_at"]), row["id"])),
-            "context": [], "checkpoints": checkpoints, "expectations": [], "recorded_responses": {"screen": [], "analyze": []}}
+    checkpoints = [
+        (end + timedelta(minutes=index)).isoformat()
+        for index in range(1, (len(observations) + 19) // 20 + 1)
+    ]
+    case = {
+        "version": 1,
+        "id": args.id,
+        "description": "Historical collection replay; manually review expected alerts before evaluation.",
+        "sources": sources,
+        "availability_note": "Collection times only. Revised news lacks older body snapshots; only the latest revision's conservative availability is exported. Disclosure listings are not document bodies.",
+        "observations": sorted(
+            observations, key=lambda row: (timestamp(row["observed_at"]), row["id"])
+        ),
+        "context": [],
+        "checkpoints": checkpoints,
+        "expectations": [],
+        "recorded_responses": {"screen": [], "analyze": []},
+    }
     output = safe_output(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("x") as stream:
         json.dump(case, stream, ensure_ascii=False, indent=2)
         stream.write("\n")
-    print(json.dumps({"case": str(output), "observations": len(observations), "sources_readonly": True}))
+    print(
+        json.dumps(
+            {
+                "case": str(output),
+                "observations": len(observations),
+                "sources_readonly": True,
+            }
+        )
+    )
 
 
 if __name__ == "__main__":

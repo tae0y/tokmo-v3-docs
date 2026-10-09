@@ -1,33 +1,33 @@
 """Scalar renderer contract tests for the presentation layer."""
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
 
 from tokmo.presentation.options import (
-    FormatOptions,
-    NumberStyle,
+    KOREAN,
+    KRW,
+    NUMBER,
+    RAW,
+    USD,
     CurrencyStyle,
     DateStyle,
     DateTimeStyle,
+    FormatOptions,
     Locale,
-    RAW,
-    NUMBER,
-    KRW,
-    USD,
-    KOREAN,
+    NumberStyle,
 )
 from tokmo.presentation.scalars import (
-    format_number,
-    format_money,
-    format_percent,
     format_date,
     format_datetime,
+    format_money,
+    format_number,
+    format_percent,
 )
 
-
 # === Options validation ===
+
 
 class TestFormatOptionsValidation:
     def test_defaults(self):
@@ -129,6 +129,7 @@ class TestPresets:
 
 # === format_number ===
 
+
 class TestFormatNumberRaw:
     def test_raw_preserves_integer(self):
         assert format_number(100, options=RAW) == "100"
@@ -145,24 +146,26 @@ class TestFormatNumberRaw:
 
 class TestFormatNumberGrouped:
     def test_grouped_integer(self):
-        assert format_number(Decimal("100000"), options=NUMBER) == "100,000"
+        assert format_number(Decimal(100000), options=NUMBER) == "100,000"
 
     def test_grouped_scientific_expanded(self):
         assert format_number(Decimal("1E+5"), options=NUMBER) == "100,000"
 
     def test_grouped_preserves_original_decimals_when_max_none(self):
         from dataclasses import replace
+
         opts = replace(NUMBER, max_decimal_places=None)
         assert format_number(Decimal("100000.00"), options=opts) == "100,000.00"
 
     def test_grouped_zero_preserves_original_decimals_when_max_none(self):
         from dataclasses import replace
+
         opts = replace(NUMBER, max_decimal_places=None)
         assert format_number(Decimal("0.00"), options=opts) == "0.00"
         assert format_number(Decimal("-0.00"), options=opts) == "-0.00"
 
     def test_contract_100(self):
-        assert format_number(Decimal("100"), options=NUMBER) == "100"
+        assert format_number(Decimal(100), options=NUMBER) == "100"
 
     def test_contract_100_5(self):
         assert format_number(Decimal("100.5"), options=NUMBER) == "100.5"
@@ -177,28 +180,28 @@ class TestFormatNumberGrouped:
         assert format_number(Decimal("100.1267"), options=NUMBER) == "100.13"
 
     def test_zero(self):
-        assert format_number(Decimal("0"), options=NUMBER) == "0"
+        assert format_number(Decimal(0), options=NUMBER) == "0"
 
     def test_negative_grouped(self):
-        assert format_number(Decimal("-100000"), options=NUMBER) == "-100,000"
+        assert format_number(Decimal(-100000), options=NUMBER) == "-100,000"
 
     def test_negative_with_decimals(self):
         assert format_number(Decimal("-100.5"), options=NUMBER) == "-100.5"
 
     def test_very_large_number(self):
-        result = format_number(Decimal("999999999999999"), options=NUMBER)
+        result = format_number(Decimal(999999999999999), options=NUMBER)
         assert result == "999,999,999,999,999"
 
 
 class TestFormatNumberMinMax:
     def test_usd_preset_pads_to_two(self):
-        assert format_number(Decimal("100"), options=USD) == "100.00"
+        assert format_number(Decimal(100), options=USD) == "100.00"
 
     def test_usd_preset_pads_half(self):
         assert format_number(Decimal("100.5"), options=USD) == "100.50"
 
     def test_krw_rounds_to_integer(self):
-        assert format_number(Decimal("100000"), options=KRW) == "100,000"
+        assert format_number(Decimal(100000), options=KRW) == "100,000"
 
 
 class TestFormatNumberRejections:
@@ -214,7 +217,9 @@ class TestFormatNumberRejections:
         with pytest.raises(TypeError):
             format_number("100", options=NUMBER)
 
-    @pytest.mark.parametrize("value", [Decimal("NaN"), Decimal("Infinity"), Decimal("-Infinity")])
+    @pytest.mark.parametrize(
+        "value", [Decimal("NaN"), Decimal("Infinity"), Decimal("-Infinity")]
+    )
     def test_non_finite_decimal_rejected(self, value):
         with pytest.raises(ValueError, match="non_finite_decimal_not_allowed"):
             format_number(value, options=NUMBER)
@@ -229,27 +234,29 @@ class TestFormatNumberImmutability:
 
 # === format_money ===
 
+
 class TestFormatMoney:
     def test_krw_positive(self):
-        assert format_money(Decimal("100000"), options=KRW) == "100,000원"
+        assert format_money(Decimal(100000), options=KRW) == "100,000원"
 
     def test_krw_negative(self):
-        assert format_money(Decimal("-100000"), options=KRW) == "-100,000원"
+        assert format_money(Decimal(-100000), options=KRW) == "-100,000원"
 
     def test_usd_positive(self):
-        assert format_money(Decimal("100"), options=USD) == "$100.00"
+        assert format_money(Decimal(100), options=USD) == "$100.00"
 
     def test_usd_half(self):
         assert format_money(Decimal("100.5"), options=USD) == "$100.50"
 
     def test_usd_negative(self):
-        assert format_money(Decimal("-100"), options=USD) == "-$100.00"
+        assert format_money(Decimal(-100), options=USD) == "-$100.00"
 
     def test_none_currency(self):
-        assert format_money(Decimal("1000"), options=NUMBER) == "1,000"
+        assert format_money(Decimal(1000), options=NUMBER) == "1,000"
 
 
 # === format_percent ===
+
 
 class TestFormatPercent:
     def test_basic_percent(self):
@@ -272,6 +279,7 @@ class TestFormatPercent:
 
 # === format_date ===
 
+
 class TestFormatDate:
     def test_iso(self):
         assert format_date(date(2026, 7, 25), options=FormatOptions()) == "2026-07-25"
@@ -287,13 +295,16 @@ class TestFormatDate:
 
 # === format_datetime ===
 
+
 class TestFormatDatetime:
     def test_iso_aware(self):
-        dt = datetime(2026, 7, 25, 12, 30, 0, tzinfo=timezone.utc)
-        assert format_datetime(dt, options=FormatOptions()) == "2026-07-25T12:30:00+00:00"
+        dt = datetime(2026, 7, 25, 12, 30, 0, tzinfo=UTC)
+        assert (
+            format_datetime(dt, options=FormatOptions()) == "2026-07-25T12:30:00+00:00"
+        )
 
     def test_timezone_conversion(self):
-        dt = datetime(2026, 7, 25, 12, 0, 0, tzinfo=timezone.utc)
+        dt = datetime(2026, 7, 25, 12, 0, 0, tzinfo=UTC)
         opts = FormatOptions(timezone="Asia/Seoul")
         result = format_datetime(dt, options=opts)
         assert "21:00" in result
@@ -311,6 +322,6 @@ class TestFormatDatetime:
             format_datetime(dt, options=opts)
 
     def test_korean_style(self):
-        dt = datetime(2026, 7, 25, 12, 30, 0, tzinfo=timezone.utc)
+        dt = datetime(2026, 7, 25, 12, 30, 0, tzinfo=UTC)
         opts = FormatOptions(datetime_style=DateTimeStyle.KOREAN)
         assert format_datetime(dt, options=opts) == "2026년 7월 25일 12시 30분"

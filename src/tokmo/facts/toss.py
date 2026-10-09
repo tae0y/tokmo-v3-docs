@@ -14,17 +14,20 @@ Credentials, the access token, and account sequences are carried with
 ``repr=False`` and live only as locals; they are never attributes of a fact.
 """
 
+import hashlib
+import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
-import hashlib
-import json
 from types import MappingProxyType
 
 from tokmo.facts.eia import LIVE_TRANSPORT_FAILURE_CODES
 from tokmo.values import (
-    TOSS_SOURCE, TossAccountHoldingsFact, TossHoldingFact, UnavailableFact,
+    TOSS_SOURCE,
+    TossAccountHoldingsFact,
+    TossHoldingFact,
+    UnavailableFact,
     canonical_decimal,
 )
 from tokmo.values.current_holdings import (
@@ -71,7 +74,9 @@ MAX_CREDENTIAL_LENGTH = 512
 # outcomes; the rest of the closed set is the shared live-transport contract.
 TOSS_TRANSPORT_FAILURE_CODES = LIVE_TRANSPORT_FAILURE_CODES | {"forbidden"}
 TOSS_CAMPAIGN_CODES = TOSS_TRANSPORT_FAILURE_CODES | {
-    "success", "contract_mismatch", "account_count_unexpected",
+    "success",
+    "contract_mismatch",
+    "account_count_unexpected",
 }
 
 _SCOPE_DOMAIN = b"tokmo-v3:toss-account-scope:v1\x00"
@@ -84,9 +89,7 @@ def derive_account_scope(account_seq_decimal: str) -> str:
 
 
 def derive_raw_identity_fingerprint(account_seq_decimal: str) -> str:
-    return hashlib.sha256(
-        _IDENTITY_DOMAIN + account_seq_decimal.encode()
-    ).hexdigest()
+    return hashlib.sha256(_IDENTITY_DOMAIN + account_seq_decimal.encode()).hexdigest()
 
 
 def derive_account_identities(account_list):
@@ -94,8 +97,11 @@ def derive_account_identities(account_list):
 
 
 def _derive_account_identities_from_seqs(
-        seqs, *, scope_deriver=derive_account_scope,
-        fingerprint_deriver=derive_raw_identity_fingerprint):
+    seqs,
+    *,
+    scope_deriver=derive_account_scope,
+    fingerprint_deriver=derive_raw_identity_fingerprint,
+):
     identities = []
     fingerprints = {}
     for ordinal, account_seq in enumerate(seqs, 1):
@@ -217,14 +223,17 @@ class TossCampaignOutcome:
     rate_limit_remaining: int | None = None
     account_identities: tuple[AccountScopeIdentityV1, ...] = ()
     _identity_fingerprints: object = field(
-        default_factory=lambda: MappingProxyType({}), repr=False,
+        default_factory=lambda: MappingProxyType({}),
+        repr=False,
     )
 
 
 TossAuthTransport = Callable[
-    [TossAuthRequest], "_TossTransportSuccess | _TossTransportFailure"]
+    [TossAuthRequest], "_TossTransportSuccess | _TossTransportFailure"
+]
 TossDataTransport = Callable[
-    [TossDataRequest], "_TossTransportSuccess | _TossTransportFailure"]
+    [TossDataRequest], "_TossTransportSuccess | _TossTransportFailure"
+]
 Clock = Callable[[], datetime]
 BeforeStart = Callable[[str, "int | None"], None]
 Checkpoint = Callable[[int], None]
@@ -232,44 +241,65 @@ Checkpoint = Callable[[int], None]
 
 def build_auth_request(*, client_id: str, client_secret: str) -> TossAuthRequest:
     return TossAuthRequest(
-        endpoint_id=TOKEN_ENDPOINT_ID, timeout_seconds=REQUEST_TIMEOUT_SECONDS,
-        client_id=client_id, client_secret=client_secret,
+        endpoint_id=TOKEN_ENDPOINT_ID,
+        timeout_seconds=REQUEST_TIMEOUT_SECONDS,
+        client_id=client_id,
+        client_secret=client_secret,
     )
 
 
 def build_accounts_request(*, token: str) -> TossDataRequest:
     """The accounts read carries no account header, hence no account sequence."""
     return TossDataRequest(
-        endpoint_id=ACCOUNTS_ENDPOINT_ID, timeout_seconds=REQUEST_TIMEOUT_SECONDS,
-        token=token, account_seq=None,
+        endpoint_id=ACCOUNTS_ENDPOINT_ID,
+        timeout_seconds=REQUEST_TIMEOUT_SECONDS,
+        token=token,
+        account_seq=None,
     )
 
 
 def build_holdings_request(*, token: str, account_seq: str) -> TossDataRequest:
     return TossDataRequest(
-        endpoint_id=HOLDINGS_ENDPOINT_ID, timeout_seconds=REQUEST_TIMEOUT_SECONDS,
-        token=token, account_seq=account_seq,
+        endpoint_id=HOLDINGS_ENDPOINT_ID,
+        timeout_seconds=REQUEST_TIMEOUT_SECONDS,
+        token=token,
+        account_seq=account_seq,
     )
 
 
 def valid_account_seq(value) -> bool:
     """Bounded single-line printable ASCII, safe as a header value."""
-    return (isinstance(value, str) and value.isascii() and value.isprintable()
-            and 0 < len(value) <= MAX_ACCOUNT_SEQ_LENGTH and " " not in value)
+    return (
+        isinstance(value, str)
+        and value.isascii()
+        and value.isprintable()
+        and 0 < len(value) <= MAX_ACCOUNT_SEQ_LENGTH
+        and " " not in value
+    )
 
 
 def valid_token(value) -> bool:
-    return (isinstance(value, str) and value.isascii() and value.isprintable()
-            and 0 < len(value) <= MAX_TOKEN_LENGTH and " " not in value)
+    return (
+        isinstance(value, str)
+        and value.isascii()
+        and value.isprintable()
+        and 0 < len(value) <= MAX_TOKEN_LENGTH
+        and " " not in value
+    )
 
 
 def valid_credential(value) -> bool:
-    return (isinstance(value, str) and value.isascii() and value.isprintable()
-            and 0 < len(value) <= MAX_CREDENTIAL_LENGTH)
+    return (
+        isinstance(value, str)
+        and value.isascii()
+        and value.isprintable()
+        and 0 < len(value) <= MAX_CREDENTIAL_LENGTH
+    )
 
 
-def parse_token_response(body: bytes, *,
-                         observed_at: datetime) -> TossAccessToken | UnavailableFact:
+def parse_token_response(
+    body: bytes, *, observed_at: datetime
+) -> TossAccessToken | UnavailableFact:
     """``access_token``/``expires_in`` are required; ``token_type`` is optional
     but must be Bearer when present (production-observed default)."""
     payload = _load(body)
@@ -290,8 +320,9 @@ def parse_token_response(body: bytes, *,
     return TossAccessToken(expires_in=expires_in, token_type=token_type, value=value)
 
 
-def parse_accounts_response(body: bytes, *,
-                            observed_at: datetime) -> TossAccountList | UnavailableFact:
+def parse_accounts_response(
+    body: bytes, *, observed_at: datetime
+) -> TossAccountList | UnavailableFact:
     """``result`` is the account list; ``accountSeq`` is the only field read.
 
     The display account number is never consumed: it is not an account
@@ -321,8 +352,8 @@ def parse_accounts_response(body: bytes, *,
 
 
 def parse_holdings_response(
-        body: bytes, *, account_ordinal: int, account_count: int,
-        captured_at: datetime) -> TossAccountHoldingsFact | UnavailableFact:
+    body: bytes, *, account_ordinal: int, account_count: int, captured_at: datetime
+) -> TossAccountHoldingsFact | UnavailableFact:
     """``result.items`` is the holdings list.
 
     Every item must supply a symbol, a quantity, and an average price under
@@ -348,8 +379,11 @@ def parse_holdings_response(
             return UnavailableFact(SOURCE, "contract_mismatch", captured_at)
         holdings.append(holding)
     return TossAccountHoldingsFact(
-        source=SOURCE, captured_at=captured_at, account_ordinal=account_ordinal,
-        account_count=account_count, holdings=tuple(holdings),
+        source=SOURCE,
+        captured_at=captured_at,
+        account_ordinal=account_ordinal,
+        account_count=account_count,
+        holdings=tuple(holdings),
     )
 
 
@@ -374,8 +408,10 @@ def _parse_holding(item) -> TossHoldingFact | None:
         return None
 
     return TossHoldingFact(
-        symbol=symbol, quantity=quantity,
-        avg_price=avg_price[0], avg_price_field=avg_price[1],
+        symbol=symbol,
+        quantity=quantity,
+        avg_price=avg_price[0],
+        avg_price_field=avg_price[1],
         currency=None if currency is None else currency[0],
         market_raw=None if market is None else market[0],
         market_field=None if market is None else market[1],
@@ -429,11 +465,17 @@ def _bounded_seconds(raw) -> int | None:
     return seconds if 0 < seconds <= MAX_EXPIRES_IN_SECONDS else None
 
 
-def query_toss_holdings(*, client_id: str, client_secret: str, max_accounts: int,
-                        auth_transport: TossAuthTransport,
-                        data_transport: TossDataTransport, clock: Clock,
-                        before_start: BeforeStart,
-                        checkpoint: Checkpoint) -> TossCampaignOutcome:
+def query_toss_holdings(
+    *,
+    client_id: str,
+    client_secret: str,
+    max_accounts: int,
+    auth_transport: TossAuthTransport,
+    data_transport: TossDataTransport,
+    clock: Clock,
+    before_start: BeforeStart,
+    checkpoint: Checkpoint,
+) -> TossCampaignOutcome:
     """Run one bounded capture: token, accounts, then one read per account.
 
     The credentials, the token, and the account sequences exist only as locals
@@ -450,9 +492,12 @@ def query_toss_holdings(*, client_id: str, client_secret: str, max_accounts: int
     observed_remaining: list[int] = []
 
     before_start("auth", None)
-    reply = _send(auth_transport,
-                  build_auth_request(client_id=client_id, client_secret=client_secret),
-                  attempts, observed_remaining)
+    reply = _send(
+        auth_transport,
+        build_auth_request(client_id=client_id, client_secret=client_secret),
+        attempts,
+        observed_remaining,
+    )
     if reply is None:
         return _stopped("auth", attempts, 0, observed_remaining)
     token = parse_token_response(reply.body, observed_at=captured_at)
@@ -461,8 +506,12 @@ def query_toss_holdings(*, client_id: str, client_secret: str, max_accounts: int
         return _mismatched("auth", attempts, 0, observed_remaining)
 
     before_start("accounts", None)
-    reply = _send(data_transport, build_accounts_request(token=token.value),
-                  attempts, observed_remaining)
+    reply = _send(
+        data_transport,
+        build_accounts_request(token=token.value),
+        attempts,
+        observed_remaining,
+    )
     if reply is None:
         return _stopped("accounts", attempts, 0, observed_remaining)
     accounts = parse_accounts_response(reply.body, observed_at=captured_at)
@@ -473,23 +522,33 @@ def query_toss_holdings(*, client_id: str, client_secret: str, max_accounts: int
     count = len(accounts)
     if not 1 <= count <= max_accounts:
         return TossCampaignOutcome(
-            code="account_count_unexpected", stage="accounts", account_count=count,
-            facts=(), attempts=tuple(attempts),
-            rate_limit_remaining=_last(observed_remaining))
+            code="account_count_unexpected",
+            stage="accounts",
+            account_count=count,
+            facts=(),
+            attempts=tuple(attempts),
+            rate_limit_remaining=_last(observed_remaining),
+        )
     checkpoint(count)
     account_identities, identity_fingerprints = derive_account_identities(accounts)
 
     facts = []
     for ordinal, account_seq in enumerate(accounts.seqs, 1):
         before_start("holdings", ordinal)
-        reply = _send(data_transport,
-                      build_holdings_request(token=token.value, account_seq=account_seq),
-                      attempts, observed_remaining)
+        reply = _send(
+            data_transport,
+            build_holdings_request(token=token.value, account_seq=account_seq),
+            attempts,
+            observed_remaining,
+        )
         if reply is None:
             return _stopped("holdings", attempts, count, observed_remaining)
         fact = parse_holdings_response(
-            reply.body, account_ordinal=ordinal, account_count=count,
-            captured_at=captured_at)
+            reply.body,
+            account_ordinal=ordinal,
+            account_count=count,
+            captured_at=captured_at,
+        )
         del reply
         if isinstance(fact, UnavailableFact):
             return _mismatched("holdings", attempts, count, observed_remaining)
@@ -497,10 +556,15 @@ def query_toss_holdings(*, client_id: str, client_secret: str, max_accounts: int
 
     del token, accounts
     return TossCampaignOutcome(
-        code="success", stage="holdings", account_count=count, facts=tuple(facts),
-        attempts=tuple(attempts), rate_limit_remaining=_last(observed_remaining),
+        code="success",
+        stage="holdings",
+        account_count=count,
+        facts=tuple(facts),
+        attempts=tuple(attempts),
+        rate_limit_remaining=_last(observed_remaining),
         account_identities=account_identities,
-        _identity_fingerprints=identity_fingerprints)
+        _identity_fingerprints=identity_fingerprints,
+    )
 
 
 def _send(transport, request, attempts: list, observed_remaining: list):
@@ -515,22 +579,30 @@ def _send(transport, request, attempts: list, observed_remaining: list):
             observed_remaining.append(outcome.rate_limit_remaining)
         return outcome
     if isinstance(outcome, _TossTransportFailure):
-        attempts.append(TossAttemptOutcome(code=outcome.code,
-                                           retry_after=outcome.retry_after))
+        attempts.append(
+            TossAttemptOutcome(code=outcome.code, retry_after=outcome.retry_after)
+        )
         return None
     attempts.append(TossAttemptOutcome(code="protocol_failure"))
     return None
 
 
-def _stopped(stage: str, attempts: list, count: int,
-             observed_remaining: list) -> TossCampaignOutcome:
+def _stopped(
+    stage: str, attempts: list, count: int, observed_remaining: list
+) -> TossCampaignOutcome:
     return TossCampaignOutcome(
-        code=attempts[-1].code, stage=stage, account_count=count, facts=(),
-        attempts=tuple(attempts), rate_limit_remaining=_last(observed_remaining))
+        code=attempts[-1].code,
+        stage=stage,
+        account_count=count,
+        facts=(),
+        attempts=tuple(attempts),
+        rate_limit_remaining=_last(observed_remaining),
+    )
 
 
-def _mismatched(stage: str, attempts: list, count: int,
-                observed_remaining: list) -> TossCampaignOutcome:
+def _mismatched(
+    stage: str, attempts: list, count: int, observed_remaining: list
+) -> TossCampaignOutcome:
     """The wire call succeeded but its body is not the contracted shape."""
     attempts[-1] = TossAttemptOutcome(code="contract_mismatch")
     return _stopped(stage, attempts, count, observed_remaining)
@@ -548,13 +620,32 @@ def _load(body: bytes):
 
 
 __all__ = [
-    "ACCOUNTS_ENDPOINT_ID", "AVG_PRICE_FIELDS", "GRANT_TYPE",
-    "HOLDINGS_ENDPOINT_ID", "MARKET_FIELDS", "NAME_FIELDS",
-    "REQUEST_TIMEOUT_SECONDS", "SOURCE", "TOKEN_ENDPOINT_ID",
-    "TOKEN_FORM_KEYS", "TOSS_CAMPAIGN_CODES", "TOSS_TRANSPORT_FAILURE_CODES",
-    "TossAccessToken", "TossAccountList", "TossAttemptOutcome",
-    "TossAuthRequest", "TossCampaignOutcome", "TossDataRequest",
-    "build_accounts_request", "build_auth_request", "build_holdings_request",
-    "parse_accounts_response", "parse_holdings_response", "parse_token_response",
-    "query_toss_holdings", "valid_account_seq", "valid_credential", "valid_token",
+    "ACCOUNTS_ENDPOINT_ID",
+    "AVG_PRICE_FIELDS",
+    "GRANT_TYPE",
+    "HOLDINGS_ENDPOINT_ID",
+    "MARKET_FIELDS",
+    "NAME_FIELDS",
+    "REQUEST_TIMEOUT_SECONDS",
+    "SOURCE",
+    "TOKEN_ENDPOINT_ID",
+    "TOKEN_FORM_KEYS",
+    "TOSS_CAMPAIGN_CODES",
+    "TOSS_TRANSPORT_FAILURE_CODES",
+    "TossAccessToken",
+    "TossAccountList",
+    "TossAttemptOutcome",
+    "TossAuthRequest",
+    "TossCampaignOutcome",
+    "TossDataRequest",
+    "build_accounts_request",
+    "build_auth_request",
+    "build_holdings_request",
+    "parse_accounts_response",
+    "parse_holdings_response",
+    "parse_token_response",
+    "query_toss_holdings",
+    "valid_account_seq",
+    "valid_credential",
+    "valid_token",
 ]

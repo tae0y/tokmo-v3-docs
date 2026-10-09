@@ -32,7 +32,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass, field, fields
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP, localcontext
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation, localcontext
 
 from tokmo.values import canonical_decimal
 from tokmo.values.material_pack import canonical_encode
@@ -49,16 +49,23 @@ CLASSIFICATION_PLAN_VERSION = "pension-account-status-plan-v1"
 
 DISPOSITION_VERIFIED_KRX_ETF = "VERIFIED_KRX_ETF"
 DISPOSITION_EXCLUDED_NON_ETF = "EXCLUDED_NON_ETF"
-DISPOSITIONS = frozenset({
-    DISPOSITION_VERIFIED_KRX_ETF, DISPOSITION_EXCLUDED_NON_ETF,
-})
+DISPOSITIONS = frozenset(
+    {
+        DISPOSITION_VERIFIED_KRX_ETF,
+        DISPOSITION_EXCLUDED_NON_ETF,
+    }
+)
 
 EXCLUSION_CORPORATE_BOND = "CORPORATE_BOND"
 EXCLUSION_MUTUAL_FUND = "MUTUAL_FUND"
 EXCLUSION_CASH_LIKE = "CASH_LIKE"
-EXCLUSION_KINDS = frozenset({
-    EXCLUSION_CORPORATE_BOND, EXCLUSION_MUTUAL_FUND, EXCLUSION_CASH_LIKE,
-})
+EXCLUSION_KINDS = frozenset(
+    {
+        EXCLUSION_CORPORATE_BOND,
+        EXCLUSION_MUTUAL_FUND,
+        EXCLUSION_CASH_LIKE,
+    }
+)
 
 # Same shape the existing pension parser already accepts for KR symbols.
 KRX_SHORT_CODE_RE = re.compile(r"^0[0-9A-Z]{5}$|^[0-9]{6}$")
@@ -66,9 +73,12 @@ KRX_SHORT_CODE_RE = re.compile(r"^0[0-9A-Z]{5}$|^[0-9]{6}$")
 # Truthful coverage statements. Neither ever claims a full-account inventory.
 COVERAGE_ETF_ONLY_PARTIAL = "ETF_ONLY_PARTIAL_ACCOUNT_COVERAGE"
 COVERAGE_ETF_ONLY_WHOLE = "ETF_ONLY_WHOLE_ACCOUNT_COVERAGE"
-COVERAGE_STATEMENTS = frozenset({
-    COVERAGE_ETF_ONLY_PARTIAL, COVERAGE_ETF_ONLY_WHOLE,
-})
+COVERAGE_STATEMENTS = frozenset(
+    {
+        COVERAGE_ETF_ONLY_PARTIAL,
+        COVERAGE_ETF_ONLY_WHOLE,
+    }
+)
 
 AVERAGE_COST_DERIVED = "DERIVED_PURCHASE_AMOUNT_OVER_QUANTITY"
 DERIVED_AVERAGE_COST_SCALE = 10
@@ -80,24 +90,29 @@ MAX_ACCOUNT_STATUS_ROWS = 256
 # The period summary is aggregate evidence, not execution truth. None of these
 # field names may appear on a period-summary type: their presence would be the
 # first step toward appending fabricated executions to the retirement ledger.
-FORBIDDEN_EXECUTION_FIELDS = frozenset({
-    "trade_date",
-    "settlement_date",
-    "order_id",
-    "source_record_key",
-    "supersedes_source_record_key",
-    "event_kind",
-    "execution_id",
-    "transaction_type_raw",
-})
+FORBIDDEN_EXECUTION_FIELDS = frozenset(
+    {
+        "trade_date",
+        "settlement_date",
+        "order_id",
+        "source_record_key",
+        "supersedes_source_record_key",
+        "event_kind",
+        "execution_id",
+        "transaction_type_raw",
+    }
+)
 
 
 def execution_field_offenders(dataclass_type) -> tuple[str, ...]:
     """Field names on *dataclass_type* that would imply execution truth."""
-    return tuple(sorted(
-        item.name for item in fields(dataclass_type)
-        if item.name in FORBIDDEN_EXECUTION_FIELDS
-    ))
+    return tuple(
+        sorted(
+            item.name
+            for item in fields(dataclass_type)
+            if item.name in FORBIDDEN_EXECUTION_FIELDS
+        )
+    )
 
 
 class PensionClassificationError(ValueError):
@@ -157,7 +172,8 @@ def derive_average_cost(purchase_amount: str, quantity: str) -> str | None:
     with localcontext() as context:
         context.prec = 50
         quotient = (amount / units).quantize(
-            _DERIVED_AVERAGE_COST_EXPONENT, rounding=ROUND_HALF_UP,
+            _DERIVED_AVERAGE_COST_EXPONENT,
+            rounding=ROUND_HALF_UP,
         )
     return canonical_decimal(quotient)
 
@@ -253,25 +269,32 @@ class PensionClassificationPlanV1:
     def __post_init__(self):
         if self.plan_version != CLASSIFICATION_PLAN_VERSION:
             raise PensionClassificationError("invalid_plan_version")
-        for name in ("expected_row_count", "expected_etf_count",
-                     "expected_excluded_count"):
+        for name in (
+            "expected_row_count",
+            "expected_etf_count",
+            "expected_excluded_count",
+        ):
             value = getattr(self, name)
             if type(value) is not int or value < 0:
                 raise PensionClassificationError(f"invalid_{name}")
         if self.expected_row_count > MAX_ACCOUNT_STATUS_ROWS:
             raise PensionClassificationError("plan_too_large")
         if type(self.rows) is not tuple or not all(
-                isinstance(row, PensionRowDispositionV1) for row in self.rows):
+            isinstance(row, PensionRowDispositionV1) for row in self.rows
+        ):
             raise PensionClassificationError("invalid_rows")
         if len(self.rows) != self.expected_row_count:
             raise PensionClassificationError("plan_row_count_mismatch")
         if [row.ordinal for row in self.rows] != list(
-                range(1, self.expected_row_count + 1)):
+            range(1, self.expected_row_count + 1)
+        ):
             raise PensionClassificationError("plan_ordinals_not_contiguous")
-        verified = [row for row in self.rows
-                    if row.disposition == DISPOSITION_VERIFIED_KRX_ETF]
-        excluded = [row for row in self.rows
-                    if row.disposition == DISPOSITION_EXCLUDED_NON_ETF]
+        verified = [
+            row for row in self.rows if row.disposition == DISPOSITION_VERIFIED_KRX_ETF
+        ]
+        excluded = [
+            row for row in self.rows if row.disposition == DISPOSITION_EXCLUDED_NON_ETF
+        ]
         if len(verified) != self.expected_etf_count:
             raise PensionClassificationError("plan_etf_count_mismatch")
         if len(excluded) != self.expected_excluded_count:
@@ -353,7 +376,8 @@ def account_status_reconciliation_digest(
                 "derived_average_cost": average_costs.get(row.ordinal),
                 "average_cost_provenance": (
                     AVERAGE_COST_DERIVED
-                    if average_costs.get(row.ordinal) is not None else None
+                    if average_costs.get(row.ordinal) is not None
+                    else None
                 ),
             }
             for row in sorted(source_rows, key=lambda item: item.ordinal)
@@ -393,14 +417,16 @@ class PensionAccountStatusResultV1:
         if self.included_etf_count + self.excluded_row_count != self.source_row_count:
             raise ValueError("row accounting mismatch")
         if sum(count for _kind, count in self.excluded_kind_counts) != (
-                self.excluded_row_count):
+            self.excluded_row_count
+        ):
             raise ValueError("excluded_kind_counts mismatch")
         if len(self.plan_digest) != 64:
             raise ValueError("invalid plan_digest")
         if self.coverage_statement not in COVERAGE_STATEMENTS:
             raise ValueError("invalid coverage_statement")
         expected = (
-            COVERAGE_ETF_ONLY_WHOLE if self.excluded_row_count == 0
+            COVERAGE_ETF_ONLY_WHOLE
+            if self.excluded_row_count == 0
             else COVERAGE_ETF_ONLY_PARTIAL
         )
         if self.coverage_statement != expected:
@@ -437,9 +463,17 @@ class PensionPeriodSummaryRowV1:
             raise ValueError("invalid ordinal")
         if type(self.instrument_repr) is not str or not self.instrument_repr.strip():
             raise ValueError("invalid instrument_repr")
-        for name in ("buy_quantity", "sell_quantity", "buy_average_price",
-                     "sell_average_price", "buy_amount", "sell_amount",
-                     "cost_amount", "profit_loss", "return_rate"):
+        for name in (
+            "buy_quantity",
+            "sell_quantity",
+            "buy_average_price",
+            "sell_average_price",
+            "buy_amount",
+            "sell_amount",
+            "cost_amount",
+            "profit_loss",
+            "return_rate",
+        ):
             _require_canonical_decimal(getattr(self, name), name)
 
 
@@ -464,12 +498,12 @@ class PensionPeriodSummaryEvidenceV1:
         if len(self.source_content_sha256) != 64:
             raise ValueError("invalid source_content_sha256")
         if type(self.rows) is not tuple or not all(
-                isinstance(row, PensionPeriodSummaryRowV1) for row in self.rows):
+            isinstance(row, PensionPeriodSummaryRowV1) for row in self.rows
+        ):
             raise ValueError("invalid rows")
         if len(self.rows) != self.row_count:
             raise ValueError("row_count mismatch")
-        if [row.ordinal for row in self.rows] != list(
-                range(1, self.row_count + 1)):
+        if [row.ordinal for row in self.rows] != list(range(1, self.row_count + 1)):
             raise ValueError("row ordinals must be contiguous from 1")
         if len(self.semantic_digest) != 64:
             raise ValueError("invalid semantic_digest")

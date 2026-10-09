@@ -11,13 +11,13 @@ crash/nonzero exit, and the runner itself waits until the configured
 an unrelated plist, and uninstall removes only the exact owned artifacts.
 """
 
-from datetime import datetime, timezone
 import json
 import os
-from pathlib import Path
 import plistlib
 import subprocess
 import sys
+from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
@@ -25,7 +25,8 @@ ROOT = Path(__file__).parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tools.install_48h_shadow_agent import (  # noqa: E402
+from tokmo.records.prelaunch_markers import create_pass_marker
+from tools.install_48h_shadow_agent import (
     AGENT_LABEL,
     START_AT_LOCAL,
     doctor,
@@ -37,7 +38,6 @@ from tools.install_48h_shadow_agent import (  # noqa: E402
     resolve_paths,
     uninstall,
 )
-from tokmo.records.prelaunch_markers import create_pass_marker  # noqa: E402
 
 COMMIT = "55b65f63359f0d3a97920ea794b9d5b60bc8003e"
 
@@ -54,11 +54,18 @@ def make_fake_project(tmp_path):
     credential names, and both PASS markers for HEAD."""
     project = tmp_path / "project"
     project.mkdir(parents=True, exist_ok=True)
-    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path),
-           "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
-           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "HOME": str(tmp_path),
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@t",
+    }
     run = lambda *args: subprocess.run(
-        ["git", "-C", str(project), *args], env=env, check=True,
+        ["git", "-C", str(project), *args],
+        env=env,
+        check=True,
         capture_output=True,
     )
     run("init", "-q")
@@ -66,8 +73,11 @@ def make_fake_project(tmp_path):
     run("add", "README.md")
     run("commit", "-qm", "fixture")
     head = subprocess.run(
-        ["git", "-C", str(project), "rev-parse", "HEAD"], env=env,
-        capture_output=True, text=True, check=True,
+        ["git", "-C", str(project), "rev-parse", "HEAD"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.strip()
     python = project / ".venv" / "bin" / "python"
     python.parent.mkdir(parents=True)
@@ -76,17 +86,25 @@ def make_fake_project(tmp_path):
     (project / ".env.toss").write_text(
         "TOSS_CLIENT_ID=x\nTOSS_CLIENT_SECRET=y\n",
     )
-    created = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    created = datetime(2026, 8, 1, tzinfo=UTC)
     evidence = project / ".hermes" / "evidence" / "stage4"
     create_pass_marker(
-        evidence / "full_suite_pass.json", kind="full-suite",
-        commit_sha=head, command="pytest -q", test_count=2500,
-        created_at=created, provenance="hermes/full-suite",
+        evidence / "full_suite_pass.json",
+        kind="full-suite",
+        commit_sha=head,
+        command="pytest -q",
+        test_count=2500,
+        created_at=created,
+        provenance="hermes/full-suite",
     )
     create_pass_marker(
-        evidence / "independent_review_pass.json", kind="pilot-acceptance",
-        commit_sha=head, command="direct glm reclosure", test_count=1,
-        created_at=created, provenance="direct-zai/glm-5.2",
+        evidence / "independent_review_pass.json",
+        kind="pilot-acceptance",
+        commit_sha=head,
+        command="direct glm reclosure",
+        test_count=1,
+        created_at=created,
+        provenance="direct-zai/glm-5.2",
     )
     return project, head
 
@@ -102,15 +120,15 @@ def test_paths_are_rooted_in_hermes_runtime_and_launch_agents(tmp_path):
     assert paths.wrapper == runtime / "run_48h_shadow.zsh"
     assert paths.config == runtime / "config.json"
     assert paths.shadow_root == runtime / "shadow"
-    assert paths.plist == (
-        home / "Library" / "LaunchAgents" / f"{AGENT_LABEL}.plist"
-    )
-    assert paths.venv_python == (
-        tmp_path / "project" / ".venv" / "bin" / "python"
-    )
+    assert paths.plist == (home / "Library" / "LaunchAgents" / f"{AGENT_LABEL}.plist")
+    assert paths.venv_python == (tmp_path / "project" / ".venv" / "bin" / "python")
     # prelaunch markers live in the repository, not the runtime root
     assert paths.full_suite_marker == (
-        tmp_path / "project" / ".hermes" / "evidence" / "stage4"
+        tmp_path
+        / "project"
+        / ".hermes"
+        / "evidence"
+        / "stage4"
         / "full_suite_pass.json"
     )
 
@@ -166,10 +184,20 @@ def test_config_pins_the_kst_start_and_48h_campaign(tmp_path):
 
 def test_dry_run_writes_nothing(tmp_path, capsys):
     project, _head = make_fake_project(tmp_path)
-    assert main([
-        "--dry-run", "--home", str(tmp_path / "home"),
-        "--project-root", str(project), "--expected-commit", COMMIT,
-    ]) == 0
+    assert (
+        main(
+            [
+                "--dry-run",
+                "--home",
+                str(tmp_path / "home"),
+                "--project-root",
+                str(project),
+                "--expected-commit",
+                COMMIT,
+            ]
+        )
+        == 0
+    )
     output = capsys.readouterr().out
     assert AGENT_LABEL in output
     assert "run_48h_shadow.zsh" in output
@@ -240,8 +268,7 @@ def test_doctor_passes_on_a_healthy_offline_install(tmp_path):
     paths = paths_for(tmp_path, project)
     install(paths, expected_commit=head, dry_run=False)
     checks = {entry["check"]: entry for entry in doctor(paths, offline=True)}
-    failed = [name for name, entry in checks.items()
-              if entry["status"] == "fail"]
+    failed = [name for name, entry in checks.items() if entry["status"] == "fail"]
     assert failed == [], failed
     assert checks["plist_lint"]["status"] == "ok"
     assert checks["plist_label"]["status"] == "ok"
@@ -268,6 +295,7 @@ def test_doctor_reports_commit_and_marker_failures(tmp_path):
 
 def test_doctor_verifies_artifact_ownership(tmp_path, monkeypatch):
     import tools.install_48h_shadow_agent as installer
+
     project, head = make_fake_project(tmp_path)
     paths = paths_for(tmp_path, project)
     install(paths, expected_commit=head, dry_run=False)
@@ -289,6 +317,14 @@ def test_doctor_fails_on_missing_wrapper(tmp_path):
 
 def test_cli_requires_exactly_one_action(tmp_path):
     assert main(["--home", str(tmp_path)]) == 1
-    assert main([
-        "--dry-run", "--uninstall", "--home", str(tmp_path),
-    ]) == 1
+    assert (
+        main(
+            [
+                "--dry-run",
+                "--uninstall",
+                "--home",
+                str(tmp_path),
+            ]
+        )
+        == 1
+    )

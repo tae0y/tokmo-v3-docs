@@ -3,11 +3,12 @@
 Owns the claim→send→settle cycle using the kernel's
 claim_pending_telegram → injected telegram_send callable → mark_sent/mark_failed.
 """
+
 from collections.abc import Callable
 from datetime import datetime
 
 from tokmo.records.ops_kernel import OpsKernelStore
-from tokmo.values.ops_kernel import AlertStatus, ProducerRole
+from tokmo.values.ops_kernel import ProducerRole
 
 
 def run_pension_reminder_delivery(
@@ -42,15 +43,19 @@ def run_pension_reminder_delivery(
         transport_ok = True
     except TimeoutError:
         ops_kernel.mark_failed(
-            role, claimed.alert_id,
-            failed_at=now, reason="provider_timeout",
+            role,
+            claimed.alert_id,
+            failed_at=now,
+            reason="provider_timeout",
         )
         result["failed"] = 1
         return result
     except Exception:
         ops_kernel.mark_failed(
-            role, claimed.alert_id,
-            failed_at=now, reason="provider_failed",
+            role,
+            claimed.alert_id,
+            failed_at=now,
+            reason="provider_failed",
         )
         result["failed"] = 1
         return result
@@ -60,8 +65,10 @@ def run_pension_reminder_delivery(
     # cannot confirm settlement — record UNKNOWN, never FAILED.
     try:
         ops_kernel.mark_sent(
-            role, claimed.alert_id,
-            delivered_at=now, provider_message_id=provider_message_id,
+            role,
+            claimed.alert_id,
+            delivered_at=now,
+            provider_message_id=provider_message_id,
         )
         result["sent"] = 1
     except Exception:
@@ -69,8 +76,10 @@ def run_pension_reminder_delivery(
         # Do NOT mark_failed — the message was delivered.
         # Mark as UNKNOWN so it is never retransmitted.
         ops_kernel.mark_unknown(
-            role, claimed.alert_id,
-            settled_at=now, reason="settle_failed_after_delivery",
+            role,
+            claimed.alert_id,
+            settled_at=now,
+            reason="settle_failed_after_delivery",
         )
         result["sent"] = 1  # transport-level success
     return result

@@ -13,16 +13,17 @@ valid candidates, and returns the malformed ones as typed
 question. The system never articulates an unarticulated thesis.
 """
 
-from dataclasses import dataclass
-from datetime import datetime
 import hashlib
 import re
+from dataclasses import dataclass
+from datetime import datetime
 
 from tokmo.values.material_pack import canonical_encode
 from tokmo.values.ops_kernel import (
     AdmissionDecisionV1,
     CandidateFailureV1,
     HypothesisIndexKeyV1,
+    HypothesisState,
     IndexKeyKind,
     ProducerRole,
     ReplayResult,
@@ -32,8 +33,6 @@ from tokmo.values.ops_kernel import (
     TriggerKind,
     hypothesis_identity_digest,
 )
-from tokmo.values.ops_kernel import HypothesisState
-
 
 BLOCK_BEGIN = "=== TRACKING_CANDIDATE BEGIN ==="
 BLOCK_END = "=== TRACKING_CANDIDATE END ==="
@@ -53,7 +52,10 @@ _MAX_STATEMENT = 300
 # alone is legitimate vocabulary and NOT blocked. Key-shaped tokens are
 # blocked by shape.
 _FORBIDDEN_STATEMENT_MARKERS = (
-    "/users/", "~/.local", "tokmo", "/hermes",
+    "/users/",
+    "~/.local",
+    "tokmo",
+    "/hermes",
 )
 _SECRET_SHAPES = (
     re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b"),
@@ -156,11 +158,13 @@ def _parse_next_check(raw: str):
 
 def _block_digest(block_text: str) -> str:
     return hashlib.sha256(
-        canonical_encode({
-            "v": 1,
-            "domain": "tokmo-v3:youtube-tracking-block:v1",
-            "block": block_text,
-        }),
+        canonical_encode(
+            {
+                "v": 1,
+                "domain": "tokmo-v3:youtube-tracking-block:v1",
+                "block": block_text,
+            }
+        ),
     ).hexdigest()
 
 
@@ -177,8 +181,15 @@ def _parse_one_block(block_text, *, source_ref, revision, observed_at):
         if key in fields:
             raise TrackingCandidateParseError(f"duplicate field {key}")
         fields[key] = value.strip()
-    required = ("STATEMENT", "TRIGGER", "SUPPORT", "INVALIDATE",
-                "NEXT_CHECK", "TOUCH", "KEYS")
+    required = (
+        "STATEMENT",
+        "TRIGGER",
+        "SUPPORT",
+        "INVALIDATE",
+        "NEXT_CHECK",
+        "TOUCH",
+        "KEYS",
+    )
     missing = [name for name in required if name not in fields]
     if missing:
         raise TrackingCandidateParseError(
@@ -205,7 +216,9 @@ def _parse_one_block(block_text, *, source_ref, revision, observed_at):
     support = _split_tokens(fields.get("SUPPORT", ""), "SUPPORT", minimum=1)
     counter = _split_tokens(fields.get("COUNTER", ""), "COUNTER", minimum=0)
     invalidate = _split_tokens(
-        fields["INVALIDATE"], "INVALIDATE", minimum=1,
+        fields["INVALIDATE"],
+        "INVALIDATE",
+        minimum=1,
     )
     keys = _parse_keys(fields["KEYS"])
     return TrackingCandidateV1(
@@ -242,8 +255,9 @@ def _failure_kind(message: str) -> str:
     return "bad_field"
 
 
-def parse_report_tracking_blocks(report_text, *, source_ref, revision,
-                                 observed_at) -> ParsedReportV1:
+def parse_report_tracking_blocks(
+    report_text, *, source_ref, revision, observed_at
+) -> ParsedReportV1:
     """Parse every block with per-block isolation (M2).
 
     Valid blocks become candidates; malformed blocks become typed failures
@@ -263,31 +277,41 @@ def parse_report_tracking_blocks(report_text, *, source_ref, revision,
             break
         end = report_text.find(BLOCK_END, begin)
         if end < 0:
-            failures.append(CandidateFailureV1(
-                source_ref=source_ref, revision=revision,
-                error_kind="unterminated_block",
-                block_digest=_block_digest(report_text[begin:]),
-                recorded_at=observed_at,
-            ))
+            failures.append(
+                CandidateFailureV1(
+                    source_ref=source_ref,
+                    revision=revision,
+                    error_kind="unterminated_block",
+                    block_digest=_block_digest(report_text[begin:]),
+                    recorded_at=observed_at,
+                )
+            )
             break
-        block_text = report_text[begin + len(BLOCK_BEGIN):end].strip("\n")
+        block_text = report_text[begin + len(BLOCK_BEGIN) : end].strip("\n")
         position = end + len(BLOCK_END)
         try:
             candidate = _parse_one_block(
-                block_text, source_ref=source_ref, revision=revision,
+                block_text,
+                source_ref=source_ref,
+                revision=revision,
                 observed_at=observed_at,
             )
         except TrackingCandidateParseError as error:
-            failures.append(CandidateFailureV1(
-                source_ref=source_ref, revision=revision,
-                error_kind=_failure_kind(str(error)),
-                block_digest=_block_digest(block_text),
-                recorded_at=observed_at,
-            ))
+            failures.append(
+                CandidateFailureV1(
+                    source_ref=source_ref,
+                    revision=revision,
+                    error_kind=_failure_kind(str(error)),
+                    block_digest=_block_digest(block_text),
+                    recorded_at=observed_at,
+                )
+            )
             continue
         block_key = (
-            candidate.statement, candidate.trigger_kind,
-            candidate.trigger_expression, candidate.index_keys,
+            candidate.statement,
+            candidate.trigger_kind,
+            candidate.trigger_expression,
+            candidate.index_keys,
             candidate.portfolio_touch,
         )
         if block_key in seen_blocks:
@@ -297,15 +321,18 @@ def parse_report_tracking_blocks(report_text, *, source_ref, revision,
     return ParsedReportV1(candidates=tuple(candidates), failures=tuple(failures))
 
 
-def parse_tracking_candidates(report_text, *, source_ref, revision,
-                              observed_at) -> tuple:
+def parse_tracking_candidates(
+    report_text, *, source_ref, revision, observed_at
+) -> tuple:
     """Strict whole-report parse: any malformed block fails loudly.
 
     Kept for callers that want all-or-nothing semantics; the isolated
     admission path is ``parse_report_tracking_blocks``.
     """
     parsed = parse_report_tracking_blocks(
-        report_text, source_ref=source_ref, revision=revision,
+        report_text,
+        source_ref=source_ref,
+        revision=revision,
         observed_at=observed_at,
     )
     if parsed.failures:
@@ -351,17 +378,23 @@ class AdmitOutcomeV1:
 def _candidate_audit_digest(candidate) -> str:
     """Deterministic audit digest of the admitted candidate content."""
     import hashlib
-    return hashlib.sha256(canonical_encode({
-        "v": 1,
-        "domain": "tokmo-v3:youtube-admission-candidate:v1",
-        "statement": candidate.statement,
-        "trigger_kind": candidate.trigger_kind.value,
-        "trigger_expression": candidate.trigger_expression,
-        "invalidation": list(candidate.invalidation_conditions),
-        "touch": candidate.portfolio_touch,
-        "keys": sorted(f"{key.kind.value}:{key.value}"
-                       for key in candidate.index_keys),
-    })).hexdigest()
+
+    return hashlib.sha256(
+        canonical_encode(
+            {
+                "v": 1,
+                "domain": "tokmo-v3:youtube-admission-candidate:v1",
+                "statement": candidate.statement,
+                "trigger_kind": candidate.trigger_kind.value,
+                "trigger_expression": candidate.trigger_expression,
+                "invalidation": list(candidate.invalidation_conditions),
+                "touch": candidate.portfolio_touch,
+                "keys": sorted(
+                    f"{key.kind.value}:{key.value}" for key in candidate.index_keys
+                ),
+            }
+        )
+    ).hexdigest()
 
 
 def _recall_open_profiles(store, candidate):
@@ -373,12 +406,12 @@ def _recall_open_profiles(store, candidate):
     profiles = {}
     for hypothesis_id in sorted(seen):
         row = store.read_hypothesis(hypothesis_id)
-        if row.state not in (HypothesisState.CANDIDATE,
-                             HypothesisState.WATCHING):
+        if row.state not in (HypothesisState.CANDIDATE, HypothesisState.WATCHING):
             continue
         index_keys = store.read_hypothesis_index(hypothesis_id)
         profiles[hypothesis_id] = SemanticProfileV1.from_hypothesis(
-            row, index_keys=index_keys,
+            row,
+            index_keys=index_keys,
         )
     return profiles
 
@@ -395,7 +428,8 @@ def _semantic_pre_admit(store, candidate, *, now):
 
     profile = SemanticProfileV1.from_candidate(candidate)
     canonical = hypothesis_identity_digest(
-        candidate.statement, candidate.trigger_kind,
+        candidate.statement,
+        candidate.trigger_kind,
         candidate.trigger_expression,
     )
     recalled = _recall_open_profiles(store, candidate)
@@ -407,17 +441,21 @@ def _semantic_pre_admit(store, candidate, *, now):
     for hypothesis_id in sorted(recalled):
         row = store.read_hypothesis(hypothesis_id)
         other_canonical = hypothesis_identity_digest(
-            row.statement, row.trigger_kind, row.trigger_expression,
+            row.statement,
+            row.trigger_kind,
+            row.trigger_expression,
         )
         if canonical == other_canonical:
             decision = classify_semantic_profiles(
-                profile, recalled[hypothesis_id],
+                profile,
+                recalled[hypothesis_id],
                 same_canonical_identity=True,
             )
             return "exact_replay", hypothesis_id, decision
     for hypothesis_id in sorted(recalled):
         decision = classify_semantic_profiles(
-            profile, recalled[hypothesis_id],
+            profile,
+            recalled[hypothesis_id],
             same_canonical_identity=False,
         )
         if decision.classification is (
@@ -448,8 +486,7 @@ def _record_semantic_sighting(store, candidate, hypothesis_id, *, now):
     return store.record_sighting(ProducerRole.ANALYSIS, sighting, now=now)
 
 
-def admit_report_candidates(store, candidates, *, now,
-                             failures=()) -> AdmitOutcomeV1:
+def admit_report_candidates(store, candidates, *, now, failures=()) -> AdmitOutcomeV1:
     """Admit parsed candidates through the durable kernel seam (idempotent).
 
     M1/M2 isolation: each candidate is admitted independently; one failure
@@ -468,7 +505,6 @@ def admit_report_candidates(store, candidates, *, now,
     manual-only.
     """
     from tokmo.programs.youtube_semantic import classify_semantic_profiles
-    from tokmo.values.ops_kernel import HypothesisState
 
     parsed = getattr(candidates, "candidates", None)
     if parsed is not None:  # ParsedReportV1 passed directly
@@ -479,23 +515,31 @@ def admit_report_candidates(store, candidates, *, now,
     for candidate in candidates:
         try:
             outcome, matched_id, decision = _semantic_pre_admit(
-                store, candidate, now=now,
+                store,
+                candidate,
+                now=now,
             )
             if outcome == "semantic_sighting":
                 sighting_result = _record_semantic_sighting(
-                    store, candidate, matched_id, now=now,
+                    store,
+                    candidate,
+                    matched_id,
+                    now=now,
                 )
-                store.record_admission_decision(ProducerRole.ANALYSIS, (
-                    AdmissionDecisionV1(
-                        candidate_digest=_candidate_audit_digest(candidate),
-                        hypothesis_id=matched_id,
-                        matched_hypothesis_id=matched_id,
-                        classification=decision.classification.value,
-                        reason_code=decision.reason_code,
-                        conflicts=decision.conflicts,
-                        decided_at=now,
-                    )
-                ))
+                store.record_admission_decision(
+                    ProducerRole.ANALYSIS,
+                    (
+                        AdmissionDecisionV1(
+                            candidate_digest=_candidate_audit_digest(candidate),
+                            hypothesis_id=matched_id,
+                            matched_hypothesis_id=matched_id,
+                            classification=decision.classification.value,
+                            reason_code=decision.reason_code,
+                            conflicts=decision.conflicts,
+                            decided_at=now,
+                        )
+                    ),
+                )
                 if sighting_result is ReplayResult.CREATED:
                     semantic_sightings += 1
                 else:
@@ -503,19 +547,24 @@ def admit_report_candidates(store, candidates, *, now,
                 continue
             exact = outcome == "exact_replay"
             if exact:
-                store.record_admission_decision(ProducerRole.ANALYSIS, (
-                    AdmissionDecisionV1(
-                        candidate_digest=_candidate_audit_digest(candidate),
-                        hypothesis_id=matched_id,
-                        matched_hypothesis_id=matched_id,
-                        classification=decision.classification.value,
-                        reason_code=decision.reason_code,
-                        conflicts=decision.conflicts,
-                        decided_at=now,
-                    )
-                ))
+                store.record_admission_decision(
+                    ProducerRole.ANALYSIS,
+                    (
+                        AdmissionDecisionV1(
+                            candidate_digest=_candidate_audit_digest(candidate),
+                            hypothesis_id=matched_id,
+                            matched_hypothesis_id=matched_id,
+                            classification=decision.classification.value,
+                            reason_code=decision.reason_code,
+                            conflicts=decision.conflicts,
+                            decided_at=now,
+                        )
+                    ),
+                )
             result, hypothesis_id = store.upsert_hypothesis(
-                ProducerRole.ANALYSIS, candidate, now=now,
+                ProducerRole.ANALYSIS,
+                candidate,
+                now=now,
             )
         except Exception:
             failure_count += 1
@@ -541,52 +590,71 @@ def admit_report_candidates(store, candidates, *, now,
                     continue
                 compared += 1
                 pair = classify_semantic_profiles(profile, other)
-                store.record_admission_decision(ProducerRole.ANALYSIS, (
-                    AdmissionDecisionV1(
-                        candidate_digest=_candidate_audit_digest(candidate),
-                        hypothesis_id=hypothesis_id,
-                        matched_hypothesis_id=other_id,
-                        classification=pair.classification.value,
-                        reason_code=pair.reason_code,
-                        conflicts=pair.conflicts,
-                        decided_at=now,
-                    )
-                ))
-                if pair.classification is (
-                    SemanticClassification.RELATED_BUT_DISTINCT
-                ):
-                    if store.record_hypothesis_relation(
-                        ProducerRole.ANALYSIS, hypothesis_id, other_id,
-                        pair, now=now,
-                    ) == "created":
+                store.record_admission_decision(
+                    ProducerRole.ANALYSIS,
+                    (
+                        AdmissionDecisionV1(
+                            candidate_digest=_candidate_audit_digest(candidate),
+                            hypothesis_id=hypothesis_id,
+                            matched_hypothesis_id=other_id,
+                            classification=pair.classification.value,
+                            reason_code=pair.reason_code,
+                            conflicts=pair.conflicts,
+                            decided_at=now,
+                        )
+                    ),
+                )
+                if pair.classification is (SemanticClassification.RELATED_BUT_DISTINCT):
+                    if (
+                        store.record_hypothesis_relation(
+                            ProducerRole.ANALYSIS,
+                            hypothesis_id,
+                            other_id,
+                            pair,
+                            now=now,
+                        )
+                        == "created"
+                    ):
                         related_edges += 1
                 elif pair.classification is SemanticClassification.MERGE_REVIEW:
-                    if store.queue_merge_review(
-                        ProducerRole.ANALYSIS, hypothesis_id, other_id,
-                        pair, now=now,
-                    ) == "created":
+                    if (
+                        store.queue_merge_review(
+                            ProducerRole.ANALYSIS,
+                            hypothesis_id,
+                            other_id,
+                            pair,
+                            now=now,
+                        )
+                        == "created"
+                    ):
                         merge_reviews += 1
             if compared == 0:
                 # no open hypothesis shared an index key: normal creation
                 # with no relation — still auditable.
-                store.record_admission_decision(ProducerRole.ANALYSIS, (
-                    AdmissionDecisionV1(
-                        candidate_digest=_candidate_audit_digest(candidate),
-                        hypothesis_id=hypothesis_id,
-                        matched_hypothesis_id=None,
-                        classification="NO_RELATION",
-                        reason_code="no_overlap",
-                        conflicts=(),
-                        decided_at=now,
-                    )
-                ))
+                store.record_admission_decision(
+                    ProducerRole.ANALYSIS,
+                    (
+                        AdmissionDecisionV1(
+                            candidate_digest=_candidate_audit_digest(candidate),
+                            hypothesis_id=hypothesis_id,
+                            matched_hypothesis_id=None,
+                            classification="NO_RELATION",
+                            reason_code="no_overlap",
+                            conflicts=(),
+                            decided_at=now,
+                        )
+                    ),
+                )
         except Exception:
             failure_count += 1
     for failure in failures:
         store.record_candidate_failure(ProducerRole.ANALYSIS, failure, now=now)
     return AdmitOutcomeV1(
-        created=created, duplicates=duplicates,
-        revisions=revisions, failures=failure_count,
+        created=created,
+        duplicates=duplicates,
+        revisions=revisions,
+        failures=failure_count,
         semantic_sightings=semantic_sightings,
-        related_edges=related_edges, merge_reviews=merge_reviews,
+        related_edges=related_edges,
+        merge_reviews=merge_reviews,
     )

@@ -39,10 +39,10 @@ def test_disclosure_review_records_imports_values_stdlib_durability_only():
     )
     for name in imports:
         if name.startswith("tokmo"):
-            assert any(name == a or name.startswith(a + ".")
-                       for a in _ALLOWED), (
+            assert any(name == a or name.startswith(a + ".") for a in _ALLOWED), (
                 f"{_RECORDS_MODULE} imports tokmo dependency "
-                f"outside allowed whitelist: {name}")
+                f"outside allowed whitelist: {name}"
+            )
 
 
 def test_disclosure_review_records_no_network_no_env_no_wall_clock():
@@ -50,12 +50,18 @@ def test_disclosure_review_records_no_network_no_env_no_wall_clock():
     path = SRC_ROOT / _RECORDS_MODULE
     text = path.read_text()
     forbidden_patterns = (
-        "os.environ", "getenv(", "datetime.now(", "utcnow(",
-        "urlopen(", "socket", "ssl",
+        "os.environ",
+        "getenv(",
+        "datetime.now(",
+        "utcnow(",
+        "urlopen(",
+        "socket",
+        "ssl",
     )
     for pattern in forbidden_patterns:
         assert pattern not in text, (
-            f"{_RECORDS_MODULE} contains forbidden pattern {pattern!r}")
+            f"{_RECORDS_MODULE} contains forbidden pattern {pattern!r}"
+        )
 
 
 def test_disclosure_review_programs_imports_values_and_records_only():
@@ -72,17 +78,24 @@ def test_disclosure_review_programs_imports_values_and_records_only():
     )
     for name in imports:
         if name.startswith("tokmo"):
-            assert any(name == a or name.startswith(a + ".")
-                       for a in allowed), (
-                f"{_PROGRAMS_MODULE} imports {name} outside allowed set")
+            assert any(name == a or name.startswith(a + ".") for a in allowed), (
+                f"{_PROGRAMS_MODULE} imports {name} outside allowed set"
+            )
     text = path.read_text()
     forbidden_patterns = (
-        "os.environ", "getenv(", "datetime.now(", "utcnow(",
-        "urlopen(", "socket", "ssl", "telegram",
+        "os.environ",
+        "getenv(",
+        "datetime.now(",
+        "utcnow(",
+        "urlopen(",
+        "socket",
+        "ssl",
+        "telegram",
     )
     for pattern in forbidden_patterns:
         assert pattern not in text, (
-            f"{_PROGRAMS_MODULE} contains forbidden pattern {pattern!r}")
+            f"{_PROGRAMS_MODULE} contains forbidden pattern {pattern!r}"
+        )
 
 
 def test_disclosure_review_programs_does_not_import_facts():
@@ -91,4 +104,5 @@ def test_disclosure_review_programs_does_not_import_facts():
     imports = _module_imports(path)
     for name in imports:
         assert not name.startswith("tokmo.facts"), (
-            f"{_PROGRAMS_MODULE} must not import {name}")
+            f"{_PROGRAMS_MODULE} must not import {name}"
+        )

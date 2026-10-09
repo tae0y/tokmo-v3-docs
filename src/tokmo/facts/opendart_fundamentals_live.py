@@ -14,7 +14,6 @@ checks that only composition imports it. No urllib imports are needed.
 """
 
 from tokmo.facts.opendart_fundamentals import (
-    OPENDART_FUNDAMENTALS_PAUSED_REASON,
     OpenDartFundamentalsResult,
     build_paused_result,
 )

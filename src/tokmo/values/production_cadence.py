@@ -6,11 +6,11 @@ directory carrier. Everything here is token-shaped: no secret, account scope,
 symbol, quantity, URL, or raw exception text may pass through these types.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from types import MappingProxyType
-from typing import Mapping
 
 from tokmo.values.current_holdings import AccountScopeIdentityV1
 
@@ -21,15 +21,36 @@ CADENCE_MODE_PRODUCTION = "production"
 # and the open projection happen inside the holdings collector but are
 # recorded as their own stages so the durable receipt proves each transition.
 CADENCE_STAGE_ORDER = (
-    "lease", "tick", "calendar", "history", "market_regime_shadow",
-    "quant_membership", "mask", "holdings", "snapshot",
-    "projection", "quotes", "trades", "barrier", "deltas", "admission",
-    "analysis_shadow", "candidates", "quant_shadow", "sink",
+    "lease",
+    "tick",
+    "calendar",
+    "history",
+    "market_regime_shadow",
+    "quant_membership",
+    "mask",
+    "holdings",
+    "snapshot",
+    "projection",
+    "quotes",
+    "trades",
+    "barrier",
+    "deltas",
+    "admission",
+    "analysis_shadow",
+    "candidates",
+    "quant_shadow",
+    "sink",
 )
 
-STAGE_STATUS_TOKENS = frozenset({
-    "ok", "skipped", "failed", "blocked", "not_reached",
-})
+STAGE_STATUS_TOKENS = frozenset(
+    {
+        "ok",
+        "skipped",
+        "failed",
+        "blocked",
+        "not_reached",
+    }
+)
 
 
 class AnalysisExecutionV1:
@@ -52,15 +73,17 @@ class CadenceOutcome(str, Enum):
 # CLI exit codes (SDS §9): truthful completion/skip is 0; every duplicate,
 # missed, overlap, partial, or failed terminal is 2. Configuration/preflight
 # refusals exit 1 before any provider work and never become an outcome.
-OUTCOME_EXIT_CODES = MappingProxyType({
-    CadenceOutcome.COMPLETE: 0,
-    CadenceOutcome.SKIPPED_CLOSED: 0,
-    CadenceOutcome.PARTIAL: 2,
-    CadenceOutcome.FAILED: 2,
-    CadenceOutcome.MISSED: 2,
-    CadenceOutcome.DUPLICATE: 2,
-    CadenceOutcome.OVERLAP: 2,
-})
+OUTCOME_EXIT_CODES = MappingProxyType(
+    {
+        CadenceOutcome.COMPLETE: 0,
+        CadenceOutcome.SKIPPED_CLOSED: 0,
+        CadenceOutcome.PARTIAL: 2,
+        CadenceOutcome.FAILED: 2,
+        CadenceOutcome.MISSED: 2,
+        CadenceOutcome.DUPLICATE: 2,
+        CadenceOutcome.OVERLAP: 2,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -78,15 +101,20 @@ class StageStatusV1:
         if self.status not in STAGE_STATUS_TOKENS:
             raise ValueError("unknown stage status")
         if self.reason is not None and (
-                type(self.reason) is not str or not self.reason):
+            type(self.reason) is not str or not self.reason
+        ):
             raise ValueError("invalid stage reason")
         if type(self.latency_ms) is not int or self.latency_ms < 0:
             raise ValueError("invalid stage latency")
 
 
-LIFECYCLE_EVENT_KINDS = frozenset({
-    "tick_started", "stage_finished", "tick_finished",
-})
+LIFECYCLE_EVENT_KINDS = frozenset(
+    {
+        "tick_started",
+        "stage_finished",
+        "tick_finished",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -113,8 +141,11 @@ class CadenceLifecycleEventV1:
             raise ValueError("invalid policy version")
         if type(self.tick_id) is not int or self.tick_id < 0:
             raise ValueError("invalid tick id")
-        if (not isinstance(self.at, datetime) or self.at.tzinfo is None
-                or self.at.utcoffset() is None):
+        if (
+            not isinstance(self.at, datetime)
+            or self.at.tzinfo is None
+            or self.at.utcoffset() is None
+        ):
             raise ValueError("event time must be aware")
         if self.stage is not None and self.stage not in CADENCE_STAGE_ORDER:
             raise ValueError("unknown lifecycle stage")
@@ -122,7 +153,7 @@ class CadenceLifecycleEventV1:
 
 def null_lifecycle_sink(event: CadenceLifecycleEventV1) -> None:
     """The default sink: local no-op (no transport, no persistence)."""
-    return None
+    return
 
 
 @dataclass(frozen=True)
@@ -142,9 +173,13 @@ class CadenceAccountsV1:
     fingerprints: Mapping[str, str] = field(repr=False)
 
     def __post_init__(self):
-        if (type(self.identities) is not tuple or not self.identities
-                or not all(isinstance(item, AccountScopeIdentityV1)
-                           for item in self.identities)):
+        if (
+            type(self.identities) is not tuple
+            or not self.identities
+            or not all(
+                isinstance(item, AccountScopeIdentityV1) for item in self.identities
+            )
+        ):
             raise ValueError("invalid account identities")
         scopes = [item.account_scope for item in self.identities]
         if len(set(scopes)) != len(scopes):
@@ -155,8 +190,12 @@ class CadenceAccountsV1:
         if set(self.native_refs) != set(scopes):
             raise ValueError("native refs must cover every account scope")
         object.__setattr__(
-            self, "native_refs", MappingProxyType(dict(self.native_refs)),
+            self,
+            "native_refs",
+            MappingProxyType(dict(self.native_refs)),
         )
         object.__setattr__(
-            self, "fingerprints", MappingProxyType(dict(self.fingerprints)),
+            self,
+            "fingerprints",
+            MappingProxyType(dict(self.fingerprints)),
         )

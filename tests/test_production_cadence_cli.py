@@ -6,9 +6,9 @@ duplicate/missed/overlap/partial/failure), and no secret ever printed.
 """
 
 import json
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -20,15 +20,30 @@ def fixture_payload():
     return {
         "token": SECRET,
         "calendar": {
-            "KR": {"regular_start": "2026-08-03T00:00:00Z",
-                   "regular_end": "2026-08-03T06:30:00Z"},
-            "US": {"regular_start": "2026-08-03T13:30:00Z",
-                   "regular_end": "2026-08-03T20:00:00Z"},
+            "KR": {
+                "regular_start": "2026-08-03T00:00:00Z",
+                "regular_end": "2026-08-03T06:30:00Z",
+            },
+            "US": {
+                "regular_start": "2026-08-03T13:30:00Z",
+                "regular_end": "2026-08-03T20:00:00Z",
+            },
         },
-        "accounts": [{"seed": "42", "label": "brokerage", "holdings": [
-            {"symbol": "AAPL", "quantity": "1", "avg_price": "100",
-             "currency": "USD", "market_raw": "US"},
-        ]}],
+        "accounts": [
+            {
+                "seed": "42",
+                "label": "brokerage",
+                "holdings": [
+                    {
+                        "symbol": "AAPL",
+                        "quantity": "1",
+                        "avg_price": "100",
+                        "currency": "USD",
+                        "market_raw": "US",
+                    },
+                ],
+            }
+        ],
         "quotes": {"AAPL": {"price": "101.5", "currency": "USD"}},
         "orders": {},
     }
@@ -36,12 +51,21 @@ def fixture_payload():
 
 def run_cli(args, cwd=ROOT, home="/tmp"):
     return subprocess.run(
-        [sys.executable, "-c",
-         "import sys; from tokmo.composition import cadence_main; "
-         "sys.exit(cadence_main(sys.argv[1:]))", *args],
-        capture_output=True, text=True, cwd=cwd,
-        env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(ROOT / "src"),
-             "HOME": str(home)},
+        [
+            sys.executable,
+            "-c",
+            "import sys; from tokmo.composition import cadence_main; "
+            "sys.exit(cadence_main(sys.argv[1:]))",
+            *args,
+        ],
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+        env={
+            "PATH": "/usr/bin:/bin",
+            "PYTHONPATH": str(ROOT / "src"),
+            "HOME": str(home),
+        },
     )
 
 
@@ -53,12 +77,19 @@ def write_fixture(tmp_path):
 
 def base_args(tmp_path, slot="2026-08-03T10:00:00Z"):
     return [
-        "--once", "--mode", "live-shadow",
-        "--policy-version", "cadence-300s-v1",
-        "--scheduled-for", slot,
-        "--observed-now", slot.replace("00Z", "01Z"),
-        "--root", str(tmp_path / "shadow-root"),
-        "--fixture", str(write_fixture(tmp_path)),
+        "--once",
+        "--mode",
+        "live-shadow",
+        "--policy-version",
+        "cadence-300s-v1",
+        "--scheduled-for",
+        slot,
+        "--observed-now",
+        slot.replace("00Z", "01Z"),
+        "--root",
+        str(tmp_path / "shadow-root"),
+        "--fixture",
+        str(write_fixture(tmp_path)),
     ]
 
 
@@ -78,10 +109,13 @@ def test_closed_tick_dry_run_exits_zero_with_one_json_summary(tmp_path):
     assert summary["scheduled_for_utc"] == "2026-08-03T10:00:00Z"
     assert summary["open_markets"] == []
     assert summary["wire"]["operation_started"] == {
-        "TOKEN": 1, "CALENDAR_DAY_KR": 1, "CALENDAR_DAY_US": 1,
+        "TOKEN": 1,
+        "CALENDAR_DAY_KR": 1,
+        "CALENDAR_DAY_US": 1,
     }
     assert {item["stage"]: item["status"] for item in summary["stages"]}[
-        "holdings"] == "skipped"
+        "holdings"
+    ] == "skipped"
     assert (tmp_path / "shadow-root" / "ops" / "cadence_ticks.sqlite3").is_file()
 
 
@@ -129,9 +163,9 @@ def test_production_mode_requires_exact_canonical_root(tmp_path):
     args = base_args(tmp_path)
     args[args.index("live-shadow")] = "production"
     fixture_index = args.index("--fixture")
-    del args[fixture_index:fixture_index + 2]
+    del args[fixture_index : fixture_index + 2]
     observed_index = args.index("--observed-now")
-    del args[observed_index:observed_index + 2]
+    del args[observed_index : observed_index + 2]
     completed = run_cli(args)
     assert completed.returncode == 1
     assert "refusal=production_mode_requires_canonical_root" in completed.stderr
@@ -153,15 +187,17 @@ def test_production_mode_forbids_fixture_even_at_canonical_root(tmp_path):
     ("extra", "reason"),
     [
         (["--replay"], "production_mode_forbids_replay"),
-        (["--observed-now", "2026-08-03T14:00:01Z"],
-         "production_mode_forbids_observed_now"),
+        (
+            ["--observed-now", "2026-08-03T14:00:01Z"],
+            "production_mode_forbids_observed_now",
+        ),
     ],
 )
 def test_production_mode_forbids_shadow_only_controls(tmp_path, extra, reason):
     args = base_args(tmp_path)
     args[args.index("live-shadow")] = "production"
     fixture_index = args.index("--fixture")
-    del args[fixture_index:fixture_index + 2]
+    del args[fixture_index : fixture_index + 2]
     args.extend(extra)
     completed = run_cli(args)
     assert completed.returncode == 1
@@ -186,7 +222,9 @@ def test_accounts_transport_failure_logs_sanitized_category(tmp_path):
     args[args.index("--fixture") + 1] = str(path)
     completed = run_cli(args)
     assert completed.returncode == 2
-    assert "provider_failure operation=ACCOUNTS category=server_error" in completed.stderr
+    assert (
+        "provider_failure operation=ACCOUNTS category=server_error" in completed.stderr
+    )
     assert SECRET not in completed.stderr
 
 
@@ -224,21 +262,30 @@ def test_production_preflight_refusals_preserve_failure_class(monkeypatch, capsy
     from tokmo.watchlists import WatchlistError
 
     args = [
-        "--once", "--mode", "production",
-        "--policy-version", "cadence-300s-v1",
-        "--scheduled-for", "2026-08-03T10:00:00Z",
-        "--root", str(Path.home() / ".local/share/tokmo-v3"),
+        "--once",
+        "--mode",
+        "production",
+        "--policy-version",
+        "cadence-300s-v1",
+        "--scheduled-for",
+        "2026-08-03T10:00:00Z",
+        "--root",
+        str(Path.home() / ".local/share/tokmo-v3"),
     ]
     cases = [
         (ConfigError("missing_keys"), "credential_preflight_failed"),
-        (WatchlistError("duplicate_symbol"),
-         "watchlist_preflight_failed_duplicate_symbol"),
+        (
+            WatchlistError("duplicate_symbol"),
+            "watchlist_preflight_failed_duplicate_symbol",
+        ),
         (OSError("private path"), "production_preflight_io_failed"),
         (ValueError("unsafe detail"), "production_preflight_validation_failed"),
     ]
     for error, reason in cases:
+
         def fail(**_kwargs):
             raise error
+
         monkeypatch.setattr(composition, "build_production_cadence_deps", fail)
         assert composition.cadence_main(args) == 1
         captured = capsys.readouterr()

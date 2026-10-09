@@ -1,6 +1,6 @@
-from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -20,9 +20,8 @@ from tokmo.values.official_membership_observation import (
     SecurityClassV1,
 )
 
-
 FIXTURES = Path(__file__).parent / "fixtures" / "quant_membership"
-NOW = datetime(2026, 8, 13, 1, 30, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 13, 1, 30, tzinfo=UTC)
 # The fixture footer reads 08/13/2026 01:30 as a bare Eastern wall clock;
 # 2026-08-13 is EDT (UTC-4), so the canonical instant is 05:30Z.
 EXPECTED_DIRECTORY_CREATION_TIME = datetime(
@@ -31,14 +30,14 @@ EXPECTED_DIRECTORY_CREATION_TIME = datetime(
     13,
     5,
     30,
-    tzinfo=timezone.utc,
+    tzinfo=UTC,
 )
 # Exact footer evidence from the durable official capture of 2026-08-13
 # (campaign starts 4 and 5).  Private response bodies remain outside Git.
 CAPTURED_NASDAQLISTED_FOOTER = "File Creation Time: 0813202621:31|||||||"
 CAPTURED_OTHERLISTED_FOOTER = "File Creation Time: 0813202621:31||||||"
 # 2026-08-13 21:31 ET (EDT, UTC-4) is 2026-08-14 01:31Z.
-CAPTURED_DIRECTORY_CREATION_TIME = datetime(2026, 8, 14, 1, 31, tzinfo=timezone.utc)
+CAPTURED_DIRECTORY_CREATION_TIME = datetime(2026, 8, 14, 1, 31, tzinfo=UTC)
 DENY_TOKENS = (
     "ADR",
     "ADS",
@@ -82,8 +81,10 @@ def test_exact_headers_footer_and_supported_rows_parse():
     assert nyse_rows[0].directory_creation_time == EXPECTED_DIRECTORY_CREATION_TIME
 
     bad_header = (
-        FIXTURES / "nasdaqlisted_sample.txt"
-    ).read_text().replace("Symbol|Security Name", "Ticker|Security Name", 1)
+        (FIXTURES / "nasdaqlisted_sample.txt")
+        .read_text()
+        .replace("Symbol|Security Name", "Ticker|Security Name", 1)
+    )
     with pytest.raises(ValueError, match="header"):
         parse_nasdaqlisted(
             bad_header.encode("utf-8"),
@@ -91,8 +92,10 @@ def test_exact_headers_footer_and_supported_rows_parse():
             expected_symbols=("AAPL",),
         )
     bad_footer = (
-        FIXTURES / "otherlisted_sample.txt"
-    ).read_text().replace("File Creation Time:", "Creation Time:", 1)
+        (FIXTURES / "otherlisted_sample.txt")
+        .read_text()
+        .replace("File Creation Time:", "Creation Time:", 1)
+    )
     with pytest.raises(ValueError, match="footer"):
         parse_otherlisted(
             bad_footer.encode("utf-8"),
@@ -100,8 +103,10 @@ def test_exact_headers_footer_and_supported_rows_parse():
             expected_symbols=("IBM",),
         )
     official_footer_colon = (
-        FIXTURES / "nasdaqlisted_sample.txt"
-    ).read_text().replace("081320260130|||||||", "0813202601:30|||||||", 1)
+        (FIXTURES / "nasdaqlisted_sample.txt")
+        .read_text()
+        .replace("081320260130|||||||", "0813202601:30|||||||", 1)
+    )
     colon_rows = parse_nasdaqlisted(
         official_footer_colon.encode("utf-8"),
         observed_at=NOW,
@@ -110,8 +115,10 @@ def test_exact_headers_footer_and_supported_rows_parse():
     assert [row.symbol for row in colon_rows] == ["AAPL"]
     assert colon_rows[0].directory_creation_time == EXPECTED_DIRECTORY_CREATION_TIME
     bad_footer_trailing = (
-        FIXTURES / "otherlisted_sample.txt"
-    ).read_text().replace("081320260130|||||||", "081320260130|x||||||", 1)
+        (FIXTURES / "otherlisted_sample.txt")
+        .read_text()
+        .replace("081320260130|||||||", "081320260130|x||||||", 1)
+    )
     with pytest.raises(ValueError, match="footer"):
         parse_otherlisted(
             bad_footer_trailing.encode("utf-8"),
@@ -119,8 +126,10 @@ def test_exact_headers_footer_and_supported_rows_parse():
             expected_symbols=("IBM",),
         )
     bad_market_token = (
-        FIXTURES / "nasdaqlisted_sample.txt"
-    ).read_text().replace("|Q|N|N|100|N|N", "|X|N|N|100|N|N", 1)
+        (FIXTURES / "nasdaqlisted_sample.txt")
+        .read_text()
+        .replace("|Q|N|N|100|N|N", "|X|N|N|100|N|N", 1)
+    )
     with pytest.raises(ValueError, match="venue_token"):
         parse_nasdaqlisted(
             bad_market_token.encode("utf-8"),
@@ -128,8 +137,10 @@ def test_exact_headers_footer_and_supported_rows_parse():
             expected_symbols=("AAPL",),
         )
     bad_exchange_token = (
-        FIXTURES / "otherlisted_sample.txt"
-    ).read_text().replace("|N|IBM|N|100|N|IBM", "|X|IBM|N|100|N|IBM", 1)
+        (FIXTURES / "otherlisted_sample.txt")
+        .read_text()
+        .replace("|N|IBM|N|100|N|IBM", "|X|IBM|N|100|N|IBM", 1)
+    )
     with pytest.raises(ValueError, match="venue_token_unknown"):
         parse_otherlisted(
             bad_exchange_token.encode("utf-8"),
@@ -146,66 +157,86 @@ def test_exact_headers_footer_and_supported_rows_parse():
 
 def _nasdaq_body(footer_timestamp, *, padding="|||||||"):
     return (
-        FIXTURES / "nasdaqlisted_sample.txt"
-    ).read_text().replace(
-        "File Creation Time: 081320260130|||||||",
-        f"File Creation Time: {footer_timestamp}{padding}",
-        1,
-    ).encode("utf-8")
+        (FIXTURES / "nasdaqlisted_sample.txt")
+        .read_text()
+        .replace(
+            "File Creation Time: 081320260130|||||||",
+            f"File Creation Time: {footer_timestamp}{padding}",
+            1,
+        )
+        .encode("utf-8")
+    )
 
 
 def _otherlisted_body(footer_timestamp, *, padding="|||||||"):
     return (
-        FIXTURES / "otherlisted_sample.txt"
-    ).read_text().replace(
-        "File Creation Time: 081320260130|||||||",
-        f"File Creation Time: {footer_timestamp}{padding}",
-        1,
-    ).encode("utf-8")
+        (FIXTURES / "otherlisted_sample.txt")
+        .read_text()
+        .replace(
+            "File Creation Time: 081320260130|||||||",
+            f"File Creation Time: {footer_timestamp}{padding}",
+            1,
+        )
+        .encode("utf-8")
+    )
 
 
 def _body_with_footer(fixture_name, footer_line):
-    return (FIXTURES / fixture_name).read_text().replace(
-        "File Creation Time: 081320260130|||||||", footer_line, 1,
-    ).encode("utf-8")
+    return (
+        (FIXTURES / fixture_name)
+        .read_text()
+        .replace(
+            "File Creation Time: 081320260130|||||||",
+            footer_line,
+            1,
+        )
+        .encode("utf-8")
+    )
 
 
 def test_both_official_footer_clock_forms_normalize_to_one_utc_instant():
     legacy = parse_nasdaqlisted(
-        _nasdaq_body("081320260130"), observed_at=NOW,
+        _nasdaq_body("081320260130"),
+        observed_at=NOW,
         expected_symbols=("AAPL",),
     )
     current = parse_nasdaqlisted(
-        _nasdaq_body("0813202601:30"), observed_at=NOW,
+        _nasdaq_body("0813202601:30"),
+        observed_at=NOW,
         expected_symbols=("AAPL",),
     )
     assert legacy[0].directory_creation_time == current[0].directory_creation_time
     assert current[0].directory_creation_time == EXPECTED_DIRECTORY_CREATION_TIME
-    assert current[0].directory_creation_time.tzinfo is timezone.utc
+    assert current[0].directory_creation_time.tzinfo is UTC
     other_legacy = parse_otherlisted(
-        _otherlisted_body("081320260130"), observed_at=NOW,
+        _otherlisted_body("081320260130"),
+        observed_at=NOW,
         expected_symbols=("IBM",),
     )
     other_current = parse_otherlisted(
-        _otherlisted_body("0813202601:30"), observed_at=NOW,
+        _otherlisted_body("0813202601:30"),
+        observed_at=NOW,
         expected_symbols=("IBM",),
     )
-    assert (other_legacy[0].directory_creation_time
-            == other_current[0].directory_creation_time
-            == EXPECTED_DIRECTORY_CREATION_TIME)
+    assert (
+        other_legacy[0].directory_creation_time
+        == other_current[0].directory_creation_time
+        == EXPECTED_DIRECTORY_CREATION_TIME
+    )
 
 
 def test_official_footer_clock_accepts_exact_midnight_and_last_minute():
     for timestamp, expected in (
-        ("081320260000", datetime(2026, 8, 13, 4, 0, tzinfo=timezone.utc)),
-        ("0813202600:00", datetime(2026, 8, 13, 4, 0, tzinfo=timezone.utc)),
-        ("081320262359", datetime(2026, 8, 14, 3, 59, tzinfo=timezone.utc)),
-        ("0813202623:59", datetime(2026, 8, 14, 3, 59, tzinfo=timezone.utc)),
-        ("122920261501", datetime(2026, 12, 29, 20, 1, tzinfo=timezone.utc)),
-        ("1229202615:01", datetime(2026, 12, 29, 20, 1, tzinfo=timezone.utc)),
+        ("081320260000", datetime(2026, 8, 13, 4, 0, tzinfo=UTC)),
+        ("0813202600:00", datetime(2026, 8, 13, 4, 0, tzinfo=UTC)),
+        ("081320262359", datetime(2026, 8, 14, 3, 59, tzinfo=UTC)),
+        ("0813202623:59", datetime(2026, 8, 14, 3, 59, tzinfo=UTC)),
+        ("122920261501", datetime(2026, 12, 29, 20, 1, tzinfo=UTC)),
+        ("1229202615:01", datetime(2026, 12, 29, 20, 1, tzinfo=UTC)),
     ):
         rows = parse_nasdaqlisted(
-            _nasdaq_body(timestamp), observed_at=NOW,
+            _nasdaq_body(timestamp),
+            observed_at=NOW,
             expected_symbols=("AAPL",),
         )
         assert rows[0].directory_creation_time == expected
@@ -214,50 +245,52 @@ def test_official_footer_clock_accepts_exact_midnight_and_last_minute():
 def test_directory_footer_wall_clock_is_eastern_and_never_stamped_naive_utc():
     """The footer clock is U.S. Eastern; the stored instant is its UTC image."""
     summer = parse_nasdaqlisted(
-        _nasdaq_body("0813202621:31"), observed_at=NOW,
+        _nasdaq_body("0813202621:31"),
+        observed_at=NOW,
         expected_symbols=("AAPL",),
     )[0].directory_creation_time
-    assert summer == datetime(2026, 8, 14, 1, 31, tzinfo=timezone.utc)
+    assert summer == datetime(2026, 8, 14, 1, 31, tzinfo=UTC)
     assert summer == CAPTURED_DIRECTORY_CREATION_TIME
     # Naive-as-UTC would have produced 2026-08-13 21:31Z; the offset is real.
-    assert summer != datetime(2026, 8, 13, 21, 31, tzinfo=timezone.utc)
-    assert summer - datetime(2026, 8, 13, 21, 31, tzinfo=timezone.utc) == timedelta(
-        hours=4)
+    assert summer != datetime(2026, 8, 13, 21, 31, tzinfo=UTC)
+    assert summer - datetime(2026, 8, 13, 21, 31, tzinfo=UTC) == timedelta(hours=4)
 
     winter = parse_nasdaqlisted(
-        _nasdaq_body("0113202621:31"), observed_at=NOW,
+        _nasdaq_body("0113202621:31"),
+        observed_at=NOW,
         expected_symbols=("AAPL",),
     )[0].directory_creation_time
-    assert winter == datetime(2026, 1, 14, 2, 31, tzinfo=timezone.utc)
-    assert winter - datetime(2026, 1, 13, 21, 31, tzinfo=timezone.utc) == timedelta(
-        hours=5)
+    assert winter == datetime(2026, 1, 14, 2, 31, tzinfo=UTC)
+    assert winter - datetime(2026, 1, 13, 21, 31, tzinfo=UTC) == timedelta(hours=5)
 
 
 @pytest.mark.parametrize(
     ("timestamp", "expected"),
     (
         # 2026 spring forward: 02:00 ET on 2026-03-08.
-        ("0308202601:59", datetime(2026, 3, 8, 6, 59, tzinfo=timezone.utc)),
-        ("030820260159", datetime(2026, 3, 8, 6, 59, tzinfo=timezone.utc)),
-        ("0308202603:00", datetime(2026, 3, 8, 7, 0, tzinfo=timezone.utc)),
-        ("030820260300", datetime(2026, 3, 8, 7, 0, tzinfo=timezone.utc)),
+        ("0308202601:59", datetime(2026, 3, 8, 6, 59, tzinfo=UTC)),
+        ("030820260159", datetime(2026, 3, 8, 6, 59, tzinfo=UTC)),
+        ("0308202603:00", datetime(2026, 3, 8, 7, 0, tzinfo=UTC)),
+        ("030820260300", datetime(2026, 3, 8, 7, 0, tzinfo=UTC)),
         # 2026 fall back: 02:00 ET on 2026-11-01.
-        ("1101202600:30", datetime(2026, 11, 1, 4, 30, tzinfo=timezone.utc)),
-        ("110120260030", datetime(2026, 11, 1, 4, 30, tzinfo=timezone.utc)),
-        ("1101202602:00", datetime(2026, 11, 1, 7, 0, tzinfo=timezone.utc)),
-        ("110120260200", datetime(2026, 11, 1, 7, 0, tzinfo=timezone.utc)),
+        ("1101202600:30", datetime(2026, 11, 1, 4, 30, tzinfo=UTC)),
+        ("110120260030", datetime(2026, 11, 1, 4, 30, tzinfo=UTC)),
+        ("1101202602:00", datetime(2026, 11, 1, 7, 0, tzinfo=UTC)),
+        ("110120260200", datetime(2026, 11, 1, 7, 0, tzinfo=UTC)),
         # The ambiguous repeated hour resolves deterministically to the first
         # (daylight) occurrence, i.e. fold=0.
-        ("1101202601:30", datetime(2026, 11, 1, 5, 30, tzinfo=timezone.utc)),
-        ("110120260130", datetime(2026, 11, 1, 5, 30, tzinfo=timezone.utc)),
+        ("1101202601:30", datetime(2026, 11, 1, 5, 30, tzinfo=UTC)),
+        ("110120260130", datetime(2026, 11, 1, 5, 30, tzinfo=UTC)),
     ),
 )
 def test_directory_footer_covers_both_dst_transitions(timestamp, expected):
     rows = parse_nasdaqlisted(
-        _nasdaq_body(timestamp), observed_at=NOW, expected_symbols=("AAPL",),
+        _nasdaq_body(timestamp),
+        observed_at=NOW,
+        expected_symbols=("AAPL",),
     )
     assert rows[0].directory_creation_time == expected
-    assert rows[0].directory_creation_time.tzinfo is timezone.utc
+    assert rows[0].directory_creation_time.tzinfo is UTC
 
 
 def test_captured_official_footers_parse_to_the_evidenced_utc_instant():
@@ -273,11 +306,13 @@ def test_captured_official_footers_parse_to_the_evidenced_utc_instant():
 
     nasdaq_rows = parse_nasdaqlisted(
         _body_with_footer("nasdaqlisted_sample.txt", CAPTURED_NASDAQLISTED_FOOTER),
-        observed_at=NOW, expected_symbols=("AAPL",),
+        observed_at=NOW,
+        expected_symbols=("AAPL",),
     )
     other_rows = parse_otherlisted(
         _body_with_footer("otherlisted_sample.txt", CAPTURED_OTHERLISTED_FOOTER),
-        observed_at=NOW, expected_symbols=("IBM",),
+        observed_at=NOW,
+        expected_symbols=("IBM",),
     )
     assert nasdaq_rows[0].directory_creation_time == CAPTURED_DIRECTORY_CREATION_TIME
     assert other_rows[0].directory_creation_time == CAPTURED_DIRECTORY_CREATION_TIME
@@ -325,7 +360,8 @@ def test_captured_official_footers_parse_to_the_evidenced_utc_instant():
 def test_official_footer_clock_rejects_every_other_shape(timestamp):
     with pytest.raises(ValueError, match="footer"):
         parse_nasdaqlisted(
-            _nasdaq_body(timestamp), observed_at=NOW,
+            _nasdaq_body(timestamp),
+            observed_at=NOW,
             expected_symbols=("AAPL",),
         )
 
@@ -334,7 +370,8 @@ def test_official_otherlisted_admits_m_only_as_a_non_target_venue():
     # Built on the captured otherlisted footer shape, so the "M" vocabulary and
     # the seven-field footer are proven together against the same evidence.
     with_m = _body_with_footer(
-        "otherlisted_sample.txt", CAPTURED_OTHERLISTED_FOOTER,
+        "otherlisted_sample.txt",
+        CAPTURED_OTHERLISTED_FOOTER,
     ).replace(
         b"ZZZ|Unsupported Acquisition Corp. Warrant|A|ZZZ|N|100|N|ZZZ",
         b"MMM|Some Company Common Stock|M|MMM|N|100|N|MMM",
@@ -352,7 +389,8 @@ def test_official_otherlisted_admits_m_only_as_a_non_target_venue():
     with pytest.raises(ValueError, match="venue_token_unknown"):
         parse_otherlisted(
             with_m.replace(b"|M|MMM|", b"|Q|MMM|", 1),
-            observed_at=NOW, expected_symbols=("IBM",),
+            observed_at=NOW,
+            expected_symbols=("IBM",),
         )
 
 
@@ -361,15 +399,18 @@ def test_official_footer_padding_admits_only_header_width_or_one_fewer():
     for padding in ("|||||||", "||||||"):
         rows = parse_otherlisted(
             _otherlisted_body("0813202601:30", padding=padding),
-            observed_at=NOW, expected_symbols=("IBM",),
+            observed_at=NOW,
+            expected_symbols=("IBM",),
         )
         assert rows[0].directory_creation_time == EXPECTED_DIRECTORY_CREATION_TIME
         nasdaq_rows = parse_nasdaqlisted(
             _nasdaq_body("0813202601:30", padding=padding),
-            observed_at=NOW, expected_symbols=("AAPL",),
+            observed_at=NOW,
+            expected_symbols=("AAPL",),
         )
         assert nasdaq_rows[0].directory_creation_time == (
-            EXPECTED_DIRECTORY_CREATION_TIME)
+            EXPECTED_DIRECTORY_CREATION_TIME
+        )
     # Degenerate padding is not an official form and is no longer admitted.
     for padding in ("|||||", "||||", "|||", "||", "|", ""):
         for builder, parser, symbol in (
@@ -379,19 +420,22 @@ def test_official_footer_padding_admits_only_header_width_or_one_fewer():
             with pytest.raises(ValueError, match="footer"):
                 parser(
                     builder("0813202601:30", padding=padding),
-                    observed_at=NOW, expected_symbols=(symbol,),
+                    observed_at=NOW,
+                    expected_symbols=(symbol,),
                 )
     # Wider than the header, or any non-empty trailing field, still fails.
     with pytest.raises(ValueError, match="footer"):
         parse_otherlisted(
             _otherlisted_body("0813202601:30", padding="||||||||"),
-            observed_at=NOW, expected_symbols=("IBM",),
+            observed_at=NOW,
+            expected_symbols=("IBM",),
         )
     for padding in ("|x||||||", "||||||x", "|||||| |"):
         with pytest.raises(ValueError, match="footer"):
             parse_otherlisted(
                 _otherlisted_body("0813202601:30", padding=padding),
-                observed_at=NOW, expected_symbols=("IBM",),
+                observed_at=NOW,
+                expected_symbols=("IBM",),
             )
 
 
@@ -406,25 +450,34 @@ def test_official_footer_padding_admits_only_header_width_or_one_fewer():
     ),
 )
 def test_security_name_classifier_accepts_supported_common_equity(name):
-    assert classify_security_name(
-        name,
-        policy_version=SECURITY_NAME_POLICY_VERSION,
-    ) is SecurityClassV1.COMMON_EQUITY
+    assert (
+        classify_security_name(
+            name,
+            policy_version=SECURITY_NAME_POLICY_VERSION,
+        )
+        is SecurityClassV1.COMMON_EQUITY
+    )
 
 
 @pytest.mark.parametrize("deny_token", DENY_TOKENS)
 def test_security_name_classifier_rejects_all_closed_deny_tokens(deny_token):
-    assert classify_security_name(
-        f"Example {deny_token} Common Stock",
-        policy_version=SECURITY_NAME_POLICY_VERSION,
-    ) is SecurityClassV1.UNSUPPORTED
+    assert (
+        classify_security_name(
+            f"Example {deny_token} Common Stock",
+            policy_version=SECURITY_NAME_POLICY_VERSION,
+        )
+        is SecurityClassV1.UNSUPPORTED
+    )
 
 
 def test_security_name_classifier_rejects_punctuation_bounded_deny_tokens_and_bad_policy():
-    assert classify_security_name(
-        "Example Common Stock (ADR)",
-        policy_version=SECURITY_NAME_POLICY_VERSION,
-    ) is SecurityClassV1.UNSUPPORTED
+    assert (
+        classify_security_name(
+            "Example Common Stock (ADR)",
+            policy_version=SECURITY_NAME_POLICY_VERSION,
+        )
+        is SecurityClassV1.UNSUPPORTED
+    )
     with pytest.raises(ValueError, match="policy"):
         classify_security_name(
             "Example Common Stock",
@@ -434,12 +487,14 @@ def test_security_name_classifier_rejects_punctuation_bounded_deny_tokens_and_ba
 
 def test_duplicate_missing_extra_and_registry_contract_reject():
     duplicate = (
-        FIXTURES / "nasdaqlisted_sample.txt"
-    ).read_text().replace(
-        "File Creation Time: 081320260130|||||||",
-        "AAPL|Apple Inc. Common Stock|Q|N|N|100|N|N\n"
-        "File Creation Time: 081320260130|||||||",
-        1,
+        (FIXTURES / "nasdaqlisted_sample.txt")
+        .read_text()
+        .replace(
+            "File Creation Time: 081320260130|||||||",
+            "AAPL|Apple Inc. Common Stock|Q|N|N|100|N|N\n"
+            "File Creation Time: 081320260130|||||||",
+            1,
+        )
     )
     with pytest.raises(ValueError, match="duplicate"):
         parse_nasdaqlisted(
@@ -447,11 +502,14 @@ def test_duplicate_missing_extra_and_registry_contract_reject():
             observed_at=NOW,
             expected_symbols=("AAPL",),
         )
-    assert parse_otherlisted(
-        (FIXTURES / "otherlisted_sample.txt").read_bytes(),
-        observed_at=NOW,
-        expected_symbols=("MSFT",),
-    ) == ()
+    assert (
+        parse_otherlisted(
+            (FIXTURES / "otherlisted_sample.txt").read_bytes(),
+            observed_at=NOW,
+            expected_symbols=("MSFT",),
+        )
+        == ()
+    )
     extra = json.loads((FIXTURES / "sec_registry_sample.json").read_text())
     extra["data"].append(["320193", "Apple Inc.", "AAPL", "Nasdaq"])
     with pytest.raises(ValueError, match="registry_duplicate"):
@@ -570,15 +628,19 @@ def test_submissions_ignores_non_target_unsupported_share_class_pairs():
         "exchanges": ["Nasdaq", "CBOE", None],
     }
     issuer = parse_sec_issuer(
-        json.dumps(issuer_body).encode(), observed_at=NOW,
-        expected_symbol="AAPL", expected_cik="0000320193",
+        json.dumps(issuer_body).encode(),
+        observed_at=NOW,
+        expected_symbol="AAPL",
+        expected_cik="0000320193",
         expected_exchange="NASDAQ",
     )
     assert issuer.symbol == "AAPL"
     assert issuer.exchange_token == "NASDAQ"
 
 
-@pytest.mark.parametrize("bad_cik", (True, "+320193", " 320193", "１２３", "", 12345678901))
+@pytest.mark.parametrize(
+    "bad_cik", (True, "+320193", " 320193", "１２３", "", 12345678901)
+)
 def test_cik_normalization_rejects_noncanonical_source_values(bad_cik):
     body = {
         "fields": ["cik", "name", "ticker", "exchange"],
@@ -630,13 +692,15 @@ def test_docs_manifests_quote_official_sources_and_separate_reconstructed_choice
         assert manifest["access_fair_use_note"]
         assert "bounded synthetic" not in manifest["quote_excerpt"]
         assert "membership testing" not in manifest["quote_excerpt"]
-        assert hashlib.sha256(
-            manifest["quote_excerpt"].encode("utf-8")
-        ).hexdigest() == manifest["quote_sha256"]
+        assert (
+            hashlib.sha256(manifest["quote_excerpt"].encode("utf-8")).hexdigest()
+            == manifest["quote_sha256"]
+        )
         fixture_path = FIXTURES / manifest["fixture_relpath"]
-        assert hashlib.sha256(
-            fixture_path.read_bytes()
-        ).hexdigest() == manifest["fixture_sha256"]
+        assert (
+            hashlib.sha256(fixture_path.read_bytes()).hexdigest()
+            == manifest["fixture_sha256"]
+        )
 
     sec_submissions = json.loads(
         (FIXTURES / "docs" / "sec_submissions.json").read_text()
@@ -657,82 +721,120 @@ def test_docs_manifests_quote_official_sources_and_separate_reconstructed_choice
 # (BRK-B) while the cohort and nasdaqtrader directories use the dot form
 # (BRK.B).  The SEC boundary alone normalizes.
 
+
 def test_registry_matches_hyphen_form_for_dot_cohort_symbol():
-    body = json.dumps({"fields": ["cik", "name", "ticker", "exchange"], "data": [
-        [1067983, "BERKSHIRE HATHAWAY INC", "BRK-B", "NYSE"],
-        [1652044, "Alphabet Inc.", "GOOGL", "Nasdaq"],
-        [1045810, "NVIDIA CORP", "NVDA", "Nasdaq"],
-        [80424, "PEPSICO INC", "PEP", "Nasdaq"],
-    ]}).encode("utf-8")
+    body = json.dumps(
+        {
+            "fields": ["cik", "name", "ticker", "exchange"],
+            "data": [
+                [1067983, "BERKSHIRE HATHAWAY INC", "BRK-B", "NYSE"],
+                [1652044, "Alphabet Inc.", "GOOGL", "Nasdaq"],
+                [1045810, "NVIDIA CORP", "NVDA", "Nasdaq"],
+                [80424, "PEPSICO INC", "PEP", "Nasdaq"],
+            ],
+        }
+    ).encode("utf-8")
     rows = parse_sec_registry(
-        body, observed_at=NOW,
-        expected_symbols=("BRK.B", "GOOGL", "NVDA", "PEP"))
+        body, observed_at=NOW, expected_symbols=("BRK.B", "GOOGL", "NVDA", "PEP")
+    )
     assert [row.symbol for row in rows] == ["BRK.B", "GOOGL", "NVDA", "PEP"]
     berkshire = rows[0]
     assert berkshire.cik == "0001067983"
     assert berkshire.exchange_token == "NYSE"
     # evidence bytes preserved on the raw row, not the normalized symbol
-    row_json = json.dumps([1067983, "BERKSHIRE HATHAWAY INC", "BRK-B", "NYSE"],
-                          separators=(",", ":"), ensure_ascii=True)
-    assert berkshire.row_sha256 == hashlib.sha256(
-        row_json.encode("utf-8")).hexdigest()
+    row_json = json.dumps(
+        [1067983, "BERKSHIRE HATHAWAY INC", "BRK-B", "NYSE"],
+        separators=(",", ":"),
+        ensure_ascii=True,
+    )
+    assert berkshire.row_sha256 == hashlib.sha256(row_json.encode("utf-8")).hexdigest()
 
 
 def test_issuer_matches_hyphen_ticker_pair_for_dot_cohort_symbol():
-    body = json.dumps({
-        "cik": 1067983, "sic": "6021",
-        "tickers": ["BRK-A", "BRK-B"], "exchanges": ["NYSE", "NYSE"],
-    }).encode("utf-8")
+    body = json.dumps(
+        {
+            "cik": 1067983,
+            "sic": "6021",
+            "tickers": ["BRK-A", "BRK-B"],
+            "exchanges": ["NYSE", "NYSE"],
+        }
+    ).encode("utf-8")
     issuer = parse_sec_issuer(
-        body, observed_at=NOW, expected_symbol="BRK.B",
-        expected_cik="0001067983", expected_exchange="NYSE")
+        body,
+        observed_at=NOW,
+        expected_symbol="BRK.B",
+        expected_cik="0001067983",
+        expected_exchange="NYSE",
+    )
     assert issuer.symbol == "BRK.B"
     assert issuer.exchange_token == "NYSE"
 
 
 def test_registry_rejects_dot_and_hyphen_duplicates():
-    body = json.dumps({"fields": ["cik", "name", "ticker", "exchange"], "data": [
-        [1067983, "BERKSHIRE HATHAWAY INC", "BRK-B", "NYSE"],
-        [1067983, "BERKSHIRE HATHAWAWAY INC", "BRK.B", "NYSE"],
-    ]}).encode("utf-8")
+    body = json.dumps(
+        {
+            "fields": ["cik", "name", "ticker", "exchange"],
+            "data": [
+                [1067983, "BERKSHIRE HATHAWAY INC", "BRK-B", "NYSE"],
+                [1067983, "BERKSHIRE HATHAWAWAY INC", "BRK.B", "NYSE"],
+            ],
+        }
+    ).encode("utf-8")
     with pytest.raises(ValueError, match="registry_duplicate"):
-        parse_sec_registry(body, observed_at=NOW,
-                           expected_symbols=("BRK.B",))
+        parse_sec_registry(body, observed_at=NOW, expected_symbols=("BRK.B",))
 
 
 def test_registry_plain_symbols_unchanged():
-    body = json.dumps({"fields": ["cik", "name", "ticker", "exchange"], "data": [
-        [320193, "Apple Inc.", "AAPL", "Nasdaq"],
-        [789019, "MICROSOFT CORP", "MSFT", "Nasdaq"],
-    ]}).encode("utf-8")
-    rows = parse_sec_registry(body, observed_at=NOW,
-                              expected_symbols=("AAPL", "MSFT"))
+    body = json.dumps(
+        {
+            "fields": ["cik", "name", "ticker", "exchange"],
+            "data": [
+                [320193, "Apple Inc.", "AAPL", "Nasdaq"],
+                [789019, "MICROSOFT CORP", "MSFT", "Nasdaq"],
+            ],
+        }
+    ).encode("utf-8")
+    rows = parse_sec_registry(body, observed_at=NOW, expected_symbols=("AAPL", "MSFT"))
     assert [row.symbol for row in rows] == ["AAPL", "MSFT"]
 
 
 def test_issuer_exchange_conflict_still_rejected():
-    body = json.dumps({
-        "cik": 1067983, "sic": "6021",
-        "tickers": ["BRK-B"], "exchanges": ["Nasdaq"],
-    }).encode("utf-8")
+    body = json.dumps(
+        {
+            "cik": 1067983,
+            "sic": "6021",
+            "tickers": ["BRK-B"],
+            "exchanges": ["Nasdaq"],
+        }
+    ).encode("utf-8")
     with pytest.raises(ValueError, match="issuer_exchange"):
         parse_sec_issuer(
-            body, observed_at=NOW, expected_symbol="BRK.B",
-            expected_cik="0001067983", expected_exchange="NYSE")
+            body,
+            observed_at=NOW,
+            expected_symbol="BRK.B",
+            expected_cik="0001067983",
+            expected_exchange="NYSE",
+        )
 
 
 def test_nasdaqtrader_parsers_do_not_use_sec_ticker_form():
     import inspect
+
     import tokmo.facts.quant_membership as module
+
     for parser_name in ("parse_nasdaqlisted", "parse_otherlisted"):
         source = inspect.getsource(getattr(module, parser_name))
         assert "sec_ticker_form" not in source, parser_name
 
 
 def test_registry_rejects_dot_and_hyphen_conflict_in_expected_symbols():
-    body = json.dumps({"fields": ["cik", "name", "ticker", "exchange"], "data": [
-        [1067983, "BERKSHIRE HATHAWAY INC", "BRK-B", "NYSE"],
-    ]}).encode("utf-8")
+    body = json.dumps(
+        {
+            "fields": ["cik", "name", "ticker", "exchange"],
+            "data": [
+                [1067983, "BERKSHIRE HATHAWAY INC", "BRK-B", "NYSE"],
+            ],
+        }
+    ).encode("utf-8")
     with pytest.raises(ValueError, match="expected_symbols_sec_conflict"):
-        parse_sec_registry(body, observed_at=NOW,
-                           expected_symbols=("BRK.B", "BRK-B"))
+        parse_sec_registry(body, observed_at=NOW, expected_symbols=("BRK.B", "BRK-B"))

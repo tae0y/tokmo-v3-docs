@@ -1,4 +1,5 @@
 """Immutable order command vocabulary; no transport, storage or strategy."""
+
 from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
@@ -62,7 +63,9 @@ class OrderCommand:
     operation: OrderOperation
     market: str
     symbol: str = field(repr=False)
-    payload: RegularOrder | ReplaceOrder | CancelOrder | ConditionalOrder = field(repr=False)
+    payload: RegularOrder | ReplaceOrder | CancelOrder | ConditionalOrder = field(
+        repr=False
+    )
     target_id: str | None = field(default=None, repr=False)
 
 
@@ -82,6 +85,7 @@ class OrderWireResponse:
 @dataclass(frozen=True)
 class OrderCommandResult:
     """ACCEPTED acknowledges the command, never certifies a fill/cancellation."""
+
     status: str
     code: str
     order_id: str | None = field(default=None, repr=False)

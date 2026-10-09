@@ -9,53 +9,57 @@ fails atomically: one bad item invalidates the entire result.
 import json
 import re
 from datetime import date
-from tokmo.values.toss_investor_trading import (
-    InvestorTradingVolume, StockInvestorTradingRecord, StockInvestorTradingResponse,
-)
-from tokmo.values.toss_order_info import BuyingPowerResponse, SellableQuantityResponse, Commission
 
 from tokmo.values import (
-    MISSING,
-    Opt,
-    RawStr,
-    _Decimal30,
-    _DecimalNoMax,
-    _AwareDateTime,
-    _StrictDate,
-    _RawEnum,
     _INSTITUTION_BREAKDOWN_KEYS,
+    MISSING,
     CalendarSession,
     Candle,
     CandlePageResponse,
     ConditionalOrderCondition,
     ConditionalOrderDetailResponse,
     ExchangeRateResponse,
-    IntegratedHour,
     InstitutionTradingBreakdown,
+    IntegratedHour,
     InvestorTradingAmount,
     InvestorTradingRecord,
     InvestorTradingResponse,
-    KrMarketDay,
     KrMarketCalendarResponse,
+    KrMarketDay,
     KrMarketDetail,
     MarketIndicatorCandle,
     MarketIndicatorCandlePageResponse,
     MarketIndicatorPrice,
+    Opt,
     Order,
-    OrderExecution,
     OrderbookEntry,
     OrderbookResponse,
+    OrderExecution,
     PaginatedConditionalOrderResponse,
     PaginatedOrderResponse,
     PriceLimitResponse,
     RankingItem,
     RankingPrice,
     RankingResponse,
+    RawStr,
     StockInfo,
     StockWarning,
     Trade,
-    UsMarketDay,
     UsMarketCalendarResponse,
+    UsMarketDay,
+    _AwareDateTime,
+    _Decimal30,
+    _StrictDate,
+)
+from tokmo.values.toss_investor_trading import (
+    InvestorTradingVolume,
+    StockInvestorTradingRecord,
+    StockInvestorTradingResponse,
+)
+from tokmo.values.toss_order_info import (
+    BuyingPowerResponse,
+    Commission,
+    SellableQuantityResponse,
 )
 
 __all__ = ["parse_envelope"]
@@ -64,6 +68,7 @@ __all__ = ["parse_envelope"]
 # =========================================================================
 # Envelope loading
 # =========================================================================
+
 
 def _load_envelope(body: bytes):
     """Return the ``result`` value if the body is a valid envelope, else
@@ -97,6 +102,7 @@ _WRONG = _Wrong()
 # =========================================================================
 # Common field extraction helpers
 # =========================================================================
+
 
 def _req_str(obj: dict, key: str) -> str | None:
     """Required string that must be a non-empty ``str``."""
@@ -220,8 +226,8 @@ def _opt_nullable_str_no_max(obj: dict, key: str):
 # Dispatch
 # =========================================================================
 
-def parse_envelope(body: bytes, operation: str, *,
-                   requested_symbols=None, status=None):
+
+def parse_envelope(body: bytes, operation: str, *, requested_symbols=None, status=None):
     """Dispatch to the schema-specific parser for ``operation``.
 
     Returns the typed value on success, ``_FAIL`` for invalid JSON/bytes,
@@ -233,8 +239,9 @@ def parse_envelope(body: bytes, operation: str, *,
     if result is _WRONG:
         return _WRONG
     try:
-        return _dispatch(operation, result,
-                         requested_symbols=requested_symbols, status=status)
+        return _dispatch(
+            operation, result, requested_symbols=requested_symbols, status=status
+        )
     except Exception:
         return _WRONG
 
@@ -242,6 +249,7 @@ def parse_envelope(body: bytes, operation: str, *,
 # =========================================================================
 # Bundle 1 parsers
 # =========================================================================
+
 
 def _parse_orderbook(result) -> object:
     if not isinstance(result, dict):
@@ -258,8 +266,7 @@ def _parse_orderbook(result) -> object:
     bids = _parse_orderbook_entries(result.get("bids"))
     if bids is _WRONG:
         return _WRONG
-    return OrderbookResponse(
-        currency=currency, asks=asks, bids=bids, timestamp=ts)
+    return OrderbookResponse(currency=currency, asks=asks, bids=bids, timestamp=ts)
 
 
 def _parse_orderbook_entries(raw) -> tuple[OrderbookEntry, ...] | object:
@@ -292,8 +299,9 @@ def _parse_trades(result) -> object:
         currency = _req_str(item, "currency")
         if price is None or volume is None or ts is None or currency is None:
             return _WRONG
-        trades.append(Trade(
-            price=price, volume=volume, timestamp=ts, currency=currency))
+        trades.append(
+            Trade(price=price, volume=volume, timestamp=ts, currency=currency)
+        )
     return tuple(trades)
 
 
@@ -309,8 +317,11 @@ def _parse_price_limits(result) -> object:
     if upper is _WRONG or lower is _WRONG:
         return _WRONG
     return PriceLimitResponse(
-        timestamp=ts, currency=currency,
-        upper_limit_price=upper, lower_limit_price=lower)
+        timestamp=ts,
+        currency=currency,
+        upper_limit_price=upper,
+        lower_limit_price=lower,
+    )
 
 
 def _parse_stock_candles(result) -> object:
@@ -341,9 +352,17 @@ def _parse_candles(raw) -> tuple[Candle, ...] | object:
         cur = _req_str(item, "currency")
         if any(x is None for x in (ts, op, hp, lp, cp, vol, cur)):
             return _WRONG
-        candles.append(Candle(
-            timestamp=ts, open_price=op, high_price=hp,
-            low_price=lp, close_price=cp, volume=vol, currency=cur))
+        candles.append(
+            Candle(
+                timestamp=ts,
+                open_price=op,
+                high_price=hp,
+                low_price=lp,
+                close_price=cp,
+                volume=vol,
+                currency=cur,
+            )
+        )
     return tuple(candles)
 
 
@@ -377,8 +396,21 @@ def _parse_stock_info(item: dict) -> StockInfo | object:
     status = _req_str(item, "status")
     currency = _req_str(item, "currency")
     shares = _req_decimal30(item, "sharesOutstanding")
-    if any(x is None for x in (symbol, name, english_name, isin, market,
-                               sec_type, is_common, status, currency, shares)):
+    if any(
+        x is None
+        for x in (
+            symbol,
+            name,
+            english_name,
+            isin,
+            market,
+            sec_type,
+            is_common,
+            status,
+            currency,
+            shares,
+        )
+    ):
         return _WRONG
     list_date = _opt_nullable_date(item, "listDate")
     delist_date = _opt_nullable_date(item, "delistDate")
@@ -396,12 +428,21 @@ def _parse_stock_info(item: dict) -> StockInfo | object:
                 return _WRONG
             kr_detail = parsed
     return StockInfo(
-        symbol=symbol, name=name, english_name=english_name,
-        isin_code=isin, market=market, security_type=sec_type,
-        is_common_share=is_common, status=status, currency=currency,
-        shares_outstanding=shares, list_date=list_date,
-        delist_date=delist_date, leverage_factor=leverage,
-        korean_market_detail=kr_detail)
+        symbol=symbol,
+        name=name,
+        english_name=english_name,
+        isin_code=isin,
+        market=market,
+        security_type=sec_type,
+        is_common_share=is_common,
+        status=status,
+        currency=currency,
+        shares_outstanding=shares,
+        list_date=list_date,
+        delist_date=delist_date,
+        leverage_factor=leverage,
+        korean_market_detail=kr_detail,
+    )
 
 
 def _parse_kr_market_detail(raw) -> KrMarketDetail | object:
@@ -425,8 +466,11 @@ def _parse_kr_market_detail(raw) -> KrMarketDetail | object:
     else:
         nxt_susp = MISSING
     return KrMarketDetail(
-        liquidation_trading=liq, nxt_supported=nxt,
-        krx_trading_suspended=krx_susp, nxt_trading_suspended=nxt_susp)
+        liquidation_trading=liq,
+        nxt_supported=nxt,
+        krx_trading_suspended=krx_susp,
+        nxt_trading_suspended=nxt_susp,
+    )
 
 
 def _parse_stock_warnings(result) -> object:
@@ -444,9 +488,14 @@ def _parse_stock_warnings(result) -> object:
         end_date = _opt_nullable_date(item, "endDate")
         if any(x is _WRONG for x in (exchange, start_date, end_date)):
             return _WRONG
-        warnings.append(StockWarning(
-            warning_type=wt, exchange=exchange,
-            start_date=start_date, end_date=end_date))
+        warnings.append(
+            StockWarning(
+                warning_type=wt,
+                exchange=exchange,
+                start_date=start_date,
+                end_date=end_date,
+            )
+        )
     return tuple(warnings)
 
 
@@ -464,9 +513,15 @@ def _parse_exchange_rate(result) -> object:
     if any(x is None for x in (base, quote, rate, mid, bp, rct, vf, vu)):
         return _WRONG
     return ExchangeRateResponse(
-        base_currency=base, quote_currency=quote, rate=rate,
-        mid_rate=mid, basis_point=bp, rate_change_type=rct,
-        valid_from=vf, valid_until=vu)
+        base_currency=base,
+        quote_currency=quote,
+        rate=rate,
+        mid_rate=mid,
+        basis_point=bp,
+        rate_change_type=rct,
+        valid_from=vf,
+        valid_until=vu,
+    )
 
 
 def _parse_kr_calendar(result) -> object:
@@ -478,7 +533,8 @@ def _parse_kr_calendar(result) -> object:
     if any(x is _WRONG for x in (today, prev, nxt)):
         return _WRONG
     return KrMarketCalendarResponse(
-        today=today, previous_business_day=prev, next_business_day=nxt)
+        today=today, previous_business_day=prev, next_business_day=nxt
+    )
 
 
 def _parse_kr_market_day(raw) -> KrMarketDay | object:
@@ -510,8 +566,7 @@ def _parse_integrated_hour(raw) -> IntegratedHour | object:
     am = _parse_optional_session(raw, "afterMarket")
     if any(x is _WRONG for x in (pm, rm, am)):
         return _WRONG
-    return IntegratedHour(
-        pre_market=pm, regular_market=rm, after_market=am)
+    return IntegratedHour(pre_market=pm, regular_market=rm, after_market=am)
 
 
 def _parse_optional_session(raw: dict, key: str):
@@ -535,9 +590,11 @@ def _parse_session(raw) -> CalendarSession | object:
     if spat is _WRONG or epat is _WRONG:
         return _WRONG
     return CalendarSession(
-        start_time=st, end_time=et,
+        start_time=st,
+        end_time=et,
         single_price_auction_start_time=spat,
-        single_price_auction_end_time=epat)
+        single_price_auction_end_time=epat,
+    )
 
 
 def _parse_us_calendar(result) -> object:
@@ -549,7 +606,8 @@ def _parse_us_calendar(result) -> object:
     if any(x is _WRONG for x in (today, prev, nxt)):
         return _WRONG
     return UsMarketCalendarResponse(
-        today=today, previous_business_day=prev, next_business_day=nxt)
+        today=today, previous_business_day=prev, next_business_day=nxt
+    )
 
 
 def _parse_us_market_day(raw) -> UsMarketDay | object:
@@ -571,13 +629,14 @@ def _parse_us_market_day(raw) -> UsMarketDay | object:
     if any(x is _WRONG for x in (dm, pm, rm, am)):
         return _WRONG
     return UsMarketDay(
-        date=d, day_market=dm, pre_market=pm,
-        regular_market=rm, after_market=am)
+        date=d, day_market=dm, pre_market=pm, regular_market=rm, after_market=am
+    )
 
 
 # =========================================================================
 # Bundle 2 parsers
 # =========================================================================
+
 
 def _parse_rankings(result) -> object:
     if not isinstance(result, dict):
@@ -596,8 +655,7 @@ def _parse_rankings(result) -> object:
         if ri is _WRONG:
             return _WRONG
         items.append(ri)
-    return RankingResponse(
-        rankings=tuple(items), ranked_at=ranked_at)
+    return RankingResponse(rankings=tuple(items), ranked_at=ranked_at)
 
 
 def _parse_ranking_item(item: dict) -> RankingItem | object:
@@ -619,10 +677,13 @@ def _parse_ranking_item(item: dict) -> RankingItem | object:
     if change is _WRONG:
         return _WRONG
     return RankingItem(
-        rank=rank, symbol=symbol, currency=currency,
-        price=RankingPrice(last_price=last_p, base_price=base_p,
-                           change_rate=change),
-        trading_volume=tv, trading_amount=ta)
+        rank=rank,
+        symbol=symbol,
+        currency=currency,
+        price=RankingPrice(last_price=last_p, base_price=base_p, change_rate=change),
+        trading_volume=tv,
+        trading_amount=ta,
+    )
 
 
 def _parse_indicator_prices(result, requested_symbols) -> object:
@@ -639,8 +700,9 @@ def _parse_indicator_prices(result, requested_symbols) -> object:
         ts = _opt_nullable_datetime(item, "timestamp")
         if ts is _WRONG:
             return _WRONG
-        items.append(MarketIndicatorPrice(
-            symbol=symbol, last_price=last_price, timestamp=ts))
+        items.append(
+            MarketIndicatorPrice(symbol=symbol, last_price=last_price, timestamp=ts)
+        )
     returned = tuple(mi.symbol for mi in items)
     if len(set(returned)) != len(returned):
         return _WRONG
@@ -667,37 +729,61 @@ def _parse_indicator_candles(result) -> object:
         vol = _req_decimal30(item, "volume")
         if any(x is None for x in (ts, op, hp, lp, cp, vol)):
             return _WRONG
-        candles.append(MarketIndicatorCandle(
-            timestamp=ts, open_price=op, high_price=hp,
-            low_price=lp, close_price=cp, volume=vol))
+        candles.append(
+            MarketIndicatorCandle(
+                timestamp=ts,
+                open_price=op,
+                high_price=hp,
+                low_price=lp,
+                close_price=cp,
+                volume=vol,
+            )
+        )
     nb = _opt_nullable_datetime(result, "nextBefore")
     if nb is _WRONG:
         return _WRONG
-    return MarketIndicatorCandlePageResponse(
-        candles=tuple(candles), next_before=nb)
+    return MarketIndicatorCandlePageResponse(candles=tuple(candles), next_before=nb)
 
 
 def _parse_stock_investor_trading(result) -> object:
-    if not isinstance(result, dict) or not isinstance(result.get('records'), list):
+    if not isinstance(result, dict) or not isinstance(result.get("records"), list):
         return _WRONG
+
     def volume(raw):
-        if not isinstance(raw, dict): return _WRONG
-        values = [raw.get(k) for k in ('buyVolume', 'sellVolume', 'netBuyVolume')]
-        if any(not isinstance(v, str) or len(v) > 30 or re.fullmatch(r'-?\d+', v) is None for v in values):
+        if not isinstance(raw, dict):
+            return _WRONG
+        values = [raw.get(k) for k in ("buyVolume", "sellVolume", "netBuyVolume")]
+        if any(
+            not isinstance(v, str) or len(v) > 30 or re.fullmatch(r"-?\d+", v) is None
+            for v in values
+        ):
             return _WRONG
         return InvestorTradingVolume(*values)
+
     records = []
-    for row in result['records']:
-        if not isinstance(row, dict): return _WRONG
-        day, at = _req_date(row, 'date'), _req_datetime(row, 'updatedAt')
-        personal = row.get('individual', MISSING)
-        if personal is not None and personal is not MISSING: personal = volume(personal)
-        foreign, institution = volume(row.get('foreigner')), volume(row.get('institution'))
-        if day is None or at is None or any(v is _WRONG for v in (personal, foreign, institution)):
+    for row in result["records"]:
+        if not isinstance(row, dict):
             return _WRONG
-        records.append(StockInvestorTradingRecord(day, at, personal, foreign, institution))
-    cursor = _opt_nullable_date(result, 'nextUntil')
-    if cursor is _WRONG: return _WRONG
+        day, at = _req_date(row, "date"), _req_datetime(row, "updatedAt")
+        personal = row.get("individual", MISSING)
+        if personal is not None and personal is not MISSING:
+            personal = volume(personal)
+        foreign, institution = (
+            volume(row.get("foreigner")),
+            volume(row.get("institution")),
+        )
+        if (
+            day is None
+            or at is None
+            or any(v is _WRONG for v in (personal, foreign, institution))
+        ):
+            return _WRONG
+        records.append(
+            StockInvestorTradingRecord(day, at, personal, foreign, institution)
+        )
+    cursor = _opt_nullable_date(result, "nextUntil")
+    if cursor is _WRONG:
+        return _WRONG
     return StockInvestorTradingResponse(tuple(records), cursor)
 
 
@@ -716,8 +802,7 @@ def _parse_investor_trading(result) -> object:
     nu = _opt_nullable_date(result, "nextUntil")
     if nu is _WRONG:
         return _WRONG
-    return InvestorTradingResponse(
-        records=tuple(records), next_until=nu)
+    return InvestorTradingResponse(records=tuple(records), next_until=nu)
 
 
 def _parse_investor_trading_record(item) -> InvestorTradingRecord | object:
@@ -746,9 +831,15 @@ def _parse_investor_trading_record(item) -> InvestorTradingRecord | object:
     if any(x is _WRONG for x in (ind, fr, oc)):
         return _WRONG
     return InvestorTradingRecord(
-        date=d, updated_at=ua, individual=ind, foreigner=fr,
-        institution_buy_amount=inst_buy, institution_sell_amount=inst_sell,
-        institution_breakdown=breakdown, other_corporation=oc)
+        date=d,
+        updated_at=ua,
+        individual=ind,
+        foreigner=fr,
+        institution_buy_amount=inst_buy,
+        institution_sell_amount=inst_sell,
+        institution_breakdown=breakdown,
+        other_corporation=oc,
+    )
 
 
 def _parse_investor_amount(raw) -> InvestorTradingAmount | object:
@@ -784,6 +875,7 @@ def _parse_institution_breakdown(raw: dict) -> InstitutionTradingBreakdown | obj
 # =========================================================================
 # Bundle 3 parsers
 # =========================================================================
+
 
 def _parse_orders(result, status) -> object:
     if not isinstance(result, dict):
@@ -821,8 +913,8 @@ def _parse_orders(result, status) -> object:
         if has_next_raw != cursor_present:
             return _WRONG
     return PaginatedOrderResponse(
-        orders=tuple(orders), next_cursor=next_cursor,
-        has_next=has_next_raw)
+        orders=tuple(orders), next_cursor=next_cursor, has_next=has_next_raw
+    )
 
 
 def _parse_order(item) -> Order | object:
@@ -837,8 +929,10 @@ def _parse_order(item) -> Order | object:
     qty = _req_decimal30(item, "quantity")
     currency = _req_str(item, "currency")
     ordered = _req_datetime(item, "orderedAt")
-    if any(x is None for x in (order_id, symbol, side, ot, tif, status,
-                               qty, currency, ordered)):
+    if any(
+        x is None
+        for x in (order_id, symbol, side, ot, tif, status, qty, currency, ordered)
+    ):
         return _WRONG
     price = _opt_nullable_decimal30(item, "price")
     oa = _opt_nullable_decimal30(item, "orderAmount")
@@ -852,10 +946,20 @@ def _parse_order(item) -> Order | object:
     if execution is _WRONG:
         return _WRONG
     return Order(
-        order_id=order_id, symbol=symbol, side=side, order_type=ot,
-        time_in_force=tif, status=status, quantity=qty, currency=currency,
-        ordered_at=ordered, execution=execution,
-        price=price, order_amount=oa, canceled_at=canceled)
+        order_id=order_id,
+        symbol=symbol,
+        side=side,
+        order_type=ot,
+        time_in_force=tif,
+        status=status,
+        quantity=qty,
+        currency=currency,
+        ordered_at=ordered,
+        execution=execution,
+        price=price,
+        order_amount=oa,
+        canceled_at=canceled,
+    )
 
 
 def _parse_execution(raw: dict) -> OrderExecution | object:
@@ -873,8 +977,14 @@ def _parse_execution(raw: dict) -> OrderExecution | object:
     if any(x is _WRONG for x in (afp, fa, comm, tax, fat, sd)):
         return _WRONG
     return OrderExecution(
-        filled_quantity=fq, average_filled_price=afp, filled_amount=fa,
-        commission=comm, tax=tax, filled_at=fat, settlement_date=sd)
+        filled_quantity=fq,
+        average_filled_price=afp,
+        filled_amount=fa,
+        commission=comm,
+        tax=tax,
+        filled_at=fat,
+        settlement_date=sd,
+    )
 
 
 def _parse_order_detail(result) -> object:
@@ -915,8 +1025,8 @@ def _parse_conditional_orders(result, status) -> object:
     if has_next_raw != cursor_present_non_null:
         return _WRONG
     return PaginatedConditionalOrderResponse(
-        conditional_orders=tuple(items), has_next=has_next_raw,
-        next_cursor=next_cursor)
+        conditional_orders=tuple(items), has_next=has_next_raw, next_cursor=next_cursor
+    )
 
 
 def _parse_conditional_order_detail(result) -> object:
@@ -925,7 +1035,9 @@ def _parse_conditional_order_detail(result) -> object:
     return _parse_conditional_order_detail_obj(result)
 
 
-def _parse_conditional_order_detail_obj(item) -> ConditionalOrderDetailResponse | object:
+def _parse_conditional_order_detail_obj(
+    item,
+) -> ConditionalOrderDetailResponse | object:
     if not isinstance(item, dict):
         return _WRONG
     coid = _req_str(item, "conditionalOrderId")
@@ -958,9 +1070,18 @@ def _parse_conditional_order_detail_obj(item) -> ConditionalOrderDetailResponse 
                 return _WRONG
             second = parsed
     return ConditionalOrderDetailResponse(
-        conditional_order_id=coid, type=typ, status=status,
-        symbol=symbol, market=market, quantity=qty, order_type=ot,
-        first=first, created_at=created, expire_date=expire, second=second)
+        conditional_order_id=coid,
+        type=typ,
+        status=status,
+        symbol=symbol,
+        market=market,
+        quantity=qty,
+        order_type=ot,
+        first=first,
+        created_at=created,
+        expire_date=expire,
+        second=second,
+    )
 
 
 def _parse_conditional_condition(raw: dict) -> ConditionalOrderCondition | object:
@@ -980,20 +1101,31 @@ def _parse_conditional_condition(raw: dict) -> ConditionalOrderCondition | objec
     if any(x is _WRONG for x in (tp, tpr, op, toi)):
         return _WRONG
     return ConditionalOrderCondition(
-        type=typ, status=status, order_side=side, trigger_price=tp,
-        target_profit_rate=tpr, order_price=op, triggered_order_id=toi)
+        type=typ,
+        status=status,
+        order_side=side,
+        trigger_price=tp,
+        target_profit_rate=tpr,
+        order_price=op,
+        triggered_order_id=toi,
+    )
 
 
 # =========================================================================
 # Dispatch table
 # =========================================================================
 
+
 def _parse_buying_power(result):
     if not isinstance(result, dict):
         return _WRONG
     currency = _req_str(result, "currency")
     amount = _req_decimal30(result, "cashBuyingPower")
-    return BuyingPowerResponse(currency, amount) if currency and amount is not None else _WRONG
+    return (
+        BuyingPowerResponse(currency, amount)
+        if currency and amount is not None
+        else _WRONG
+    )
 
 
 def _parse_sellable_quantity(result):
@@ -1015,8 +1147,16 @@ def _parse_commissions(result):
         if not market or rate is None:
             return _WRONG
         try:
-            start = date.fromisoformat(item["startDate"]) if item.get("startDate") is not None else None
-            end = date.fromisoformat(item["endDate"]) if item.get("endDate") is not None else None
+            start = (
+                date.fromisoformat(item["startDate"])
+                if item.get("startDate") is not None
+                else None
+            )
+            end = (
+                date.fromisoformat(item["endDate"])
+                if item.get("endDate") is not None
+                else None
+            )
         except (ValueError, TypeError):
             return _WRONG
         rows.append(Commission(market, rate, start, end))

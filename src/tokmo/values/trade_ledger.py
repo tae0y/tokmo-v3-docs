@@ -21,25 +21,27 @@ EVENT_KINDS = frozenset({"EXECUTION", "CORRECTION"})
 
 # The closed diagnostic vocabulary: receipts, exceptions, and audit rows may
 # carry these tokens and nothing else.
-CLOSED_REASON_TOKENS = frozenset({
-    "invalid_batch",
-    "source_contract_violation",
-    "batch_identity_conflict",
-    "supersession_invalid",
-    "schema_mismatch",
-    "store_corrupt",
-    "store_locked",
-    "store_write_failed",
-    "store_read_failed",
-    "audit_write_failed",
-    "promotion_link_failed",
-    "promotion_recovery_required",
-    "candidate_missing",
-    "canonical_exists",
-    "wal_checkpoint_failed",
-    "sidecars_present",
-    "directory_mismatch",
-})
+CLOSED_REASON_TOKENS = frozenset(
+    {
+        "invalid_batch",
+        "source_contract_violation",
+        "batch_identity_conflict",
+        "supersession_invalid",
+        "schema_mismatch",
+        "store_corrupt",
+        "store_locked",
+        "store_write_failed",
+        "store_read_failed",
+        "audit_write_failed",
+        "promotion_link_failed",
+        "promotion_recovery_required",
+        "candidate_missing",
+        "canonical_exists",
+        "wal_checkpoint_failed",
+        "sidecars_present",
+        "directory_mismatch",
+    }
+)
 
 
 @dataclass(frozen=True, repr=False)

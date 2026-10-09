@@ -9,28 +9,28 @@ No persistence, composition, campaign runner, scheduler, retry, alert,
 semantic calculation, or production wiring beyond facts query functions.
 """
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from enum import Enum
-import re
 
-from tokmo.facts.toss import valid_token, valid_account_seq
-from tokmo.facts.toss_read_parsers import parse_envelope, _FAIL, _WRONG
+from tokmo.facts.toss import valid_account_seq, valid_token
+from tokmo.facts.toss_read_parsers import _FAIL, _WRONG, parse_envelope
 from tokmo.values import MISSING
 
 __all__ = [
-    "TossReadOperation",
-    "TossReadSpec",
-    "SPEC_TABLE",
-    "TossReadRequest",
-    "TossReadOutcome",
     "REQUEST_TIMEOUT_SECONDS",
+    "SPEC_TABLE",
+    "TossReadOperation",
+    "TossReadOutcome",
+    "TossReadRequest",
+    "TossReadSpec",
     "build_read_request",
     "parse_read_response",
     "query_read",
-    "valid_iso_date",
     "valid_account_seq_int64",
+    "valid_iso_date",
 ]
 
 REQUEST_TIMEOUT_SECONDS = 10.0
@@ -39,6 +39,7 @@ REQUEST_TIMEOUT_SECONDS = 10.0
 # =========================================================================
 # Closed operation enum
 # =========================================================================
+
 
 class TossReadOperation(Enum):
     BUYING_POWER = "BUYING_POWER"
@@ -65,8 +66,10 @@ class TossReadOperation(Enum):
 
 
 def resolve_conditional_order_side(
-        order_type: str, leg_index: int,
-        leg_order_side: object, legacy_order_side: object = None,
+    order_type: str,
+    leg_index: int,
+    leg_order_side: object,
+    legacy_order_side: object = None,
 ) -> str | None:
     """Resolve one conditional-order leg's provider-defined direction.
 
@@ -87,7 +90,10 @@ def resolve_conditional_order_side(
         if not isinstance(leg_order_side, str) or leg_order_side not in {"BUY", "SELL"}:
             raise ValueError("conditional_order_side_contract")
         return leg_order_side
-    if not isinstance(legacy_order_side, str) or legacy_order_side not in {"BUY", "SELL"}:
+    if not isinstance(legacy_order_side, str) or legacy_order_side not in {
+        "BUY",
+        "SELL",
+    }:
         legacy_order_side = None
     if order_type == "SINGLE":
         return legacy_order_side
@@ -96,10 +102,10 @@ def resolve_conditional_order_side(
     return "BUY" if leg_index == 0 else "SELL"
 
 
-
 # =========================================================================
 # Immutable spec table
 # =========================================================================
+
 
 @dataclass(frozen=True)
 class TossReadSpec:
@@ -111,68 +117,110 @@ class TossReadSpec:
 
 SPEC_TABLE: dict[TossReadOperation, TossReadSpec] = {
     TossReadOperation.STOCK_INVESTOR_TRADING: TossReadSpec(
-        TossReadOperation.STOCK_INVESTOR_TRADING, "/api/v1/stocks/{symbol}/investor-trading",
-        "STOCK_TRADING_TREND", "FORBIDDEN"),
+        TossReadOperation.STOCK_INVESTOR_TRADING,
+        "/api/v1/stocks/{symbol}/investor-trading",
+        "STOCK_TRADING_TREND",
+        "FORBIDDEN",
+    ),
     TossReadOperation.BUYING_POWER: TossReadSpec(
-        TossReadOperation.BUYING_POWER, "/api/v1/buying-power", "ORDER_INFO", "required"),
+        TossReadOperation.BUYING_POWER, "/api/v1/buying-power", "ORDER_INFO", "required"
+    ),
     TossReadOperation.SELLABLE_QUANTITY: TossReadSpec(
-        TossReadOperation.SELLABLE_QUANTITY, "/api/v1/sellable-quantity", "ORDER_INFO", "required"),
+        TossReadOperation.SELLABLE_QUANTITY,
+        "/api/v1/sellable-quantity",
+        "ORDER_INFO",
+        "required",
+    ),
     TossReadOperation.COMMISSIONS: TossReadSpec(
-        TossReadOperation.COMMISSIONS, "/api/v1/commissions", "ORDER_INFO", "required"),
+        TossReadOperation.COMMISSIONS, "/api/v1/commissions", "ORDER_INFO", "required"
+    ),
     TossReadOperation.ORDERBOOK: TossReadSpec(
-        TossReadOperation.ORDERBOOK, "/api/v1/orderbook",
-        "MARKET_DATA", "FORBIDDEN"),
+        TossReadOperation.ORDERBOOK, "/api/v1/orderbook", "MARKET_DATA", "FORBIDDEN"
+    ),
     TossReadOperation.TRADES: TossReadSpec(
-        TossReadOperation.TRADES, "/api/v1/trades",
-        "MARKET_DATA", "FORBIDDEN"),
+        TossReadOperation.TRADES, "/api/v1/trades", "MARKET_DATA", "FORBIDDEN"
+    ),
     TossReadOperation.PRICE_LIMITS: TossReadSpec(
-        TossReadOperation.PRICE_LIMITS, "/api/v1/price-limits",
-        "MARKET_DATA", "FORBIDDEN"),
+        TossReadOperation.PRICE_LIMITS,
+        "/api/v1/price-limits",
+        "MARKET_DATA",
+        "FORBIDDEN",
+    ),
     TossReadOperation.STOCK_CANDLES: TossReadSpec(
-        TossReadOperation.STOCK_CANDLES, "/api/v1/candles",
-        "MARKET_DATA_CHART", "FORBIDDEN"),
+        TossReadOperation.STOCK_CANDLES,
+        "/api/v1/candles",
+        "MARKET_DATA_CHART",
+        "FORBIDDEN",
+    ),
     TossReadOperation.STOCKS: TossReadSpec(
-        TossReadOperation.STOCKS, "/api/v1/stocks",
-        "STOCK", "FORBIDDEN"),
+        TossReadOperation.STOCKS, "/api/v1/stocks", "STOCK", "FORBIDDEN"
+    ),
     TossReadOperation.STOCK_WARNINGS: TossReadSpec(
-        TossReadOperation.STOCK_WARNINGS, "/api/v1/stocks/{symbol}/warnings",
-        "STOCK", "FORBIDDEN"),
+        TossReadOperation.STOCK_WARNINGS,
+        "/api/v1/stocks/{symbol}/warnings",
+        "STOCK",
+        "FORBIDDEN",
+    ),
     TossReadOperation.EXCHANGE_RATE: TossReadSpec(
-        TossReadOperation.EXCHANGE_RATE, "/api/v1/exchange-rate",
-        "MARKET_INFO", "FORBIDDEN"),
+        TossReadOperation.EXCHANGE_RATE,
+        "/api/v1/exchange-rate",
+        "MARKET_INFO",
+        "FORBIDDEN",
+    ),
     TossReadOperation.KR_MARKET_CALENDAR: TossReadSpec(
-        TossReadOperation.KR_MARKET_CALENDAR, "/api/v1/market-calendar/KR",
-        "MARKET_INFO", "FORBIDDEN"),
+        TossReadOperation.KR_MARKET_CALENDAR,
+        "/api/v1/market-calendar/KR",
+        "MARKET_INFO",
+        "FORBIDDEN",
+    ),
     TossReadOperation.US_MARKET_CALENDAR: TossReadSpec(
-        TossReadOperation.US_MARKET_CALENDAR, "/api/v1/market-calendar/US",
-        "MARKET_INFO", "FORBIDDEN"),
+        TossReadOperation.US_MARKET_CALENDAR,
+        "/api/v1/market-calendar/US",
+        "MARKET_INFO",
+        "FORBIDDEN",
+    ),
     TossReadOperation.RANKINGS: TossReadSpec(
-        TossReadOperation.RANKINGS, "/api/v1/rankings",
-        "RANKING", "FORBIDDEN"),
+        TossReadOperation.RANKINGS, "/api/v1/rankings", "RANKING", "FORBIDDEN"
+    ),
     TossReadOperation.INDICATOR_PRICES: TossReadSpec(
-        TossReadOperation.INDICATOR_PRICES, "/api/v1/market-indicators/prices",
-        "MARKET_INDICATOR", "FORBIDDEN"),
+        TossReadOperation.INDICATOR_PRICES,
+        "/api/v1/market-indicators/prices",
+        "MARKET_INDICATOR",
+        "FORBIDDEN",
+    ),
     TossReadOperation.INDICATOR_CANDLES: TossReadSpec(
         TossReadOperation.INDICATOR_CANDLES,
         "/api/v1/market-indicators/{symbol}/candles",
-        "MARKET_INDICATOR_CHART", "FORBIDDEN"),
+        "MARKET_INDICATOR_CHART",
+        "FORBIDDEN",
+    ),
     TossReadOperation.INDICATOR_INVESTOR_TRADING: TossReadSpec(
         TossReadOperation.INDICATOR_INVESTOR_TRADING,
         "/api/v1/market-indicators/{symbol}/investor-trading",
-        "MARKET_INDICATOR", "FORBIDDEN"),
+        "MARKET_INDICATOR",
+        "FORBIDDEN",
+    ),
     TossReadOperation.ORDERS: TossReadSpec(
-        TossReadOperation.ORDERS, "/api/v1/orders",
-        "ORDER_HISTORY", "required"),
+        TossReadOperation.ORDERS, "/api/v1/orders", "ORDER_HISTORY", "required"
+    ),
     TossReadOperation.ORDER_DETAIL: TossReadSpec(
-        TossReadOperation.ORDER_DETAIL, "/api/v1/orders/{orderId}",
-        "ORDER_HISTORY", "required"),
+        TossReadOperation.ORDER_DETAIL,
+        "/api/v1/orders/{orderId}",
+        "ORDER_HISTORY",
+        "required",
+    ),
     TossReadOperation.CONDITIONAL_ORDERS: TossReadSpec(
-        TossReadOperation.CONDITIONAL_ORDERS, "/api/v1/conditional-orders",
-        "CONDITIONAL_ORDER_HISTORY", "required"),
+        TossReadOperation.CONDITIONAL_ORDERS,
+        "/api/v1/conditional-orders",
+        "CONDITIONAL_ORDER_HISTORY",
+        "required",
+    ),
     TossReadOperation.CONDITIONAL_ORDER_DETAIL: TossReadSpec(
         TossReadOperation.CONDITIONAL_ORDER_DETAIL,
         "/api/v1/conditional-orders/{conditionalOrderId}",
-        "CONDITIONAL_ORDER_HISTORY", "required"),
+        "CONDITIONAL_ORDER_HISTORY",
+        "required",
+    ),
 }
 
 
@@ -187,28 +235,49 @@ _CURSOR_RE = re.compile(r"^[A-Za-z0-9_\-]+$")
 
 _CANDLE_INTERVALS = frozenset({"1m", "1d"})
 _INVESTOR_INTERVALS = frozenset({"1d", "1w", "1mo", "1y"})
-_RANKING_TYPES = frozenset({
-    "MARKET_TRADING_AMOUNT", "MARKET_TRADING_VOLUME",
-    "TOP_GAINERS", "TOP_LOSERS",
-    "TOSS_SECURITIES_TRADING_AMOUNT", "TOSS_SECURITIES_TRADING_VOLUME",
-})
-_RANKING_DURATIONS = frozenset({
-    "realtime", "1d", "1w", "1mo", "3mo", "6mo", "1y",
-})
+_RANKING_TYPES = frozenset(
+    {
+        "MARKET_TRADING_AMOUNT",
+        "MARKET_TRADING_VOLUME",
+        "TOP_GAINERS",
+        "TOP_LOSERS",
+        "TOSS_SECURITIES_TRADING_AMOUNT",
+        "TOSS_SECURITIES_TRADING_VOLUME",
+    }
+)
+_RANKING_DURATIONS = frozenset(
+    {
+        "realtime",
+        "1d",
+        "1w",
+        "1mo",
+        "3mo",
+        "6mo",
+        "1y",
+    }
+)
 _TOP_RANKING_TYPES = frozenset({"TOP_GAINERS", "TOP_LOSERS"})
 _CURRENCIES = frozenset({"KRW", "USD"})
 _MARKET_COUNTRIES = frozenset({"KR", "US"})
-_INDICATOR_CATALOG = frozenset({
-    "KOSPI", "KOSDAQ", "KR_BOND_2Y", "KR_BOND_3Y",
-    "KR_BOND_5Y", "KR_BOND_10Y", "KR_BOND_20Y", "KR_BOND_30Y",
-})
+_INDICATOR_CATALOG = frozenset(
+    {
+        "KOSPI",
+        "KOSDAQ",
+        "KR_BOND_2Y",
+        "KR_BOND_3Y",
+        "KR_BOND_5Y",
+        "KR_BOND_10Y",
+        "KR_BOND_20Y",
+        "KR_BOND_30Y",
+    }
+)
 _INVESTOR_SYMBOLS = frozenset({"KOSPI", "KOSDAQ"})
 _ORDER_STATUSES = frozenset({"OPEN", "CLOSED"})
 _BOND_PREFIX = "KR_BOND_"
 
 
 def _valid_single_symbol(value) -> bool:
-    return (isinstance(value, str) and _SYMBOL_RE.fullmatch(value) is not None)
+    return isinstance(value, str) and _SYMBOL_RE.fullmatch(value) is not None
 
 
 def _valid_batch_symbols(value) -> tuple[str, ...] | None:
@@ -219,7 +288,11 @@ def _valid_batch_symbols(value) -> tuple[str, ...] | None:
     if len(set(value)) != len(value):
         return None
     for sym in value:
-        if not isinstance(sym, str) or not sym or _BATCH_SYMBOL_RE.fullmatch(sym) is None:
+        if (
+            not isinstance(sym, str)
+            or not sym
+            or _BATCH_SYMBOL_RE.fullmatch(sym) is None
+        ):
             return None
     return value
 
@@ -246,7 +319,11 @@ def _valid_int(value, lo: int, hi: int) -> int | None:
 
 
 def _valid_aware_datetime(value) -> datetime | None:
-    if isinstance(value, datetime) and value.tzinfo is not None and value.utcoffset() is not None:
+    if (
+        isinstance(value, datetime)
+        and value.tzinfo is not None
+        and value.utcoffset() is not None
+    ):
         return value
     return None
 
@@ -273,8 +350,8 @@ def valid_iso_date(value) -> bool:
     return True
 
 
-_INT64_MIN = -(2 ** 63)
-_INT64_MAX = 2 ** 63 - 1
+_INT64_MIN = -(2**63)
+_INT64_MAX = 2**63 - 1
 _INT64_RE = re.compile(r"^-?\d{1,19}$")
 
 
@@ -306,6 +383,7 @@ def _valid_opaque_id(value) -> str | None:
 # =========================================================================
 # Request type
 # =========================================================================
+
 
 @dataclass(frozen=True)
 class TossReadRequest:
@@ -351,10 +429,14 @@ class TossReadRequest:
 # Request builder
 # =========================================================================
 
+
 def build_read_request(
-        operation: TossReadOperation, *, token: str,
-        account_seq: str | None = None,
-        **kwargs) -> TossReadRequest:
+    operation: TossReadOperation,
+    *,
+    token: str,
+    account_seq: str | None = None,
+    **kwargs,
+) -> TossReadRequest:
     """Build a validated request for one of the 20 operations.
 
     Raises ``ValueError`` on invalid parameters. Raises ``TypeError`` if a
@@ -379,7 +461,9 @@ def build_read_request(
     params: dict = {}
 
     if op == "BUYING_POWER":
-        params["currency"] = _require_enum(kwargs.pop("currency", None), {"KRW", "USD"}, "currency")
+        params["currency"] = _require_enum(
+            kwargs.pop("currency", None), {"KRW", "USD"}, "currency"
+        )
         _reject_extra(kwargs)
 
     elif op == "SELLABLE_QUANTITY":
@@ -431,11 +515,7 @@ def build_read_request(
         _require_currencies(kwargs, params)
         _reject_extra(kwargs)
 
-    elif op == "KR_MARKET_CALENDAR":
-        _optional_date(kwargs, params)
-        _reject_extra(kwargs)
-
-    elif op == "US_MARKET_CALENDAR":
+    elif op == "KR_MARKET_CALENDAR" or op == "US_MARKET_CALENDAR":
         _optional_date(kwargs, params)
         _reject_extra(kwargs)
 
@@ -443,8 +523,9 @@ def build_read_request(
         _require_ranking_type(kwargs, params)
         _require_market_country(kwargs, params)
         _require_duration(kwargs, params)
-        _optional_bool(kwargs, params, "excludeInvestmentCaution",
-                       "exclude_investment_caution")
+        _optional_bool(
+            kwargs, params, "excludeInvestmentCaution", "exclude_investment_caution"
+        )
         _optional_count(kwargs, params, 1, 100)
         _reject_extra(kwargs)
 
@@ -469,7 +550,8 @@ def build_read_request(
 
     elif op == "ORDERS":
         params["status"] = _require_enum(
-            kwargs.pop("status"), _ORDER_STATUSES, "status")
+            kwargs.pop("status"), _ORDER_STATUSES, "status"
+        )
         _optional_symbol(kwargs, params)
         _optional_named_date(kwargs, params, "from", "from_date")
         _optional_named_date(kwargs, params, "to", "to_date")
@@ -483,7 +565,8 @@ def build_read_request(
 
     elif op == "CONDITIONAL_ORDERS":
         params["status"] = _require_enum(
-            kwargs.pop("status"), _ORDER_STATUSES, "status")
+            kwargs.pop("status"), _ORDER_STATUSES, "status"
+        )
         _optional_symbol(kwargs, params)
         _optional_conditional_cursor(kwargs, params)
         _optional_limit(kwargs, params, 1, 100)
@@ -491,7 +574,8 @@ def build_read_request(
 
     elif op == "CONDITIONAL_ORDER_DETAIL":
         params["conditional_order_id"] = _require_opaque_id_kwarg(
-            kwargs, "conditional_order_id")
+            kwargs, "conditional_order_id"
+        )
         _reject_extra(kwargs)
 
     else:
@@ -509,6 +593,7 @@ def build_read_request(
 # =========================================================================
 # Per-operation validator helpers
 # =========================================================================
+
 
 def _reject_extra(kwargs):
     if kwargs:
@@ -745,6 +830,7 @@ def _require_opaque_id_kwarg(kwargs, key):
 # Query outcome
 # =========================================================================
 
+
 @dataclass(frozen=True)
 class TossReadOutcome:
     """Closed outcome: ``success`` with a ``repr=False`` value, or a closed
@@ -761,12 +847,15 @@ class TossReadOutcome:
 # Response parsing (called by query_read after transport returns body)
 # =========================================================================
 
-def parse_read_response(*, req: TossReadRequest, body: bytes,
-                        fetched_at: datetime) -> TossReadOutcome:
+
+def parse_read_response(
+    *, req: TossReadRequest, body: bytes, fetched_at: datetime
+) -> TossReadOutcome:
     """Parse the transport body into a typed value or closed failure."""
     op = req.operation.value
     parsed = parse_envelope(
-        body, op,
+        body,
+        op,
         requested_symbols=req.symbols if req.symbols else None,
         status=req.status if req.status else None,
     )
@@ -781,10 +870,10 @@ def parse_read_response(*, req: TossReadRequest, body: bytes,
 # One-request orchestration
 # =========================================================================
 
+
 def query_read(
-        request: TossReadRequest, *,
-        transport: Callable,
-        clock: Callable[[], datetime]) -> TossReadOutcome:
+    request: TossReadRequest, *, transport: Callable, clock: Callable[[], datetime]
+) -> TossReadOutcome:
     """Start exactly one transport attempt, then parse atomically.
 
     No retry, no auto-pagination, no loop. One call to ``transport``,
@@ -792,8 +881,7 @@ def query_read(
     """
     reply = transport(request)
     if hasattr(reply, "body"):
-        parsed = parse_read_response(
-            req=request, body=reply.body, fetched_at=clock())
+        parsed = parse_read_response(req=request, body=reply.body, fetched_at=clock())
         return TossReadOutcome(
             parsed.code,
             parsed.value,

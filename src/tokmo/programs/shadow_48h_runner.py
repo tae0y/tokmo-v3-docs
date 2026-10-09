@@ -27,16 +27,16 @@ deduplicated with cooldown, FINISH once); stock signal and analysis alerts
 are zero, and no model or order API is reachable from this module.
 """
 
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 import fcntl
 import importlib.util
 import json
 import os
-from pathlib import Path
 import re
 import sys
-from typing import Callable, Mapping
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from tokmo.records.durability import fsync_directory
 from tokmo.records.prelaunch_markers import MarkerError
@@ -62,7 +62,11 @@ _ORDER_WRITE_MODULES = (
 
 # The only summary fields a tick record may carry into durable state.
 _TICK_RECORD_ALLOWLIST = (
-    "outcome", "reason", "exit_code", "lag_seconds", "mask_digest",
+    "outcome",
+    "reason",
+    "exit_code",
+    "lag_seconds",
+    "mask_digest",
     "open_markets",
 )
 
@@ -72,7 +76,7 @@ class ShadowRunnerRefusal(ValueError):
 
 
 def _z(value: datetime) -> str:
-    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 @dataclass(frozen=True)
@@ -95,19 +99,26 @@ class Shadow48hConfigV1:
         if self.mode != RUNNER_MODE:
             raise ValueError("live-shadow is the only enabled runner mode")
         start = self.start_at_utc
-        if (not isinstance(start, datetime) or start.tzinfo is None
-                or start.utcoffset() is None or start.microsecond != 0):
+        if (
+            not isinstance(start, datetime)
+            or start.tzinfo is None
+            or start.utcoffset() is None
+            or start.microsecond != 0
+        ):
             raise ValueError("start_at_utc must be aware")
-        if (type(self.interval_seconds) is not int
-                or self.interval_seconds <= 0
-                or type(self.duration_seconds) is not int
-                or self.duration_seconds <= 0
-                or self.duration_seconds % self.interval_seconds != 0):
+        if (
+            type(self.interval_seconds) is not int
+            or self.interval_seconds <= 0
+            or type(self.duration_seconds) is not int
+            or self.duration_seconds <= 0
+            or self.duration_seconds % self.interval_seconds != 0
+        ):
             raise ValueError("duration must be whole positive intervals")
         if int(start.timestamp()) % self.interval_seconds != 0:
             raise ValueError("start_at_utc must align to the interval grid")
-        if (type(self.expected_commit) is not str
-                or not _COMMIT_SHA.fullmatch(self.expected_commit)):
+        if type(self.expected_commit) is not str or not _COMMIT_SHA.fullmatch(
+            self.expected_commit
+        ):
             raise ValueError("expected commit must be the full 40-hex identity")
         if self.lifecycle not in LIFECYCLE_MODES:
             raise ValueError("unknown lifecycle mode")
@@ -203,7 +214,8 @@ class Shadow48hStateStore:
 
     def write(self, state: Mapping) -> None:
         _atomic_write_private(
-            self.path, json.dumps(dict(state), sort_keys=True).encode(),
+            self.path,
+            json.dumps(dict(state), sort_keys=True).encode(),
         )
 
 
@@ -217,8 +229,11 @@ def _production_canonical_root() -> Path:
 def _refuse_unsafe_root(root: Path) -> Path:
     resolved = Path(root).absolute()
     production = _production_canonical_root().absolute()
-    if (resolved == production or production in resolved.parents
-            or resolved in production.parents):
+    if (
+        resolved == production
+        or production in resolved.parents
+        or resolved in production.parents
+    ):
         raise ShadowRunnerRefusal("unsafe_shadow_root")
     return resolved
 
@@ -227,8 +242,7 @@ def _order_write_capability_present(environ: Mapping) -> bool:
     if environ.get(_ORDER_WRITE_ENV_FLAG):
         return True
     return any(
-        importlib.util.find_spec(name) is not None
-        for name in _ORDER_WRITE_MODULES
+        importlib.util.find_spec(name) is not None for name in _ORDER_WRITE_MODULES
     )
 
 
@@ -239,14 +253,16 @@ def _preflight(config: Shadow48hConfigV1, deps: ShadowRunnerDepsV1) -> None:
         raise ShadowRunnerRefusal("commit_mismatch")
     try:
         deps.marker_verify(
-            config.full_suite_marker, kind="full-suite",
+            config.full_suite_marker,
+            kind="full-suite",
             expected_commit=config.expected_commit,
         )
     except MarkerError:
         raise ShadowRunnerRefusal("marker_full_suite_invalid") from None
     try:
         deps.marker_verify(
-            config.review_marker, kind="pilot-acceptance",
+            config.review_marker,
+            kind="pilot-acceptance",
             expected_commit=config.expected_commit,
         )
     except MarkerError:
@@ -257,9 +273,11 @@ def _preflight(config: Shadow48hConfigV1, deps: ShadowRunnerDepsV1) -> None:
         raise ShadowRunnerRefusal("credentials_unavailable")
     now = deps.clock()
     window_start = config.start_at_utc - _CLOCK_SANITY_WINDOW
-    window_end = (config.start_at_utc
-                  + timedelta(seconds=config.duration_seconds)
-                  + _CLOCK_SANITY_WINDOW)
+    window_end = (
+        config.start_at_utc
+        + timedelta(seconds=config.duration_seconds)
+        + _CLOCK_SANITY_WINDOW
+    )
     if not window_start <= now <= window_end:
         raise ShadowRunnerRefusal("clock_out_of_range")
 
@@ -284,8 +302,7 @@ def _sanitized_stage(stage: Mapping) -> dict:
     }
 
 
-def _tick_record(summary: Mapping, *, duration_ms: int, config,
-                 slot_iso: str) -> dict:
+def _tick_record(summary: Mapping, *, duration_ms: int, config, slot_iso: str) -> dict:
     record = {"status": summary.get("outcome"), "duration_ms": duration_ms}
     for key in _TICK_RECORD_ALLOWLIST:
         if key == "outcome":
@@ -294,10 +311,11 @@ def _tick_record(summary: Mapping, *, duration_ms: int, config,
     wire = summary.get("wire")
     record["wire"] = dict(wire) if isinstance(wire, Mapping) else None
     stages = summary.get("stages")
-    record["stages"] = ([
-        _sanitized_stage(stage) for stage in stages
-        if isinstance(stage, Mapping)
-    ] if isinstance(stages, list) else None)
+    record["stages"] = (
+        [_sanitized_stage(stage) for stage in stages if isinstance(stage, Mapping)]
+        if isinstance(stages, list)
+        else None
+    )
     record["receipt"] = {
         "policy_version": config.policy_version,
         "scheduled_for_utc": slot_iso,
@@ -323,8 +341,7 @@ def _terminal_summary(state: dict, finished_at: datetime) -> dict:
                 if stage.get("reason") == "backfill_deferred":
                     deferred_ticks += 1
         wire = record.get("wire")
-        started = wire.get("operation_started") if isinstance(wire, Mapping) \
-            else None
+        started = wire.get("operation_started") if isinstance(wire, Mapping) else None
         for operation, count in (started or {}).items():
             if isinstance(count, int) and count > 0:
                 exercised_routes.add(operation)
@@ -333,16 +350,12 @@ def _terminal_summary(state: dict, finished_at: datetime) -> dict:
         "finished_at": _z(finished_at),
         "counts": counts,
         "lag_max_seconds": max(lags) if lags else 0.0,
-        "lag_avg_seconds": (
-            round(sum(lags) / len(lags), 3) if lags else 0.0
-        ),
+        "lag_avg_seconds": (round(sum(lags) / len(lags), 3) if lags else 0.0),
         "history_bootstrap": {
             "backfill_deferred_ticks": deferred_ticks,
             "history_ok_ticks": history_ok_ticks,
         },
-        "unverified_routes": sorted(
-            set(CADENCE_OPERATIONS) - exercised_routes
-        ),
+        "unverified_routes": sorted(set(CADENCE_OPERATIONS) - exercised_routes),
     }
 
 
@@ -354,8 +367,7 @@ def _sleep_until(deps: ShadowRunnerDepsV1, target: datetime) -> None:
         deps.sleep(min(remaining, _WAIT_CHUNK_SECONDS))
 
 
-def run_48h_shadow(config: Shadow48hConfigV1,
-                   deps: ShadowRunnerDepsV1) -> int:
+def run_48h_shadow(config: Shadow48hConfigV1, deps: ShadowRunnerDepsV1) -> int:
     """Run (or resume) one 48-hour live-shadow campaign; returns exit code."""
     try:
         root = _refuse_unsafe_root(config.shadow_root)
@@ -377,9 +389,13 @@ def run_48h_shadow(config: Shadow48hConfigV1,
         print("tokmo-48h-shadow refusal=duplicate_instance", file=sys.stderr)
         return 1
     try:
-        return _run_locked(config, deps, Shadow48hStateStore(
-            harness / "state.json",
-        ))
+        return _run_locked(
+            config,
+            deps,
+            Shadow48hStateStore(
+                harness / "state.json",
+            ),
+        )
     except ShadowRunnerRefusal as refusal:
         print(f"tokmo-48h-shadow refusal={refusal}", file=sys.stderr)
         return 1
@@ -395,10 +411,12 @@ def _run_locked(config, deps, store: Shadow48hStateStore) -> int:
             raise ShadowRunnerRefusal("state_config_mismatch")
         if state.get("terminal") is not None:
             # successful completion is inert: no rerun, no re-emission
-            print(json.dumps(
-                {"status": "ALREADY_COMPLETE",
-                 "terminal": state["terminal"]}, sort_keys=True,
-            ))
+            print(
+                json.dumps(
+                    {"status": "ALREADY_COMPLETE", "terminal": state["terminal"]},
+                    sort_keys=True,
+                )
+            )
             return 0
 
     _preflight(config, deps)
@@ -438,7 +456,7 @@ def _run_locked(config, deps, store: Shadow48hStateStore) -> int:
     end_epoch = int(intended_end.timestamp())
 
     for slot_epoch in range(first_epoch, end_epoch, interval):
-        slot = datetime.fromtimestamp(slot_epoch, tz=timezone.utc)
+        slot = datetime.fromtimestamp(slot_epoch, tz=UTC)
         slot_iso = _z(slot)
         if slot_iso in state["ticks"]:
             continue  # a recorded slot is never replayed
@@ -447,10 +465,14 @@ def _run_locked(config, deps, store: Shadow48hStateStore) -> int:
             # the whole slot elapsed while the runner was down: MISSED, and
             # never invoked retroactively
             state["ticks"][slot_iso] = {
-                "status": "MISSED", "reason": "elapsed_during_downtime",
-                "exit_code": None, "duration_ms": 0,
-                "receipt": {"policy_version": config.policy_version,
-                            "scheduled_for_utc": slot_iso},
+                "status": "MISSED",
+                "reason": "elapsed_during_downtime",
+                "exit_code": None,
+                "duration_ms": 0,
+                "receipt": {
+                    "policy_version": config.policy_version,
+                    "scheduled_for_utc": slot_iso,
+                },
             }
             store.write(state)
             continue
@@ -461,37 +483,49 @@ def _run_locked(config, deps, store: Shadow48hStateStore) -> int:
             summary = deps.invoke_tick(slot, observed)
         except Exception as error:
             duration_ms = max(
-                0, int((deps.clock() - observed).total_seconds() * 1000),
+                0,
+                int((deps.clock() - observed).total_seconds() * 1000),
             )
             reason = f"exception_{type(error).__name__}"
             state["ticks"][slot_iso] = {
-                "status": "HARNESS_ERROR", "reason": reason,
-                "exit_code": None, "duration_ms": duration_ms,
-                "receipt": {"policy_version": config.policy_version,
-                            "scheduled_for_utc": slot_iso},
+                "status": "HARNESS_ERROR",
+                "reason": reason,
+                "exit_code": None,
+                "duration_ms": duration_ms,
+                "receipt": {
+                    "policy_version": config.policy_version,
+                    "scheduled_for_utc": slot_iso,
+                },
             }
             store.write(state)
             deps.lifecycle_emit(
-                "FATAL", signature=f"invoke_{type(error).__name__}",
+                "FATAL",
+                signature=f"invoke_{type(error).__name__}",
             )
             continue
         duration_seconds = (deps.clock() - observed).total_seconds()
         state["ticks"][slot_iso] = _tick_record(
-            summary, duration_ms=max(0, int(duration_seconds * 1000)),
-            config=config, slot_iso=slot_iso,
+            summary,
+            duration_ms=max(0, int(duration_seconds * 1000)),
+            config=config,
+            slot_iso=slot_iso,
         )
         store.write(state)
         if duration_seconds > interval:
             deps.lifecycle_emit(
-                "STALLED", signature="tick_overrun",
+                "STALLED",
+                signature="tick_overrun",
                 detail=f"duration_{int(duration_seconds)}s",
             )
 
     state["terminal"] = _terminal_summary(state, deps.clock())
     store.write(state)
     deps.lifecycle_emit("FINISH")
-    print(json.dumps({"status": "COMPLETE",
-                      "terminal": state["terminal"]}, sort_keys=True))
+    print(
+        json.dumps(
+            {"status": "COMPLETE", "terminal": state["terminal"]}, sort_keys=True
+        )
+    )
     return 0
 
 

@@ -23,55 +23,66 @@ cache read on demand, never a refresh loop.
 """
 
 import argparse
-from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
 import hashlib
 import json
 import os
-from pathlib import Path
 import pwd
 import stat
 import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from dataclasses import dataclass
+from datetime import UTC, date, datetime
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
 from tokmo.facts.bls_release_calendar import (
-    BLS_TZID, IANA_ZONE, MAX_ICS_BYTES, BlsCalendarRejection,
-    parse_bls_calendar_v1, select_release_instant_v1,
+    BLS_TZID,
+    IANA_ZONE,
+    MAX_ICS_BYTES,
+    BlsCalendarRejection,
+    parse_bls_calendar_v1,
+    select_release_instant_v1,
 )
 from tokmo.facts.fred_live import (
-    FredLiveTransport, build_live_opener, load_fred_api_key,
+    FredLiveTransport,
+    build_live_opener,
+    load_fred_api_key,
 )
 from tokmo.facts.fred_query import (
-    FredQueryAdapterV1, FredScheduleAdapterV1, TerminalMonthGuardedPortV1,
+    FredQueryAdapterV1,
+    FredScheduleAdapterV1,
+    TerminalMonthGuardedPortV1,
     observation_limit,
 )
 from tokmo.fred_query_composition import (
-    FredStartBudget, BudgetedFredTransportV1,
+    BudgetedFredTransportV1,
+    FredStartBudget,
 )
 from tokmo.programs.macro_fred_inputs import (
+    derive_query_window_v1,
     run_macro_fred_enrichment_v1,
-    derive_query_window_v1, previous_calendar_month, last_day_of_month,
-    WINDOW_MONTHS_BEFORE_TERMINAL,
 )
-from tokmo.records.atomic_json import read_atomic_json, write_atomic_json
 from tokmo.records.fred_query_cache import DATABASE_NAME, FredQueryCacheV1
 from tokmo.records.fred_schedule_sidecar import (
-    LoadedScheduleV1, MAX_SIDECAR_BYTES, SIDECAR_NAME, SIDECAR_SCHEMA,
-    SIDECAR_SCHEMA_VERSION, ScheduleSidecarInvalid,
-    build_sidecar_payload_v1, encode_sidecar_payload_v1,
-    format_instant_v1, load_schedule_sidecar_v1, parse_instant_v1,
+    SIDECAR_NAME,
+    LoadedScheduleV1,
+    ScheduleSidecarInvalid,
+    build_sidecar_payload_v1,
+    format_instant_v1,
+    load_schedule_sidecar_v1,
     write_schedule_sidecar_v1,
 )
-from tokmo.records.private_sqlite import prepare_private_path
 from tokmo.values.fred_query import (
-    SCHEDULE_DOMAIN, SERIES_PAYEMS, SERIES_REGISTRY, FredCoverageV1,
-    FredDueStateV1, FredQueryFailureV1, FredReleaseScheduleV1,
-    FredSeriesQueryV1, build_fred_release_schedule_v1, canonical_json,
-    domain_digest, release_slot_for,
+    SERIES_PAYEMS,
+    FredCoverageV1,
+    FredDueStateV1,
+    FredQueryFailureV1,
+    FredReleaseScheduleV1,
+    build_fred_release_schedule_v1,
+    canonical_json,
 )
 
 # -- declared boundaries ----------------------------------------------------
@@ -84,8 +95,7 @@ BLS_RESOURCE_PATH = "/schedule/news_release/bls.ics"
 BLS_SOURCE_ID = "BLS_ICS_V1"
 BLS_SUMMARY = "Employment Situation"
 BLS_UA_ENV_KEY = "BLS_USER_AGENT"
-JOIN_RULE = ("SUMMARY_EXACT+TZID_ALLOWLIST+DST_CROSSCHECK+"
-             "LOCAL_DATE_EQUAL+SINGLETON")
+JOIN_RULE = "SUMMARY_EXACT+TZID_ALLOWLIST+DST_CROSSCHECK+LOCAL_DATE_EQUAL+SINGLETON"
 GRACE_SECONDS = 900
 
 # Per-invocation ceilings (§4.8). Cumulative purpose accounting is recorded
@@ -100,11 +110,19 @@ MAX_CREDENTIAL_BYTES = 4096
 
 EXECUTE_FLAG = "--fred-ondemand-canary-execute"
 
-BLS_FAILURE_CODES = frozenset({
-    "timeout", "connection_failure", "redirect", "bad_request", "http_429",
-    "http_5xx", "body_too_large", "unsupported_content_encoding",
-    "protocol_failure",
-})
+BLS_FAILURE_CODES = frozenset(
+    {
+        "timeout",
+        "connection_failure",
+        "redirect",
+        "bad_request",
+        "http_429",
+        "http_5xx",
+        "body_too_large",
+        "unsupported_content_encoding",
+        "protocol_failure",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -120,17 +138,24 @@ def ondemand_paths() -> OndemandPathsV1:
     home = Path(pwd.getpwuid(os.getuid()).pw_dir).resolve(strict=True)
     namespace = home / ".local" / "share" / "tokmo-v3" / "fred-ondemand"
     root = namespace / "v1"
-    return OndemandPathsV1(root, root / SIDECAR_NAME,
-                           Path(__file__).resolve().parents[1] / ".secrets" / "hermes-credentials" / "fred.env",
-                           namespace / ".ondemand-v1.lock")
+    return OndemandPathsV1(
+        root,
+        root / SIDECAR_NAME,
+        Path(__file__).resolve().parents[1]
+        / ".secrets"
+        / "hermes-credentials"
+        / "fred.env",
+        namespace / ".ondemand-v1.lock",
+    )
 
 
 def paths_for_root(root: Path, *, credential: Path) -> OndemandPathsV1:
     """The same identity around an explicitly injected root."""
     if not isinstance(root, Path) or not isinstance(credential, Path):
         raise ValueError("explicit_root_required")
-    return OndemandPathsV1(root, root / SIDECAR_NAME, credential,
-                           root.parent / ".ondemand-v1.lock")
+    return OndemandPathsV1(
+        root, root / SIDECAR_NAME, credential, root.parent / ".ondemand-v1.lock"
+    )
 
 
 # -- per-invocation start budgets (§4.8) ------------------------------------
@@ -180,8 +205,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def build_bls_opener():
-    return urllib.request.build_opener(urllib.request.ProxyHandler({}),
-                                       _NoRedirect())
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
 
 
 def load_bls_user_agent(path: Path) -> str:
@@ -202,10 +226,14 @@ def load_bls_user_agent(path: Path) -> str:
     except OSError:
         raise ValueError("credential_unsafe") from None
     uid = os.getuid() if hasattr(os, "getuid") else None
-    if (not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode)
-            or stat.S_IMODE(info.st_mode) != 0o600
-            or uid is None or info.st_uid != uid
-            or info.st_size > MAX_CREDENTIAL_BYTES):
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or stat.S_ISLNK(info.st_mode)
+        or stat.S_IMODE(info.st_mode) != 0o600
+        or uid is None
+        or info.st_uid != uid
+        or info.st_size > MAX_CREDENTIAL_BYTES
+    ):
         raise ValueError("credential_unsafe")
     try:
         descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
@@ -264,14 +292,23 @@ class BlsIcsTransport:
     def __call__(self) -> BlsTransportOutcome:
         try:
             wire = urllib.request.Request(
-                BLS_SOURCE_URL, data=None, method="GET",
-                headers={"User-Agent": self._user_agent,
-                         "Accept": "text/calendar",
-                         "Accept-Encoding": "identity"})
+                BLS_SOURCE_URL,
+                data=None,
+                method="GET",
+                headers={
+                    "User-Agent": self._user_agent,
+                    "Accept": "text/calendar",
+                    "Accept-Encoding": "identity",
+                },
+            )
             parts = urllib.parse.urlsplit(wire.full_url)
-            if ((parts.scheme, parts.hostname, parts.port, parts.path,
-                 parts.query) != ("https", BLS_HOST, None, BLS_RESOURCE_PATH, "")
-                    or wire.method != "GET"):
+            if (parts.scheme, parts.hostname, parts.port, parts.path, parts.query) != (
+                "https",
+                BLS_HOST,
+                None,
+                BLS_RESOURCE_PATH,
+                "",
+            ) or wire.method != "GET":
                 return BlsTransportOutcome("protocol_failure")
             with self._opener.open(wire, timeout=TIMEOUT_SECONDS) as response:
                 return _read_ics_response(response)
@@ -312,8 +349,11 @@ def _bls_failure_code(error: BaseException) -> str:
             return "http_5xx"
         return "protocol_failure"
     if isinstance(error, urllib.error.URLError):
-        return ("timeout" if isinstance(getattr(error, "reason", None),
-                                        TimeoutError) else "connection_failure")
+        return (
+            "timeout"
+            if isinstance(getattr(error, "reason", None), TimeoutError)
+            else "connection_failure"
+        )
     if isinstance(error, TimeoutError):
         return "timeout"
     if isinstance(error, OSError):
@@ -324,9 +364,14 @@ def _bls_failure_code(error: BaseException) -> str:
 # -- schedule provenance and the private sidecar (§4.6/§4.9) ----------------
 
 
-def build_schedule_provenance_v1(*, release_id: int, release_date: date,
-                                 official_release_at: datetime,
-                                 body_sha256: str, body_bytes: int) -> dict:
+def build_schedule_provenance_v1(
+    *,
+    release_id: int,
+    release_date: date,
+    official_release_at: datetime,
+    body_sha256: str,
+    body_bytes: int,
+) -> dict:
     """The exact digested field set; no raw calendar material is retained."""
     return {
         "fred_release_id": release_id,
@@ -362,38 +407,68 @@ def discover_schedule_v1(*, schedule_adapter, bls_transport) -> DiscoveryOutcome
     """Steps 1-3 of §5 plus the local join. The one failure STOPs the rest."""
     release_id = schedule_adapter.query_series_release_v1(series_id=SERIES_PAYEMS)
     if isinstance(release_id, FredQueryFailureV1):
-        return DiscoveryOutcomeV1(None, None, None, None, None, "series_release",
-                                  release_id.code.value)
+        return DiscoveryOutcomeV1(
+            None, None, None, None, None, "series_release", release_id.code.value
+        )
     release_date = schedule_adapter.query_release_dates_v1(release_id=release_id)
     if isinstance(release_date, FredQueryFailureV1):
-        return DiscoveryOutcomeV1(None, release_id, None, None, None,
-                                  "release_dates", release_date.code.value)
+        return DiscoveryOutcomeV1(
+            None, release_id, None, None, None, "release_dates", release_date.code.value
+        )
     outcome = bls_transport()
     if getattr(outcome, "code", None) != "success":
-        return DiscoveryOutcomeV1(None, release_id, release_date, None, None,
-                                  "bls_calendar", getattr(outcome, "code", None))
+        return DiscoveryOutcomeV1(
+            None,
+            release_id,
+            release_date,
+            None,
+            None,
+            "bls_calendar",
+            getattr(outcome, "code", None),
+        )
     try:
         calendar = parse_bls_calendar_v1(getattr(outcome, "body", None))
         official_release_at = select_release_instant_v1(
-            calendar, summary=BLS_SUMMARY, local_date=release_date)
+            calendar, summary=BLS_SUMMARY, local_date=release_date
+        )
         provenance = build_schedule_provenance_v1(
-            release_id=release_id, release_date=release_date,
-            official_release_at=official_release_at,
-            body_sha256=calendar.body_sha256, body_bytes=calendar.body_bytes)
-        schedule = build_fred_release_schedule_v1(
-            series_id=SERIES_PAYEMS, release_id=release_id,
+            release_id=release_id,
             release_date=release_date,
             official_release_at=official_release_at,
-            schedule_provenance=provenance)
+            body_sha256=calendar.body_sha256,
+            body_bytes=calendar.body_bytes,
+        )
+        schedule = build_fred_release_schedule_v1(
+            series_id=SERIES_PAYEMS,
+            release_id=release_id,
+            release_date=release_date,
+            official_release_at=official_release_at,
+            schedule_provenance=provenance,
+        )
     except (BlsCalendarRejection, ValueError) as error:
-        return DiscoveryOutcomeV1(None, release_id, release_date, None, None,
-                                  "schedule_join", type(error).__name__)
-    return DiscoveryOutcomeV1(schedule, release_id, release_date,
-                              official_release_at, provenance, None, None)
+        return DiscoveryOutcomeV1(
+            None,
+            release_id,
+            release_date,
+            None,
+            None,
+            "schedule_join",
+            type(error).__name__,
+        )
+    return DiscoveryOutcomeV1(
+        schedule, release_id, release_date, official_release_at, provenance, None, None
+    )
 
 
-def run_canary_v1(*, paths: OndemandPathsV1, fred_transport, bls_transport,
-                  api_key_provider, clock, rediscover_schedule: bool) -> dict:
+def run_canary_v1(
+    *,
+    paths: OndemandPathsV1,
+    fred_transport,
+    bls_transport,
+    api_key_provider,
+    clock,
+    rediscover_schedule: bool,
+) -> dict:
     """One bounded invocation in the §4.6 order: sidecar, then admission."""
     now = _require_aware_utc(clock())
     fred_budget = FredStartBudget(maximum=FRED_MAX_STARTS)
@@ -407,9 +482,14 @@ def run_canary_v1(*, paths: OndemandPathsV1, fred_transport, bls_transport,
         loaded = load_schedule_sidecar_v1(paths.sidecar, now=now)
     except ScheduleSidecarInvalid as error:
         if not rediscover_schedule:
-            return _result("schedule_sidecar_invalid", fred_budget, bls_budget,
-                           schedule_source="invalid", stopped_at="sidecar",
-                           failure_code=str(error))
+            return _result(
+                "schedule_sidecar_invalid",
+                fred_budget,
+                bls_budget,
+                schedule_source="invalid",
+                stopped_at="sidecar",
+                failure_code=str(error),
+            )
         loaded = None
         schedule_source = "rediscovery"
     if loaded is not None and loaded.expired:
@@ -420,38 +500,61 @@ def run_canary_v1(*, paths: OndemandPathsV1, fred_transport, bls_transport,
             schedule_source = "discovery"
         discovery = discover_schedule_v1(
             schedule_adapter=FredScheduleAdapterV1(
-                transport=fred_wire, api_key_provider=api_key_provider),
-            bls_transport=bls_wire)
+                transport=fred_wire, api_key_provider=api_key_provider
+            ),
+            bls_transport=bls_wire,
+        )
         if discovery.schedule is None:
-            return _result("schedule_unavailable", fred_budget, bls_budget,
-                           schedule_source=schedule_source,
-                           stopped_at=discovery.stopped_at,
-                           failure_code=discovery.failure_code,
-                           release_id=discovery.release_id,
-                           release_date=_isoformat(discovery.release_date))
+            return _result(
+                "schedule_unavailable",
+                fred_budget,
+                bls_budget,
+                schedule_source=schedule_source,
+                stopped_at=discovery.stopped_at,
+                failure_code=discovery.failure_code,
+                release_id=discovery.release_id,
+                release_date=_isoformat(discovery.release_date),
+            )
         # Persisted as soon as the join validates and before any observation
         # request, so a later failure cannot force a rediscovery.
-        write_schedule_sidecar_v1(paths.sidecar, build_sidecar_payload_v1(
-            schedule=discovery.schedule, release_id=discovery.release_id,
-            release_date=discovery.release_date,
-            official_release_at=discovery.official_release_at,
-            provenance=discovery.provenance))
-        loaded = LoadedScheduleV1(discovery.schedule, discovery.release_id,
-                                  discovery.release_date,
-                                  discovery.official_release_at,
-                                  discovery.provenance, False)
+        write_schedule_sidecar_v1(
+            paths.sidecar,
+            build_sidecar_payload_v1(
+                schedule=discovery.schedule,
+                release_id=discovery.release_id,
+                release_date=discovery.release_date,
+                official_release_at=discovery.official_release_at,
+                provenance=discovery.provenance,
+            ),
+        )
+        loaded = LoadedScheduleV1(
+            discovery.schedule,
+            discovery.release_id,
+            discovery.release_date,
+            discovery.official_release_at,
+            discovery.provenance,
+            False,
+        )
 
     query, expected_terminal_month = derive_query_window_v1(
-        release_date=loaded.release_date, as_of=now)
-    port = TerminalMonthGuardedPortV1(FredQueryAdapterV1(
-        transport=fred_wire, api_key_provider=api_key_provider, clock=clock))
+        release_date=loaded.release_date, as_of=now
+    )
+    port = TerminalMonthGuardedPortV1(
+        FredQueryAdapterV1(
+            transport=fred_wire, api_key_provider=api_key_provider, clock=clock
+        )
+    )
     enrichment = run_macro_fred_enrichment_v1(
-        query=query, schedule=loaded.schedule, cache=cache, query_port=port,
-        clock=clock)
-    settled = cache.read_attempt_state(query.query_identity,
-                                       loaded.schedule.release_slot, now=now)
-    failure_code = (settled.last_failure_code if enrichment.provider_starts
-                    and enrichment.coverage is not FredCoverageV1.USED else None)
+        query=query, schedule=loaded.schedule, cache=cache, query_port=port, clock=clock
+    )
+    settled = cache.read_attempt_state(
+        query.query_identity, loaded.schedule.release_slot, now=now
+    )
+    failure_code = (
+        settled.last_failure_code
+        if enrichment.provider_starts and enrichment.coverage is not FredCoverageV1.USED
+        else None
+    )
     if enrichment.coverage is FredCoverageV1.USED:
         code = "enrichment_complete"
     elif failure_code == "NOT_YET_RELEASED":
@@ -461,8 +564,12 @@ def run_canary_v1(*, paths: OndemandPathsV1, fred_transport, bls_transport,
     else:
         code = "enrichment_omitted"
     return _result(
-        code, fred_budget, bls_budget, schedule_source=schedule_source,
-        failure_code=failure_code, release_id=loaded.release_id,
+        code,
+        fred_budget,
+        bls_budget,
+        schedule_source=schedule_source,
+        failure_code=failure_code,
+        release_id=loaded.release_id,
         release_date=_isoformat(loaded.release_date),
         release_slot=loaded.schedule.release_slot,
         official_release_at=format_instant_v1(loaded.official_release_at),
@@ -479,16 +586,26 @@ def run_canary_v1(*, paths: OndemandPathsV1, fred_transport, bls_transport,
         revision_identity=enrichment.revision_identity,
         schedule_provenance_digest=loaded.schedule.provenance_digest,
         bls_body_sha256=loaded.provenance["bls_body_sha256"],
-        bls_body_bytes=loaded.provenance["bls_body_bytes"])
+        bls_body_bytes=loaded.provenance["bls_body_bytes"],
+    )
 
 
-def _result(code: str, fred_budget: FredStartBudget, bls_budget: BlsStartBudget,
-            **fields) -> dict:
-    return dict({"code": code, "fred_starts": fred_budget.starts,
-                 "bls_starts": bls_budget.starts, "observation_starts": 0,
-                 "fred_purpose": FRED_PURPOSE, "bls_purpose": BLS_PURPOSE,
-                 "fred_per_invocation_cap": fred_budget.maximum,
-                 "bls_per_invocation_cap": bls_budget.maximum}, **fields)
+def _result(
+    code: str, fred_budget: FredStartBudget, bls_budget: BlsStartBudget, **fields
+) -> dict:
+    return dict(
+        {
+            "code": code,
+            "fred_starts": fred_budget.starts,
+            "bls_starts": bls_budget.starts,
+            "observation_starts": 0,
+            "fred_purpose": FRED_PURPOSE,
+            "bls_purpose": BLS_PURPOSE,
+            "fred_per_invocation_cap": fred_budget.maximum,
+            "bls_per_invocation_cap": bls_budget.maximum,
+        },
+        **fields,
+    )
 
 
 def _isoformat(value: date | None) -> str | None:
@@ -496,9 +613,12 @@ def _isoformat(value: date | None) -> str | None:
 
 
 def _require_aware_utc(value: object) -> datetime:
-    if (type(value) is not datetime or value.tzinfo is None
-            or value.utcoffset() is None
-            or value.utcoffset().total_seconds() != 0):
+    if (
+        type(value) is not datetime
+        or value.tzinfo is None
+        or value.utcoffset() is None
+        or value.utcoffset().total_seconds() != 0
+    ):
         raise ValueError("aware_utc_required")
     return value
 
@@ -513,12 +633,21 @@ def credential_metadata_v1(path: Path) -> dict:
     except OSError:
         return {"present": False, "safe": False, "reason": "absent"}
     uid = os.getuid()
-    safe = (stat.S_ISREG(info.st_mode) and not stat.S_ISLNK(info.st_mode)
-            and stat.S_IMODE(info.st_mode) == 0o600 and info.st_uid == uid
-            and 0 < info.st_size <= MAX_CREDENTIAL_BYTES)
-    return {"present": True, "safe": safe, "mode": oct(stat.S_IMODE(info.st_mode)),
-            "size_bytes": info.st_size, "owner_match": info.st_uid == uid,
-            "reason": None if safe else "credential_unsafe"}
+    safe = (
+        stat.S_ISREG(info.st_mode)
+        and not stat.S_ISLNK(info.st_mode)
+        and stat.S_IMODE(info.st_mode) == 0o600
+        and info.st_uid == uid
+        and 0 < info.st_size <= MAX_CREDENTIAL_BYTES
+    )
+    return {
+        "present": True,
+        "safe": safe,
+        "mode": oct(stat.S_IMODE(info.st_mode)),
+        "size_bytes": info.st_size,
+        "owner_match": info.st_uid == uid,
+        "reason": None if safe else "credential_unsafe",
+    }
 
 
 def directory_fingerprint_v1(root: Path) -> dict:
@@ -528,13 +657,24 @@ def directory_fingerprint_v1(root: Path) -> dict:
     entries = []
     for path in sorted(Path(root).rglob("*")):
         info = os.lstat(path)
-        digest = (hashlib.sha256(path.read_bytes()).hexdigest()
-                  if stat.S_ISREG(info.st_mode) else None)
-        entries.append({"name": path.relative_to(root).as_posix(),
-                        "mode": stat.S_IMODE(info.st_mode),
-                        "size": info.st_size, "sha256": digest})
-    return {"present": True, "entries": entries,
-            "digest": hashlib.sha256(canonical_json(entries)).hexdigest()}
+        digest = (
+            hashlib.sha256(path.read_bytes()).hexdigest()
+            if stat.S_ISREG(info.st_mode)
+            else None
+        )
+        entries.append(
+            {
+                "name": path.relative_to(root).as_posix(),
+                "mode": stat.S_IMODE(info.st_mode),
+                "size": info.st_size,
+                "sha256": digest,
+            }
+        )
+    return {
+        "present": True,
+        "entries": entries,
+        "digest": hashlib.sha256(canonical_json(entries)).hexdigest(),
+    }
 
 
 def read_pinned_ics_fixture(path: Path) -> bytes:
@@ -551,7 +691,7 @@ def read_pinned_ics_fixture(path: Path) -> bytes:
     end = b"<!--BLS-ICS-END-->"
     if begin not in raw or end not in raw:
         raise ValueError("invalid_ics_fixture")
-    stored = raw[raw.index(begin) + len(begin):raw.index(end)]
+    stored = raw[raw.index(begin) + len(begin) : raw.index(end)]
     if b"\r" in stored:
         # Canonical LF storage is an invariant, not a preference: a stored CR
         # would make the reconstruction below ambiguous.
@@ -559,9 +699,15 @@ def read_pinned_ics_fixture(path: Path) -> bytes:
     return stored.replace(b"\n", b"\r\n")
 
 
-def run_preflight_v1(*, root: Path, credential: Path, campaign_root: Path,
-                     production_sidecar: Path, ics_fixture: Path,
-                     clock) -> dict:
+def run_preflight_v1(
+    *,
+    root: Path,
+    credential: Path,
+    campaign_root: Path,
+    production_sidecar: Path,
+    ics_fixture: Path,
+    clock,
+) -> dict:
     """Prove the production path offline. External starts are structurally 0.
 
     No transport is constructed here at all, and the fixture-derived schedule
@@ -576,29 +722,47 @@ def run_preflight_v1(*, root: Path, credential: Path, campaign_root: Path,
     cache = FredQueryCacheV1(root, opened_at=now)
     database = root / DATABASE_NAME
     reopened = FredQueryCacheV1(root, opened_at=now)
-    sidecars = [suffix for suffix in ("-journal", "-wal", "-shm")
-                if os.path.lexists(Path(f"{database}{suffix}"))]
+    sidecars = [
+        suffix
+        for suffix in ("-journal", "-wal", "-shm")
+        if os.path.lexists(Path(f"{database}{suffix}"))
+    ]
 
     body = read_pinned_ics_fixture(ics_fixture)
     calendar = parse_bls_calendar_v1(body)
     release_date = date(2026, 8, 7)
     official_release_at = select_release_instant_v1(
-        calendar, summary=BLS_SUMMARY, local_date=release_date)
+        calendar, summary=BLS_SUMMARY, local_date=release_date
+    )
     provenance = build_schedule_provenance_v1(
-        release_id=50, release_date=release_date,
+        release_id=50,
+        release_date=release_date,
         official_release_at=official_release_at,
-        body_sha256=calendar.body_sha256, body_bytes=calendar.body_bytes)
+        body_sha256=calendar.body_sha256,
+        body_bytes=calendar.body_bytes,
+    )
     schedule = build_fred_release_schedule_v1(
-        series_id=SERIES_PAYEMS, release_id=50, release_date=release_date,
+        series_id=SERIES_PAYEMS,
+        release_id=50,
+        release_date=release_date,
         official_release_at=official_release_at,
-        schedule_provenance=provenance)
+        schedule_provenance=provenance,
+    )
     working_sidecar = root / SIDECAR_NAME
-    write_schedule_sidecar_v1(working_sidecar, build_sidecar_payload_v1(
-        schedule=schedule, release_id=50, release_date=release_date,
-        official_release_at=official_release_at, provenance=provenance))
+    write_schedule_sidecar_v1(
+        working_sidecar,
+        build_sidecar_payload_v1(
+            schedule=schedule,
+            release_id=50,
+            release_date=release_date,
+            official_release_at=official_release_at,
+            provenance=provenance,
+        ),
+    )
     reloaded = load_schedule_sidecar_v1(working_sidecar, now=now)
     query, expected_terminal_month = derive_query_window_v1(
-        release_date=release_date, as_of=now)
+        release_date=release_date, as_of=now
+    )
 
     return {
         "code": "preflight_ok",
@@ -611,11 +775,13 @@ def run_preflight_v1(*, root: Path, credential: Path, campaign_root: Path,
         "root_mode": oct(stat.S_IMODE(os.lstat(root).st_mode)),
         "database_mode": oct(stat.S_IMODE(os.lstat(database).st_mode)),
         "sqlite_sidecars": sidecars,
-        "reopen_success": (cache.path == reopened.path
-                           and reopened.read_success_for_series(
-                               SERIES_PAYEMS, now=now) is None),
-        "campaign_root_unchanged": (campaign_before
-                                    == directory_fingerprint_v1(campaign_root)),
+        "reopen_success": (
+            cache.path == reopened.path
+            and reopened.read_success_for_series(SERIES_PAYEMS, now=now) is None
+        ),
+        "campaign_root_unchanged": (
+            campaign_before == directory_fingerprint_v1(campaign_root)
+        ),
         "production_sidecar": str(production_sidecar),
         "production_sidecar_absent": not os.path.lexists(production_sidecar),
         "bls_body_sha256": calendar.body_sha256,
@@ -624,9 +790,11 @@ def run_preflight_v1(*, root: Path, credential: Path, campaign_root: Path,
         "eligible_from": format_instant_v1(schedule.eligible_from),
         "release_slot": schedule.release_slot,
         "schedule_provenance_digest": schedule.provenance_digest,
-        "sidecar_reload_matches": (reloaded is not None
-                                   and reloaded.schedule == schedule
-                                   and not reloaded.expired),
+        "sidecar_reload_matches": (
+            reloaded is not None
+            and reloaded.schedule == schedule
+            and not reloaded.expired
+        ),
         "sidecar_mode": oct(stat.S_IMODE(os.lstat(working_sidecar).st_mode)),
         "expected_terminal_month": list(expected_terminal_month),
         "observation_start": query.observation_start.isoformat(),
@@ -645,26 +813,44 @@ def run_readback_v1(*, root: Path, clock) -> dict:
     coverage = None
     success = None
     if stored is not None:
-        success = {"query_identity": stored.query_identity,
-                   "revision_identity": stored.revision_identity,
-                   "due_slot": stored.due_slot,
-                   "fetched_at": format_instant_v1(stored.fetched_at),
-                   "observations": len(stored.fact.observations),
-                   "newest_observation_date":
-                       stored.fact.observations[-1].observation_date.isoformat()}
+        success = {
+            "query_identity": stored.query_identity,
+            "revision_identity": stored.revision_identity,
+            "due_slot": stored.due_slot,
+            "fetched_at": format_instant_v1(stored.fetched_at),
+            "observations": len(stored.fact.observations),
+            "newest_observation_date": stored.fact.observations[
+                -1
+            ].observation_date.isoformat(),
+        }
         coverage = FredCoverageV1.USED.value
-        attempts = [{"attempt_seq": row[0], "state": row[1],
-                     "started_at": row[2], "finished_at": row[3],
-                     "failure_code": row[4]}
-                    for row in cache.attempt_rows(stored.query_identity,
-                                                  stored.due_slot)]
-    return {"code": "readback_ok", "root": str(root), "fred_starts": 0,
-            "bls_starts": 0, "observation_starts": 0, "coverage": coverage,
-            "success": success, "attempts": attempts,
-            "observation_attempt_total": cache.count_observation_attempts_v1(),
-            "sidecar_present": os.path.lexists(sidecar),
-            "sidecar_mode": (oct(stat.S_IMODE(os.lstat(sidecar).st_mode))
-                             if os.path.lexists(sidecar) else None)}
+        attempts = [
+            {
+                "attempt_seq": row[0],
+                "state": row[1],
+                "started_at": row[2],
+                "finished_at": row[3],
+                "failure_code": row[4],
+            }
+            for row in cache.attempt_rows(stored.query_identity, stored.due_slot)
+        ]
+    return {
+        "code": "readback_ok",
+        "root": str(root),
+        "fred_starts": 0,
+        "bls_starts": 0,
+        "observation_starts": 0,
+        "coverage": coverage,
+        "success": success,
+        "attempts": attempts,
+        "observation_attempt_total": cache.count_observation_attempts_v1(),
+        "sidecar_present": os.path.lexists(sidecar),
+        "sidecar_mode": (
+            oct(stat.S_IMODE(os.lstat(sidecar).st_mode))
+            if os.path.lexists(sidecar)
+            else None
+        ),
+    }
 
 
 # -- CLI ---------------------------------------------------------------------
@@ -672,8 +858,7 @@ def run_readback_v1(*, root: Path, clock) -> dict:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(add_help=True)
-    parser.add_argument("subcommand",
-                        choices=("preflight", "canary", "readback"))
+    parser.add_argument("subcommand", choices=("preflight", "canary", "readback"))
     parser.add_argument("--root", default=None)
     parser.add_argument("--credential", default=None)
     parser.add_argument("--bls-ua-credential", default=None)
@@ -693,60 +878,97 @@ def run_cli(argv, *, clock, api_key_loader, bls_ua_loader=load_bls_user_agent) -
     if args.subcommand == "canary" and not args.execute:
         # D2: the gate is checked before any credential value read, any
         # external request and any production persistence.
-        print(json.dumps({"code": "ondemand_forbidden", "fred_starts": 0,
-                          "bls_starts": 0, "observation_starts": 0,
-                          "credential_reads": 0,
-                          "required_flag": EXECUTE_FLAG}, sort_keys=True))
+        print(
+            json.dumps(
+                {
+                    "code": "ondemand_forbidden",
+                    "fred_starts": 0,
+                    "bls_starts": 0,
+                    "observation_starts": 0,
+                    "credential_reads": 0,
+                    "required_flag": EXECUTE_FLAG,
+                },
+                sort_keys=True,
+            )
+        )
         return 2
     if args.root is None:
         print(json.dumps({"code": "explicit_root_required"}, sort_keys=True))
         return 2
     root = Path(args.root)
     if args.subcommand == "preflight":
-        for name in ("credential", "campaign_root", "production_sidecar",
-                     "ics_fixture"):
+        for name in (
+            "credential",
+            "campaign_root",
+            "production_sidecar",
+            "ics_fixture",
+        ):
             if getattr(args, name) is None:
-                print(json.dumps({"code": "explicit_preflight_paths_required",
-                                  "missing": name}, sort_keys=True))
+                print(
+                    json.dumps(
+                        {"code": "explicit_preflight_paths_required", "missing": name},
+                        sort_keys=True,
+                    )
+                )
                 return 2
         result = run_preflight_v1(
-            root=root, credential=Path(args.credential),
+            root=root,
+            credential=Path(args.credential),
             campaign_root=Path(args.campaign_root),
             production_sidecar=Path(args.production_sidecar),
-            ics_fixture=Path(args.ics_fixture), clock=clock)
+            ics_fixture=Path(args.ics_fixture),
+            clock=clock,
+        )
     elif args.subcommand == "readback":
         result = run_readback_v1(root=root, clock=clock)
     else:
         paths = ondemand_paths()
-        credential = (Path(args.credential) if args.credential is not None
-                      else paths.credential)
-        bls_ua_path = (Path(args.bls_ua_credential)
-                       if args.bls_ua_credential is not None
-                       else credential.parent / "bls_ua.env")
+        credential = (
+            Path(args.credential) if args.credential is not None else paths.credential
+        )
+        bls_ua_path = (
+            Path(args.bls_ua_credential)
+            if args.bls_ua_credential is not None
+            else credential.parent / "bls_ua.env"
+        )
         try:
             bls_user_agent = bls_ua_loader(bls_ua_path)
         except ValueError:
-            print(json.dumps({"code": "bls_user_agent_unavailable",
-                              "fred_starts": 0, "bls_starts": 0,
-                              "observation_starts": 0,
-                              "credential_reads": 0}, sort_keys=True))
+            print(
+                json.dumps(
+                    {
+                        "code": "bls_user_agent_unavailable",
+                        "fred_starts": 0,
+                        "bls_starts": 0,
+                        "observation_starts": 0,
+                        "credential_reads": 0,
+                    },
+                    sort_keys=True,
+                )
+            )
             return 2
         result = run_canary_v1(
             paths=paths_for_root(root, credential=credential),
             fred_transport=FredLiveTransport(opener=build_live_opener()),
-            bls_transport=BlsIcsTransport(opener=build_bls_opener(),
-                                          user_agent=bls_user_agent),
-            api_key_provider=lambda: api_key_loader(credential), clock=clock,
-            rediscover_schedule=args.rediscover_schedule)
+            bls_transport=BlsIcsTransport(
+                opener=build_bls_opener(), user_agent=bls_user_agent
+            ),
+            api_key_provider=lambda: api_key_loader(credential),
+            clock=clock,
+            rediscover_schedule=args.rediscover_schedule,
+        )
     print(json.dumps(result, sort_keys=True))
-    return 0 if result.get("code") in ("preflight_ok", "readback_ok",
-                                       "enrichment_complete") else 1
+    return (
+        0
+        if result.get("code") in ("preflight_ok", "readback_ok", "enrichment_complete")
+        else 1
+    )
 
 
 def main() -> int:
-    return run_cli(sys.argv[1:],
-                   clock=lambda: datetime.now(timezone.utc),
-                   api_key_loader=load_fred_api_key)
+    return run_cli(
+        sys.argv[1:], clock=lambda: datetime.now(UTC), api_key_loader=load_fred_api_key
+    )
 
 
 if __name__ == "__main__":

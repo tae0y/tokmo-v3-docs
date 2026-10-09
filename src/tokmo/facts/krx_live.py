@@ -2,8 +2,13 @@
 
 import http.client
 
-from tokmo.facts.krx import (ENDPOINT_ID, REQUEST_TIMEOUT_SECONDS, KrxRequest,
-                             _KrxTransportFailure, _KrxTransportSuccess)
+from tokmo.facts.krx import (
+    ENDPOINT_ID,
+    REQUEST_TIMEOUT_SECONDS,
+    KrxRequest,
+    _KrxTransportFailure,
+    _KrxTransportSuccess,
+)
 
 KRX_HOST = "data-dbg.krx.co.kr"
 KRX_PATH = "/svc/apis/sto/stk_bydd_trd"
@@ -17,17 +22,27 @@ class KrxLiveTransport:
 
     def __call__(self, request: KrxRequest):
         try:
-            if (request.endpoint_id != ENDPOINT_ID
-                    or request.timeout_seconds != REQUEST_TIMEOUT_SECONDS
-                    or not _date_digits(request.base_date)
-                    or not isinstance(request.api_key, str) or not request.api_key):
+            if (
+                request.endpoint_id != ENDPOINT_ID
+                or request.timeout_seconds != REQUEST_TIMEOUT_SECONDS
+                or not _date_digits(request.base_date)
+                or not isinstance(request.api_key, str)
+                or not request.api_key
+            ):
                 return _KrxTransportFailure("protocol_failure")
             path = f"{KRX_PATH}?basDd={request.base_date}"
             connection = self._connection_factory(
-                KRX_HOST, timeout=request.timeout_seconds)
+                KRX_HOST, timeout=request.timeout_seconds
+            )
             try:
-                connection.request("GET", path, headers={
-                    "AUTH_KEY": request.api_key, "Accept-Encoding": "identity"})
+                connection.request(
+                    "GET",
+                    path,
+                    headers={
+                        "AUTH_KEY": request.api_key,
+                        "Accept-Encoding": "identity",
+                    },
+                )
                 response = connection.getresponse()
                 if response.status != 200:
                     return _KrxTransportFailure(_status_code(response.status))
@@ -65,10 +80,16 @@ def _status_code(status):
 
 
 def _date_digits(value):
-    if not isinstance(value, str) or len(value) != 8 or not value.isascii() or not value.isdigit():
+    if (
+        not isinstance(value, str)
+        or len(value) != 8
+        or not value.isascii()
+        or not value.isdigit()
+    ):
         return False
     try:
         from datetime import datetime
+
         datetime.strptime(value, "%Y%m%d")
     except ValueError:
         return False

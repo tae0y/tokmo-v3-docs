@@ -12,17 +12,16 @@ same identity is a conflict and fails the run closed.
 
 import json
 import os
+import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-import sqlite3
 
 from tokmo.records.private_sqlite import (
     MIN_SQLITE_VERSION,
     acquire_immediate_transaction,
     connect_private,
-    fsync_directory,
     path_identity,
     prepare_private_path,
     private_creation,
@@ -34,7 +33,6 @@ from tokmo.values.sec_provenance import (
     COMBINED_PROVENANCE,
     TARGET_PROVENANCE,
     VALID_TARGET_PROVENANCE,
-    WATCHLIST_PROVENANCE,
 )
 
 Clock = Callable[[], datetime]
@@ -43,11 +41,11 @@ DB_NAME = "sec-targeted.sqlite3"
 SCHEMA_VERSION = 2
 
 _DDL = (
-"""CREATE TABLE storage_metadata (
+    """CREATE TABLE storage_metadata (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 ) STRICT""",
-"""CREATE TABLE runs (
+    """CREATE TABLE runs (
     run_id        TEXT PRIMARY KEY,
     started_at    TEXT NOT NULL,
     code          TEXT NOT NULL,
@@ -55,7 +53,7 @@ _DDL = (
     CHECK (length(run_id) BETWEEN 1 AND 128),
     CHECK (started_count >= 0)
 ) STRICT""",
-"""CREATE TABLE attempts (
+    """CREATE TABLE attempts (
     run_id       TEXT NOT NULL REFERENCES runs(run_id) ON DELETE RESTRICT,
     seq          INTEGER NOT NULL,
     endpoint     TEXT NOT NULL,
@@ -68,7 +66,7 @@ _DDL = (
     CHECK (endpoint IN ('sec_company_tickers', 'sec_submissions')),
     CHECK (cik IS NULL OR (length(cik) = 10 AND cik GLOB '[0-9]*'))
 ) STRICT""",
-"""CREATE TABLE target_universe (
+    """CREATE TABLE target_universe (
     universe_id      TEXT PRIMARY KEY,
     captured_at      TEXT NOT NULL,
     symbols          TEXT NOT NULL,
@@ -77,21 +75,21 @@ _DDL = (
     CHECK (length(universe_id) BETWEEN 1 AND 128),
     CHECK (length(source_snapshot) BETWEEN 1 AND 256)
 ) STRICT""",
-"""CREATE TABLE target_universe_members (
+    """CREATE TABLE target_universe_members (
     universe_id TEXT NOT NULL REFERENCES target_universe(universe_id) ON DELETE RESTRICT,
     symbol      TEXT NOT NULL,
     provenance  TEXT NOT NULL,
     PRIMARY KEY (universe_id, symbol),
     CHECK (provenance IN ('HOLDING', 'WATCHLIST', 'HOLDING + WATCHLIST'))
 ) STRICT""",
-"""CREATE TABLE registry (
+    """CREATE TABLE registry (
     ticker       TEXT PRIMARY KEY,
     cik          TEXT NOT NULL,
     company_name TEXT NOT NULL,
     refreshed_at TEXT NOT NULL,
     CHECK (length(ticker) BETWEEN 1 AND 32)
 ) STRICT""",
-"""CREATE TABLE filings (
+    """CREATE TABLE filings (
     accession_number  TEXT NOT NULL,
     cik                TEXT NOT NULL,
     ticker             TEXT NOT NULL,
@@ -110,7 +108,7 @@ _DDL = (
     CHECK (provenance IN ('HOLDING', 'WATCHLIST', 'HOLDING + WATCHLIST')),
     CHECK (source = 'sec_submissions')
 ) STRICT""",
-"""CREATE TABLE conflicts (
+    """CREATE TABLE conflicts (
     cik               TEXT NOT NULL,
     accession_number  TEXT NOT NULL,
     existing_form     TEXT NOT NULL,
@@ -119,24 +117,27 @@ _DDL = (
     run_id            TEXT NOT NULL,
     PRIMARY KEY (accession_number)
 ) STRICT""",
-"""CREATE INDEX filings_filing_date
+    """CREATE INDEX filings_filing_date
     ON filings (filing_date DESC, cik, accession_number)""",
 )
 _TABLES = {
-    "storage_metadata", "runs", "attempts", "target_universe", "registry",
-    "filings", "conflicts", "target_universe_members",
+    "storage_metadata",
+    "runs",
+    "attempts",
+    "target_universe",
+    "registry",
+    "filings",
+    "conflicts",
+    "target_universe_members",
 }
-_DDL_MEMBERS = (
-    """CREATE TABLE target_universe_members (
+_DDL_MEMBERS = """CREATE TABLE target_universe_members (
     universe_id TEXT NOT NULL REFERENCES target_universe(universe_id) ON DELETE RESTRICT,
     symbol      TEXT NOT NULL,
     provenance  TEXT NOT NULL,
     PRIMARY KEY (universe_id, symbol),
     CHECK (provenance IN ('HOLDING', 'WATCHLIST', 'HOLDING + WATCHLIST'))
 ) STRICT"""
-)
-_FILINGS_NEXT_DDL = (
-    """CREATE TABLE filings_next (
+_FILINGS_NEXT_DDL = """CREATE TABLE filings_next (
     accession_number  TEXT NOT NULL,
     cik                TEXT NOT NULL,
     ticker             TEXT NOT NULL,
@@ -155,7 +156,6 @@ _FILINGS_NEXT_DDL = (
     CHECK (provenance IN ('HOLDING', 'WATCHLIST', 'HOLDING + WATCHLIST')),
     CHECK (source = 'sec_submissions')
 ) STRICT"""
-)
 _METADATA = (
     ("sec_targeted_schema_version", str(SCHEMA_VERSION)),
     ("sec_targeted_adapter", "tokmo-sec-targeted-next"),
@@ -166,6 +166,7 @@ _EXPECTED_TABLES = sorted(_TABLES)
 # ---------------------------------------------------------------------------
 # Provenance widening helpers
 # ---------------------------------------------------------------------------
+
 
 def _widen_provenance(current: str, incoming: str) -> str | None:
     """Return the monotonic widening of ``current`` with ``incoming``.
@@ -182,8 +183,7 @@ def _widen_provenance(current: str, incoming: str) -> str | None:
         return current
     if current == COMBINED_PROVENANCE or incoming == COMBINED_PROVENANCE:
         return COMBINED_PROVENANCE
-    if (current in VALID_TARGET_PROVENANCE
-            and incoming in VALID_TARGET_PROVENANCE):
+    if current in VALID_TARGET_PROVENANCE and incoming in VALID_TARGET_PROVENANCE:
         return COMBINED_PROVENANCE
     return None
 
@@ -214,7 +214,7 @@ class SecTargetedStoreError(Exception):
 
 
 def _canonical_utc(dt: datetime) -> str:
-    return dt.astimezone(timezone.utc).isoformat(timespec="microseconds")
+    return dt.astimezone(UTC).isoformat(timespec="microseconds")
 
 
 def _new_connection(path: Path) -> sqlite3.Connection:
@@ -295,9 +295,9 @@ def _maybe_migrate_v1(connection: sqlite3.Connection) -> None:
     version and returns without touching the schema.
     """
     try:
-        meta = dict(connection.execute(
-            "SELECT key, value FROM storage_metadata"
-        ).fetchall())
+        meta = dict(
+            connection.execute("SELECT key, value FROM storage_metadata").fetchall()
+        )
     except sqlite3.Error:
         return
     if meta.get("sec_targeted_schema_version") != "1":
@@ -307,8 +307,7 @@ def _maybe_migrate_v1(connection: sqlite3.Connection) -> None:
         # Re-check version inside the write transaction to prevent
         # a concurrent opener from double-migrating.
         row = connection.execute(
-            "SELECT value FROM storage_metadata "
-            "WHERE key='sec_targeted_schema_version'"
+            "SELECT value FROM storage_metadata WHERE key='sec_targeted_schema_version'"
         ).fetchone()
         if row is None or row[0] != "1":
             connection.execute("ROLLBACK")
@@ -316,7 +315,8 @@ def _maybe_migrate_v1(connection: sqlite3.Connection) -> None:
 
         # 1. Create target_universe_members (by name, not positional DDL)
         existing_tables = {
-            r[0] for r in connection.execute(
+            r[0]
+            for r in connection.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
         }
@@ -333,13 +333,14 @@ def _maybe_migrate_v1(connection: sqlite3.Connection) -> None:
             except (json.JSONDecodeError, TypeError):
                 raise SecTargetedStoreError("schema_mismatch")
             if not isinstance(symbols, list) or not all(
-                    isinstance(symbol, str) and symbol for symbol in symbols):
+                isinstance(symbol, str) and symbol for symbol in symbols
+            ):
                 raise SecTargetedStoreError("schema_mismatch")
             # Only backfill rows not already present (idempotent)
             existing_members = {
-                r[0] for r in connection.execute(
-                    "SELECT symbol FROM target_universe_members "
-                    "WHERE universe_id=?",
+                r[0]
+                for r in connection.execute(
+                    "SELECT symbol FROM target_universe_members WHERE universe_id=?",
                     (universe_id,),
                 )
             }
@@ -357,7 +358,8 @@ def _maybe_migrate_v1(connection: sqlite3.Connection) -> None:
 
         # 2. Rebuild filings table with widened provenance CHECK
         existing_tables = {
-            r[0] for r in connection.execute(
+            r[0]
+            for r in connection.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
         }
@@ -368,21 +370,23 @@ def _maybe_migrate_v1(connection: sqlite3.Connection) -> None:
                 "SELECT accession_number, cik, ticker, company_name, "
                 "form, filing_date, report_date, primary_document, "
                 "is_xbrl, observed_at, stored_at, provenance, source, "
-                "run_id FROM filings")
+                "run_id FROM filings"
+            )
             connection.execute("DROP TABLE filings")
-            connection.execute(
-                "ALTER TABLE filings_next RENAME TO filings")
+            connection.execute("ALTER TABLE filings_next RENAME TO filings")
 
         # Recreate filings index by name
         existing_indexes = {
-            r[0] for r in connection.execute(
+            r[0]
+            for r in connection.execute(
                 "SELECT name FROM sqlite_master WHERE type='index'"
             )
         }
         if "filings_filing_date" not in existing_indexes:
             connection.execute(
                 "CREATE INDEX filings_filing_date"
-                " ON filings (filing_date DESC, cik, accession_number)")
+                " ON filings (filing_date DESC, cik, accession_number)"
+            )
 
         connection.execute(
             "UPDATE storage_metadata SET value=? WHERE key=?",
@@ -415,9 +419,7 @@ def _validate(connection: sqlite3.Connection) -> None:
         if not table_is_strict(connection, table):
             raise SecTargetedStoreError("schema_mismatch")
     meta = dict(
-        connection.execute(
-            "SELECT key, value FROM storage_metadata"
-        ).fetchall()
+        connection.execute("SELECT key, value FROM storage_metadata").fetchall()
     )
     if meta != dict(_METADATA):
         raise SecTargetedStoreError("schema_mismatch")
@@ -437,7 +439,10 @@ class SecTargetedStore:
     # --- run claim / overlap ---
 
     def claim_run(
-        self, *, run_id: str, started_at: datetime,
+        self,
+        *,
+        run_id: str,
+        started_at: datetime,
     ) -> RunClaimResult:
         """Insert a run row before any I/O.  Returns overlap on PK collision."""
         connection = _new_connection(self._path)
@@ -480,7 +485,11 @@ class SecTargetedStore:
             connection.close()
 
     def complete_run(
-        self, *, run_id: str, code: str, started_count: int,
+        self,
+        *,
+        run_id: str,
+        code: str,
+        started_count: int,
         started_at: datetime,
     ) -> None:
         connection = _new_connection(self._path)
@@ -504,9 +513,15 @@ class SecTargetedStore:
     # --- attempts ---
 
     def record_attempt(
-        self, *, run_id: str, seq: int, endpoint: str,
-        cik: str | None, ticker: str | None,
-        started_at: datetime, outcome_code: str,
+        self,
+        *,
+        run_id: str,
+        seq: int,
+        endpoint: str,
+        cik: str | None,
+        ticker: str | None,
+        started_at: datetime,
+        outcome_code: str,
     ) -> None:
         connection = _new_connection(self._path)
         try:
@@ -516,8 +531,15 @@ class SecTargetedStore:
                 "started_at, outcome_code) VALUES (?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(run_id, seq) DO UPDATE SET "
                 "outcome_code=excluded.outcome_code",
-                (run_id, seq, endpoint, cik, ticker,
-                 _canonical_utc(started_at), outcome_code),
+                (
+                    run_id,
+                    seq,
+                    endpoint,
+                    cik,
+                    ticker,
+                    _canonical_utc(started_at),
+                    outcome_code,
+                ),
             )
             connection.execute("COMMIT")
         except sqlite3.Error as error:
@@ -533,8 +555,12 @@ class SecTargetedStore:
     # --- target universe ---
 
     def store_universe(
-        self, *, universe_id: str, captured_at: datetime,
-        symbols: frozenset[str], source_snapshot: str,
+        self,
+        *,
+        universe_id: str,
+        captured_at: datetime,
+        symbols: frozenset[str],
+        source_snapshot: str,
         provenance: dict[str, str] | None = None,
     ) -> UniverseStoreResult:
         """Persist target universe provenance without account details.
@@ -549,8 +575,11 @@ class SecTargetedStore:
         fail truthfully with no partial write.
         """
         # Validate provenance before opening a connection or SQL.
-        members = ({symbol: TARGET_PROVENANCE for symbol in symbols}
-                   if provenance is None else provenance)
+        members = (
+            {symbol: TARGET_PROVENANCE for symbol in symbols}
+            if provenance is None
+            else provenance
+        )
         if set(members) != set(symbols):
             raise SecTargetedStoreError("provenance_key_mismatch")
         for symbol, prov in members.items():
@@ -574,7 +603,8 @@ class SecTargetedStore:
                 # Same symbols: widen provenance monotonically.
                 # Load existing member provenance and compare.
                 existing_members = {
-                    r[0]: r[1] for r in connection.execute(
+                    r[0]: r[1]
+                    for r in connection.execute(
                         "SELECT symbol, provenance FROM "
                         "target_universe_members WHERE universe_id=?",
                         (universe_id,),
@@ -599,8 +629,7 @@ class SecTargetedStore:
                         if widened is None:
                             # Invalid narrowing or bad value: fail closed
                             connection.execute("ROLLBACK")
-                            raise SecTargetedStoreError(
-                                "provenance_narrowing_conflict")
+                            raise SecTargetedStoreError("provenance_narrowing_conflict")
                         if widened != current:
                             connection.execute(
                                 "UPDATE target_universe_members "
@@ -616,14 +645,18 @@ class SecTargetedStore:
             connection.execute(
                 "INSERT INTO target_universe(universe_id, captured_at, symbols, "
                 "source_snapshot, stored_at) VALUES (?, ?, ?, ?, ?)",
-                (universe_id, _canonical_utc(captured_at),
-                 syms_json, source_snapshot, now),
+                (
+                    universe_id,
+                    _canonical_utc(captured_at),
+                    syms_json,
+                    source_snapshot,
+                    now,
+                ),
             )
             connection.executemany(
                 "INSERT INTO target_universe_members"
                 "(universe_id, symbol, provenance) VALUES (?, ?, ?)",
-                ((universe_id, symbol, members[symbol])
-                 for symbol in sorted(symbols)),
+                ((universe_id, symbol, members[symbol]) for symbol in sorted(symbols)),
             )
             connection.execute("COMMIT")
             return UniverseStoreResult("saved", universe_id)
@@ -696,7 +729,11 @@ class SecTargetedStore:
     # --- registry ---
 
     def store_registry(
-        self, *, ticker: str, cik: str, company_name: str,
+        self,
+        *,
+        ticker: str,
+        cik: str,
+        company_name: str,
         refreshed_at: datetime,
     ) -> None:
         connection = _new_connection(self._path)
@@ -742,7 +779,11 @@ class SecTargetedStore:
     # --- filings ---
 
     def save_filing(
-        self, *, filing, run_id: str, stored_at: datetime,
+        self,
+        *,
+        filing,
+        run_id: str,
+        stored_at: datetime,
         provenance: str = "HOLDING",
     ) -> FilingSaveResult:
         """Insert one filing.  Returns duplicate/conflict on identity hit.
@@ -794,34 +835,42 @@ class SecTargetedStore:
                     "cik=excluded.cik, existing_form=excluded.existing_form, "
                     "new_form=excluded.new_form, "
                     "detected_at=excluded.detected_at, run_id=excluded.run_id",
-                    (filing.cik, filing.accession_number,
-                     existing[0], filing.form,
-                     _canonical_utc(stored_at), run_id),
+                    (
+                        filing.cik,
+                        filing.accession_number,
+                        existing[0],
+                        filing.form,
+                        _canonical_utc(stored_at),
+                        run_id,
+                    ),
                 )
                 connection.execute("COMMIT")
-                return FilingSaveResult(
-                    "conflict", filing.accession_number, filing.cik
-                )
+                return FilingSaveResult("conflict", filing.accession_number, filing.cik)
             connection.execute(
                 "INSERT INTO filings(cik, accession_number, ticker, "
                 "company_name, form, filing_date, report_date, "
                 "primary_document, is_xbrl, observed_at, stored_at, "
                 "provenance, source, run_id) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (filing.cik, filing.accession_number, filing.ticker,
-                 filing.company_name, filing.form,
-                 filing.filing_date.isoformat(),
-                 filing.report_date.isoformat() if filing.report_date else None,
-                 filing.primary_document,
-                 None if filing.is_xbrl is None else int(filing.is_xbrl),
-                 _canonical_utc(filing.observed_at),
-                 _canonical_utc(stored_at),
-                 provenance, SEC_SOURCE, run_id),
+                (
+                    filing.cik,
+                    filing.accession_number,
+                    filing.ticker,
+                    filing.company_name,
+                    filing.form,
+                    filing.filing_date.isoformat(),
+                    filing.report_date.isoformat() if filing.report_date else None,
+                    filing.primary_document,
+                    None if filing.is_xbrl is None else int(filing.is_xbrl),
+                    _canonical_utc(filing.observed_at),
+                    _canonical_utc(stored_at),
+                    provenance,
+                    SEC_SOURCE,
+                    run_id,
+                ),
             )
             connection.execute("COMMIT")
-            return FilingSaveResult(
-                "saved", filing.accession_number, filing.cik
-            )
+            return FilingSaveResult("saved", filing.accession_number, filing.cik)
         except sqlite3.Error as error:
             try:
                 if connection.in_transaction:
@@ -840,9 +889,7 @@ class SecTargetedStore:
         except SecTargetedStoreError:
             return 0
         try:
-            return connection.execute(
-                "SELECT COUNT(*) FROM filings"
-            ).fetchone()[0]
+            return connection.execute("SELECT COUNT(*) FROM filings").fetchone()[0]
         except sqlite3.Error:
             return 0
         finally:

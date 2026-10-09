@@ -1,27 +1,25 @@
 """Slice 3 — Composite HOLDINGS v2 MaterialPack tests (B1, B3, M3, M4, m4)."""
+
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import pytest
 
-from tokmo.values.material_pack import (
-    JobKind,
-    MaterialPackV1,
-    build_material_pack_v1,
-    canonical_pack_bytes,
-    canonical_pack_file_bytes,
-    COMPOSITE_HOLDINGS_PARSER_VERSION,
-    HOLDINGS_PAYLOAD_VERSION,
-    _validate_holdings_v1,
-    _validate_holdings_generation_r2,
-)
 from tokmo.values.current_holdings import (
-    CurrentHoldingsV1,
     AccountHoldingsV1,
     AccountScopeIdentityV1,
+    CurrentHoldingsV1,
     HoldingItemV1,
+)
+from tokmo.values.material_pack import (
+    COMPOSITE_HOLDINGS_PARSER_VERSION,
+    HOLDINGS_PAYLOAD_VERSION,
+    JobKind,
+    _validate_holdings_generation_r2,
+    _validate_holdings_v1,
+    build_material_pack_v1,
 )
 from tokmo.values.pension_holdings import pension_account_scope
 
@@ -38,8 +36,14 @@ def _make_v1_payload():
                 "account_type_label": "toss",
                 "ordinal": 1,
                 "holdings": [
-                    {"symbol": "005930", "quantity": "100", "avg_price": "70000",
-                     "currency": "KRW", "market_raw": "KR", "market_field": "market"},
+                    {
+                        "symbol": "005930",
+                        "quantity": "100",
+                        "avg_price": "70000",
+                        "currency": "KRW",
+                        "market_raw": "KR",
+                        "market_field": "market",
+                    },
                 ],
             },
         ],
@@ -56,8 +60,14 @@ def _make_v2_payload():
                 "account_type_label": "toss",
                 "ordinal": 1,
                 "holdings": [
-                    {"symbol": "005930", "quantity": "100", "avg_price": "70000",
-                     "currency": "KRW", "market_raw": "KR", "market_field": "market"},
+                    {
+                        "symbol": "005930",
+                        "quantity": "100",
+                        "avg_price": "70000",
+                        "currency": "KRW",
+                        "market_raw": "KR",
+                        "market_field": "market",
+                    },
                 ],
                 "source_provenance": "TOSS_PERSONAL",
             },
@@ -66,8 +76,14 @@ def _make_v2_payload():
                 "account_type_label": "pension-excel-v1",
                 "ordinal": 2,
                 "holdings": [
-                    {"symbol": "0167A0", "quantity": "50", "avg_price": "10000",
-                     "currency": "KRW", "market_raw": "KR", "market_field": "market"},
+                    {
+                        "symbol": "0167A0",
+                        "quantity": "50",
+                        "avg_price": "10000",
+                        "currency": "KRW",
+                        "market_raw": "KR",
+                        "market_field": "market",
+                    },
                 ],
                 "source_provenance": "PENSION_EXCEL",
                 "pension_revision_id": "a" * 32,
@@ -99,9 +115,12 @@ class TestV1BackwardCompat:
     def test_v1_pack_decode_unchanged(self):
         payload = _make_v1_payload()
         pack = build_material_pack_v1(
-            schema_version=1, job=JobKind.HOLDINGS,
-            tick_id=100, market_partition=("KR",),
-            payload=payload, captured_at=_NOW,
+            schema_version=1,
+            job=JobKind.HOLDINGS,
+            tick_id=100,
+            market_partition=("KR",),
+            payload=payload,
+            captured_at=_NOW,
             source_timestamps={"provider": None, "fetched": None, "stored": None},
             parser_version="toss-holdings-v1",
         )
@@ -117,9 +136,12 @@ class TestV2Dispatch:
     def test_v2_pack_builds_with_composite_parser_version(self):
         payload = _make_v2_payload()
         pack = build_material_pack_v1(
-            schema_version=1, job=JobKind.HOLDINGS,
-            tick_id=200, market_partition=("KR",),
-            payload=payload, captured_at=_NOW,
+            schema_version=1,
+            job=JobKind.HOLDINGS,
+            tick_id=200,
+            market_partition=("KR",),
+            payload=payload,
+            captured_at=_NOW,
             source_timestamps={"provider": None, "fetched": None, "stored": None},
             parser_version=COMPOSITE_HOLDINGS_PARSER_VERSION,
         )
@@ -164,8 +186,12 @@ class TestCurrentHoldingsWithPensionScope:
             ordinal=2,
             holdings=(
                 HoldingItemV1(
-                    symbol="0167A0", quantity="50", avg_price="10000",
-                    currency="KRW", market_raw="KR", market_field="market",
+                    symbol="0167A0",
+                    quantity="50",
+                    avg_price="10000",
+                    currency="KRW",
+                    market_raw="KR",
+                    market_field="market",
                 ),
             ),
         )
@@ -180,8 +206,12 @@ class TestCurrentHoldingsWithPensionScope:
             ordinal=1,
             holdings=(
                 HoldingItemV1(
-                    symbol="005930", quantity="100", avg_price="70000",
-                    currency="KRW", market_raw="KR", market_field="market",
+                    symbol="005930",
+                    quantity="100",
+                    avg_price="70000",
+                    currency="KRW",
+                    market_raw="KR",
+                    market_field="market",
                 ),
             ),
         )

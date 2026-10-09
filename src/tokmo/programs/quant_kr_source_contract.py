@@ -7,10 +7,10 @@ import hashlib
 import json
 import os
 import stat
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable
 
 from tokmo.facts.opendart import (
     OpenDartCorpMapping,
@@ -38,13 +38,18 @@ DART_V2_PHASE = "KR_QUANT_SOURCE_CONTRACT_DART_V2"
 V2_INCREMENTAL_CAPS = {
     TOSS_V2_PHASE: {"TOKEN": 1, "STOCKS": 1},
     DART_V2_PHASE: {
-        "corpCode": 1, "fnlttSinglAcnt": 4,
-        "fnlttSinglAcntAll": 4, "stockTotqySttus": 2,
+        "corpCode": 1,
+        "fnlttSinglAcnt": 4,
+        "fnlttSinglAcntAll": 4,
+        "stockTotqySttus": 2,
     },
 }
 PRIOR_ACTUAL_STARTS = {
-    "TOKEN": 2, "STOCKS": 2, "corpCode": 2,
-    "fnlttSinglAcnt": 2, "fnlttSinglAcntAll": 2,
+    "TOKEN": 2,
+    "STOCKS": 2,
+    "corpCode": 2,
+    "fnlttSinglAcnt": 2,
+    "fnlttSinglAcntAll": 2,
     "stockTotqySttus": 0,
 }
 V2_CUMULATIVE_CAPS = {
@@ -59,28 +64,65 @@ PREDECESSOR_LEDGERS = (
 )
 PREDECESSOR_TERMINALS = ("STOP:SourceContractRefusal", "RESOLVED_HYPOTHESIS")
 PREDECESSOR_FIXTURE_SHA256 = (
-    "4c22c6cda96dae4bdd8e426345a48e6d2cf47813488d274bf5960219bdb35f50")
+    "4c22c6cda96dae4bdd8e426345a48e6d2cf47813488d274bf5960219bdb35f50"
+)
 # Exact StockInfo attributes already consumed by the membership gate.  This
 # evidence lane deliberately excludes names, prices, quantities and shares.
-TOSS_MEMBERSHIP_STOCK_INFO_FIELDS = frozenset({
-    "symbol", "isin_code", "market", "security_type", "is_common_share",
-    "status", "currency", "list_date", "delist_date",
-    "krx_trading_suspended",
-})
-STOP_FAILURES = frozenset({
-    "auth_rejection", "http_429", "redirect", "body_too_large",
-    "unsupported_content_encoding", "protocol_failure",
-})
-SAFE_ROW_FIELDS = frozenset({
-    "corp_code", "corp_name", "stock_code", "corp_cls", "rcept_no",
-    "reprt_code", "bsns_year", "sj_div", "account_id", "account_nm",
-    "fs_div", "thstrm_nm", "frmtrm_nm", "bfefrmtrm_nm",
-    "se", "stock_knd", "istc_totqy", "distb_stock_co",
-})
-SAFE_FIELD_NAMES = SAFE_ROW_FIELDS | frozenset({
-    "thstrm_amount", "frmtrm_amount", "bfefrmtrm_amount",
-    "thstrm_add_amount", "frmtrm_add_amount",
-})
+TOSS_MEMBERSHIP_STOCK_INFO_FIELDS = frozenset(
+    {
+        "symbol",
+        "isin_code",
+        "market",
+        "security_type",
+        "is_common_share",
+        "status",
+        "currency",
+        "list_date",
+        "delist_date",
+        "krx_trading_suspended",
+    }
+)
+STOP_FAILURES = frozenset(
+    {
+        "auth_rejection",
+        "http_429",
+        "redirect",
+        "body_too_large",
+        "unsupported_content_encoding",
+        "protocol_failure",
+    }
+)
+SAFE_ROW_FIELDS = frozenset(
+    {
+        "corp_code",
+        "corp_name",
+        "stock_code",
+        "corp_cls",
+        "rcept_no",
+        "reprt_code",
+        "bsns_year",
+        "sj_div",
+        "account_id",
+        "account_nm",
+        "fs_div",
+        "thstrm_nm",
+        "frmtrm_nm",
+        "bfefrmtrm_nm",
+        "se",
+        "stock_knd",
+        "istc_totqy",
+        "distb_stock_co",
+    }
+)
+SAFE_FIELD_NAMES = SAFE_ROW_FIELDS | frozenset(
+    {
+        "thstrm_amount",
+        "frmtrm_amount",
+        "bfefrmtrm_amount",
+        "thstrm_add_amount",
+        "frmtrm_add_amount",
+    }
+)
 
 
 class SourceContractRefusal(RuntimeError):
@@ -93,8 +135,12 @@ class HeldIssuer:
     corp_code: str
 
     def __post_init__(self) -> None:
-        if (len(self.symbol) != 6 or not self.symbol.isdigit()
-                or len(self.corp_code) != 8 or not self.corp_code.isdigit()):
+        if (
+            len(self.symbol) != 6
+            or not self.symbol.isdigit()
+            or len(self.corp_code) != 8
+            or not self.corp_code.isdigit()
+        ):
             raise ValueError("invalid_held_issuer_identity")
 
 
@@ -128,8 +174,12 @@ class PhaseLedger:
                 raise SourceContractRefusal("output_dir_not_private")
         else:
             self.path.parent.mkdir(mode=0o700, parents=True)
-        payload = {"phase": PHASE, "held_symbols": list(held_symbols),
-                   "starts": [], "terminal": None}
+        payload = {
+            "phase": PHASE,
+            "held_symbols": list(held_symbols),
+            "starts": [],
+            "terminal": None,
+        }
         self._write_new(payload)
 
     def reserve(self, endpoint: str, identity: str) -> int:
@@ -140,9 +190,14 @@ class PhaseLedger:
         if endpoint not in ALL_CAPS or used >= ALL_CAPS[endpoint]:
             raise SourceContractRefusal("endpoint_ceiling_reached")
         sequence = len(data["starts"]) + 1
-        data["starts"].append({"sequence": sequence, "endpoint": endpoint,
-                               "request_identity": identity,
-                               "outcome": "RESERVED"})
+        data["starts"].append(
+            {
+                "sequence": sequence,
+                "endpoint": endpoint,
+                "request_identity": identity,
+                "outcome": "RESERVED",
+            }
+        )
         self._replace(data)
         return sequence
 
@@ -197,8 +252,9 @@ class PhaseLedger:
             os.close(directory_fd)
 
 
-def request_identity(endpoint: str, corp_code: str | None = None,
-                     year: str | None = None) -> str:
+def request_identity(
+    endpoint: str, corp_code: str | None = None, year: str | None = None
+) -> str:
     if endpoint == "corpCode":
         return "GET opendart.fss.or.kr/api/corpCode.xml"
     suffix = f"corp_code={corp_code}&bsns_year={year}&reprt_code=11011"
@@ -207,22 +263,43 @@ def request_identity(endpoint: str, corp_code: str | None = None,
     return f"GET opendart.fss.or.kr/api/{endpoint}.json?{suffix}"
 
 
-def inspect_json_body(body: bytes, identity: str, endpoint: str,
-                      ) -> tuple[dict, bool, bool]:
+def inspect_json_body(
+    body: bytes,
+    identity: str,
+    endpoint: str,
+) -> tuple[dict, bool, bool]:
     digest = hashlib.sha256(body).hexdigest()
     try:
         payload = json.loads(body)
     except (json.JSONDecodeError, UnicodeDecodeError):
-        return ({"request_identity": identity, "body_sha256": digest,
-                 "schema": "invalid_json"}, False, False)
+        return (
+            {
+                "request_identity": identity,
+                "body_sha256": digest,
+                "schema": "invalid_json",
+            },
+            False,
+            False,
+        )
     if not isinstance(payload, dict) or not isinstance(payload.get("status"), str):
-        return ({"request_identity": identity, "body_sha256": digest,
-                 "schema": "drift"}, False, False)
+        return (
+            {"request_identity": identity, "body_sha256": digest, "schema": "drift"},
+            False,
+            False,
+        )
     status = payload["status"]
     rows = payload.get("list", [])
     if status == "000" and not isinstance(rows, list):
-        return ({"request_identity": identity, "body_sha256": digest,
-                 "status": status, "schema": "drift"}, False, False)
+        return (
+            {
+                "request_identity": identity,
+                "body_sha256": digest,
+                "status": status,
+                "schema": "drift",
+            },
+            False,
+            False,
+        )
     selected = []
     field_names = set()
     resolved_major = False
@@ -230,30 +307,54 @@ def inspect_json_body(body: bytes, identity: str, endpoint: str,
         for row in rows:
             if isinstance(row, dict):
                 field_names.update(k for k in row if k in SAFE_FIELD_NAMES)
-                if (row.get("fs_div") == "CFS" and row.get("account_id")):
+                if row.get("fs_div") == "CFS" and row.get("account_id"):
                     resolved_major = True
                 if len(selected) < 20:
-                    selected.append({k: row[k] for k in sorted(row)
-                                     if k in SAFE_ROW_FIELDS and isinstance(row[k], str)})
-    observation = {"request_identity": identity, "body_sha256": digest,
-                   "status": status, "schema": "observed",
-                   "field_names": sorted(field_names),
-                   "selected_rows": selected}
-    unresolved_major = (endpoint == "fnlttSinglAcnt" and status == "000"
-                        and not resolved_major)
+                    selected.append(
+                        {
+                            k: row[k]
+                            for k in sorted(row)
+                            if k in SAFE_ROW_FIELDS and isinstance(row[k], str)
+                        }
+                    )
+    observation = {
+        "request_identity": identity,
+        "body_sha256": digest,
+        "status": status,
+        "schema": "observed",
+        "field_names": sorted(field_names),
+        "selected_rows": selected,
+    }
+    unresolved_major = (
+        endpoint == "fnlttSinglAcnt" and status == "000" and not resolved_major
+    )
     resolved = status == "000" and bool(selected) and not unresolved_major
     return observation, resolved, unresolved_major
 
 
-def execute_opendart(*, issuers: tuple[HeldIssuer, ...], years: tuple[str, ...],
-                     output_dir: Path, api_key: str, transport,
-                     clock: Callable[[], datetime],
-                     collect_share_evidence: bool = True,
-                     ledger: PhaseLedger | None = None,
-                     initial_observations: tuple[dict, ...] = ()) -> dict:
-    if not issuers or len(issuers) > 5 or len({x.symbol for x in issuers}) != len(issuers):
+def execute_opendart(
+    *,
+    issuers: tuple[HeldIssuer, ...],
+    years: tuple[str, ...],
+    output_dir: Path,
+    api_key: str,
+    transport,
+    clock: Callable[[], datetime],
+    collect_share_evidence: bool = True,
+    ledger: PhaseLedger | None = None,
+    initial_observations: tuple[dict, ...] = (),
+) -> dict:
+    if (
+        not issuers
+        or len(issuers) > 5
+        or len({x.symbol for x in issuers}) != len(issuers)
+    ):
         raise SourceContractRefusal("held_symbols_outside_bound")
-    if not years or len(years) > 2 or any(len(y) != 4 or not y.isdigit() for y in years):
+    if (
+        not years
+        or len(years) > 2
+        or any(len(y) != 4 or not y.isdigit() for y in years)
+    ):
         raise SourceContractRefusal("years_outside_bound")
     output_dir = output_dir.resolve()
     owns_ledger = ledger is None
@@ -268,8 +369,11 @@ def execute_opendart(*, issuers: tuple[HeldIssuer, ...], years: tuple[str, ...],
 
     def call(endpoint: str, request, identity: str):
         sequence = ledger.reserve(endpoint, identity)
-        outcome = (transport(request) if endpoint == "corpCode"
-                   else transport.trace_json(request))
+        outcome = (
+            transport(request)
+            if endpoint == "corpCode"
+            else transport.trace_json(request)
+        )
         if isinstance(outcome, _OpenDartTransportFailure):
             observation = {"request_identity": identity, "failure": outcome.code}
             ledger.settle(sequence, outcome.code, observation)
@@ -280,14 +384,17 @@ def execute_opendart(*, issuers: tuple[HeldIssuer, ...], years: tuple[str, ...],
             ledger.settle(sequence, "request_identity_disagreement", {})
             raise SourceContractRefusal("request_identity_disagreement")
         observation, resolved, unresolved = inspect_json_body(
-            outcome.body, identity, endpoint)
+            outcome.body, identity, endpoint
+        )
         rows = observation.get("selected_rows", [])
         if any(row.get("corp_code") not in (None, request.corp_code) for row in rows):
             ledger.settle(sequence, "request_identity_disagreement", observation)
             raise SourceContractRefusal("request_identity_disagreement")
-        if (endpoint == "fnlttSinglAcntAll" and rows
-                and any("fs_div" in row and row.get("fs_div") != "CFS"
-                        for row in rows)):
+        if (
+            endpoint == "fnlttSinglAcntAll"
+            and rows
+            and any("fs_div" in row and row.get("fs_div") != "CFS" for row in rows)
+        ):
             ledger.settle(sequence, "schema_drift", observation)
             raise SourceContractRefusal("schema_drift")
         code = "success" if observation.get("schema") == "observed" else "schema_drift"
@@ -309,17 +416,25 @@ def execute_opendart(*, issuers: tuple[HeldIssuer, ...], years: tuple[str, ...],
         mappings = []
         for issuer in issuers:
             mapping = parse_corp_code_zip(
-                outcome.body, stock_code=issuer.symbol, observed_at=observed_at)
+                outcome.body, stock_code=issuer.symbol, observed_at=observed_at
+            )
             if isinstance(mapping, OpenDartCorpMapping):
                 if mapping.corp_code != issuer.corp_code:
                     ledger.settle(seq, "request_identity_disagreement", {})
                     raise SourceContractRefusal("request_identity_disagreement")
-                mappings.append({"stock_code": mapping.stock_code,
-                                 "corp_code": mapping.corp_code,
-                                 "corp_name": mapping.corp_name})
-        obs = {"request_identity": identity,
-               "body_sha256": hashlib.sha256(outcome.body).hexdigest(),
-               "schema": "bounded_zip", "selected_rows": mappings}
+                mappings.append(
+                    {
+                        "stock_code": mapping.stock_code,
+                        "corp_code": mapping.corp_code,
+                        "corp_name": mapping.corp_name,
+                    }
+                )
+        obs = {
+            "request_identity": identity,
+            "body_sha256": hashlib.sha256(outcome.body).hexdigest(),
+            "schema": "bounded_zip",
+            "selected_rows": mappings,
+        }
         ledger.settle(seq, "success", obs)
         observations.append(obs)
 
@@ -327,19 +442,26 @@ def execute_opendart(*, issuers: tuple[HeldIssuer, ...], years: tuple[str, ...],
             fallback_used = False
             for year in years:
                 identity = request_identity("fnlttSinglAcnt", issuer.corp_code, year)
-                req = OpenDartTraceJsonRequest("fnlttSinglAcnt", issuer.corp_code,
-                                               year, api_key=api_key)
+                req = OpenDartTraceJsonRequest(
+                    "fnlttSinglAcnt", issuer.corp_code, year, api_key=api_key
+                )
                 obs, resolved, unresolved = call("fnlttSinglAcnt", req, identity)
                 observations.append(obs)
                 if unresolved and not fallback_used:
                     fallback_used = True
                     fallback_identity = request_identity(
-                        "fnlttSinglAcntAll", issuer.corp_code, year)
+                        "fnlttSinglAcntAll", issuer.corp_code, year
+                    )
                     fallback = OpenDartTraceJsonRequest(
-                        "fnlttSinglAcntAll", issuer.corp_code, year,
-                        fs_div="CFS", api_key=api_key)
+                        "fnlttSinglAcntAll",
+                        issuer.corp_code,
+                        year,
+                        fs_div="CFS",
+                        api_key=api_key,
+                    )
                     fallback_obs, resolved, _ = call(
-                        "fnlttSinglAcntAll", fallback, fallback_identity)
+                        "fnlttSinglAcntAll", fallback, fallback_identity
+                    )
                     observations.append(fallback_obs)
                 if resolved:
                     ledger.finish("RESOLVED_HYPOTHESIS")
@@ -347,8 +469,9 @@ def execute_opendart(*, issuers: tuple[HeldIssuer, ...], years: tuple[str, ...],
             if collect_share_evidence:
                 year = years[0]
                 identity = request_identity("stockTotqySttus", issuer.corp_code, year)
-                req = OpenDartTraceJsonRequest("stockTotqySttus", issuer.corp_code,
-                                               year, api_key=api_key)
+                req = OpenDartTraceJsonRequest(
+                    "stockTotqySttus", issuer.corp_code, year, api_key=api_key
+                )
                 obs, resolved, _ = call("stockTotqySttus", req, identity)
                 obs["admissibility"] = "NON_DILUTED_EVIDENCE_ONLY"
                 observations.append(obs)
@@ -363,13 +486,19 @@ def execute_opendart(*, issuers: tuple[HeldIssuer, ...], years: tuple[str, ...],
         raise
 
 
-def execute_source_contract(*, phase: str, issuers: tuple[HeldIssuer, ...],
-                            years: tuple[str, ...], output_dir: Path,
-                            toss_token: Callable[[TossTraceRequest], TossTraceResult],
-                            toss_stocks: Callable[[TossTraceRequest], TossTraceResult],
-                            opendart_api_key: str, opendart_transport,
-                            clock: Callable[[], datetime],
-                            collect_share_evidence: bool = True) -> dict:
+def execute_source_contract(
+    *,
+    phase: str,
+    issuers: tuple[HeldIssuer, ...],
+    years: tuple[str, ...],
+    output_dir: Path,
+    toss_token: Callable[[TossTraceRequest], TossTraceResult],
+    toss_stocks: Callable[[TossTraceRequest], TossTraceResult],
+    opendart_api_key: str,
+    opendart_transport,
+    clock: Callable[[], datetime],
+    collect_share_evidence: bool = True,
+) -> dict:
     """Execute both approved lanes once through explicitly injected I/O seams."""
     if phase != PHASE:
         raise SourceContractRefusal("exact_phase_required")
@@ -387,24 +516,40 @@ def execute_source_contract(*, phase: str, issuers: tuple[HeldIssuer, ...],
         try:
             result = injected(request)
         except Exception:
-            ledger.settle(sequence, "injected_failure",
-                          {"request_identity": identity, "failure": "injected_failure"})
+            ledger.settle(
+                sequence,
+                "injected_failure",
+                {"request_identity": identity, "failure": "injected_failure"},
+            )
             raise
-        valid_digest = (isinstance(result, TossTraceResult)
-                        and len(result.body_sha256) == 64
-                        and all(char in "0123456789abcdef"
-                                for char in result.body_sha256))
-        if (not isinstance(result, TossTraceResult)
-                or result.request_identity != identity or result.status != "success"
-                or result.symbols != expected_symbols or not valid_digest):
-            ledger.settle(sequence, "request_identity_disagreement",
-                          {"request_identity": identity,
-                           "failure": "sanitized_read_back_disagreement"})
+        valid_digest = (
+            isinstance(result, TossTraceResult)
+            and len(result.body_sha256) == 64
+            and all(char in "0123456789abcdef" for char in result.body_sha256)
+        )
+        if (
+            not isinstance(result, TossTraceResult)
+            or result.request_identity != identity
+            or result.status != "success"
+            or result.symbols != expected_symbols
+            or not valid_digest
+        ):
+            ledger.settle(
+                sequence,
+                "request_identity_disagreement",
+                {
+                    "request_identity": identity,
+                    "failure": "sanitized_read_back_disagreement",
+                },
+            )
             raise SourceContractRefusal("request_identity_disagreement")
-        observation = {"request_identity": identity, "status": "success",
-                       "body_sha256": result.body_sha256,
-                       "symbols": list(expected_symbols),
-                       "schema": "toss_read_back"}
+        observation = {
+            "request_identity": identity,
+            "status": "success",
+            "body_sha256": result.body_sha256,
+            "symbols": list(expected_symbols),
+            "schema": "toss_read_back",
+        }
         ledger.settle(sequence, "success", observation)
         observations.append(observation)
 
@@ -412,22 +557,36 @@ def execute_source_contract(*, phase: str, issuers: tuple[HeldIssuer, ...],
         toss_call("TOKEN", toss_token, ())
         toss_call("STOCKS", toss_stocks, symbols)
         return execute_opendart(
-            issuers=issuers, years=years, output_dir=output_dir,
-            api_key=opendart_api_key, transport=opendart_transport, clock=clock,
-            collect_share_evidence=collect_share_evidence, ledger=ledger,
-            initial_observations=tuple(observations))
+            issuers=issuers,
+            years=years,
+            output_dir=output_dir,
+            api_key=opendart_api_key,
+            transport=opendart_transport,
+            clock=clock,
+            collect_share_evidence=collect_share_evidence,
+            ledger=ledger,
+            initial_observations=tuple(observations),
+        )
     except Exception as exc:
         if ledger.path.exists() and ledger.read()["terminal"] is None:
             ledger.finish(f"STOP:{type(exc).__name__}")
         raise
 
 
-def _write_fixture(output_dir: Path, issuers: tuple[HeldIssuer, ...],
-                   observations: list[dict], observed_at: datetime) -> dict:
-    payload = {"phase": PHASE, "held_symbols": [x.symbol for x in issuers],
-               "comparison_acquisition": "FORBIDDEN", "retry": 0,
-               "observed_at": observed_at.astimezone(timezone.utc).isoformat(),
-               "observations": observations}
+def _write_fixture(
+    output_dir: Path,
+    issuers: tuple[HeldIssuer, ...],
+    observations: list[dict],
+    observed_at: datetime,
+) -> dict:
+    payload = {
+        "phase": PHASE,
+        "held_symbols": [x.symbol for x in issuers],
+        "comparison_acquisition": "FORBIDDEN",
+        "retry": 0,
+        "observed_at": observed_at.astimezone(UTC).isoformat(),
+        "observations": observations,
+    }
     path = output_dir / "sanitized-fixture.json"
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -439,9 +598,11 @@ def _write_fixture(output_dir: Path, issuers: tuple[HeldIssuer, ...],
 
 def _canonical_symbols(symbols: tuple[str, ...]) -> tuple[str, ...]:
     canonical = tuple(sorted(set(symbols)))
-    if (not canonical or len(canonical) > 5
-            or any(len(symbol) != 6 or not symbol.isdigit()
-                   for symbol in canonical)):
+    if (
+        not canonical
+        or len(canonical) > 5
+        or any(len(symbol) != 6 or not symbol.isdigit() for symbol in canonical)
+    ):
         raise SourceContractRefusal("held_symbols_outside_bound")
     return canonical
 
@@ -462,8 +623,7 @@ def validate_predecessor_readback(payloads: tuple[dict, dict]) -> tuple[str, str
             endpoint = row.get("endpoint") if isinstance(row, dict) else None
             if endpoint in actual:
                 actual[endpoint] += 1
-        encoded = json.dumps(payload, sort_keys=True,
-                             separators=(",", ":")).encode()
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
         digests.append(hashlib.sha256(encoded).hexdigest())
     if actual != PRIOR_ACTUAL_STARTS:
         raise SourceContractRefusal("predecessor_ledger_disagreement")
@@ -475,15 +635,18 @@ def pinned_predecessor_readback() -> tuple[dict, dict]:
     endpoints = tuple(PRIOR_ACTUAL_STARTS)
     phases = []
     for phase_index, terminal in enumerate(PREDECESSOR_TERMINALS):
-        starts = [{"endpoint": endpoint, "outcome": "settled"}
-                  for endpoint in endpoints
-                  if PRIOR_ACTUAL_STARTS[endpoint] > phase_index]
+        starts = [
+            {"endpoint": endpoint, "outcome": "settled"}
+            for endpoint in endpoints
+            if PRIOR_ACTUAL_STARTS[endpoint] > phase_index
+        ]
         phases.append({"phase": PHASE, "starts": starts, "terminal": terminal})
     return tuple(phases)
 
 
-def _create_v2_ledger(output_dir: Path, phase: str,
-                      symbols: tuple[str, ...], predecessor_payloads) -> PhaseLedger:
+def _create_v2_ledger(
+    output_dir: Path, phase: str, symbols: tuple[str, ...], predecessor_payloads
+) -> PhaseLedger:
     predecessor_digests = validate_predecessor_readback(predecessor_payloads)
     ledger = PhaseLedger(output_dir.resolve() / "phase-ledger.json")
     ledger.create(symbols)
@@ -496,16 +659,19 @@ def _create_v2_ledger(output_dir: Path, phase: str,
     data["predecessor_ledgers"] = [
         {"path": path, "terminal": terminal, "ledger_sha256": digest}
         for path, terminal, digest in zip(
-            PREDECESSOR_LEDGERS, PREDECESSOR_TERMINALS, predecessor_digests)
+            PREDECESSOR_LEDGERS, PREDECESSOR_TERMINALS, predecessor_digests
+        )
     ]
     ledger._replace(data)
     return ledger
 
 
 def _v2_read(ledger: PhaseLedger, phase: str) -> dict:
-    if (stat.S_IMODE(ledger.path.parent.stat().st_mode) != 0o700
-            or stat.S_IMODE(ledger.path.stat().st_mode) != 0o600
-            or ledger.path.with_name(ledger.path.name + ".next").exists()):
+    if (
+        stat.S_IMODE(ledger.path.parent.stat().st_mode) != 0o700
+        or stat.S_IMODE(ledger.path.stat().st_mode) != 0o600
+        or ledger.path.with_name(ledger.path.name + ".next").exists()
+    ):
         raise SourceContractRefusal("ledger_permissions_disagreement")
     data = json.loads(ledger.path.read_text(encoding="utf-8"))
     if data.get("phase") != phase:
@@ -513,8 +679,9 @@ def _v2_read(ledger: PhaseLedger, phase: str) -> dict:
     return data
 
 
-def _v2_reserve(ledger: PhaseLedger, phase: str, endpoint: str,
-                identity: str, predecessor_readback) -> int:
+def _v2_reserve(
+    ledger: PhaseLedger, phase: str, endpoint: str, identity: str, predecessor_readback
+) -> int:
     validate_predecessor_readback(predecessor_readback())
     data = _v2_read(ledger, phase)
     if data["terminal"] is not None:
@@ -527,15 +694,21 @@ def _v2_reserve(ledger: PhaseLedger, phase: str, endpoint: str,
     if cumulative > V2_CUMULATIVE_CAPS[endpoint]:
         raise SourceContractRefusal("endpoint_ceiling_reached")
     sequence = len(data["starts"]) + 1
-    data["starts"].append({"sequence": sequence, "endpoint": endpoint,
-                           "request_identity": identity,
-                           "outcome": "RESERVED"})
+    data["starts"].append(
+        {
+            "sequence": sequence,
+            "endpoint": endpoint,
+            "request_identity": identity,
+            "outcome": "RESERVED",
+        }
+    )
     ledger._replace(data)
     return sequence
 
 
-def _v2_settle(ledger: PhaseLedger, phase: str, sequence: int,
-               outcome: str, observation: dict) -> None:
+def _v2_settle(
+    ledger: PhaseLedger, phase: str, sequence: int, outcome: str, observation: dict
+) -> None:
     data = _v2_read(ledger, phase)
     row = data["starts"][sequence - 1]
     if row["sequence"] != sequence or row["outcome"] != "RESERVED":
@@ -551,14 +724,22 @@ def _v2_finish(ledger: PhaseLedger, phase: str, terminal: str) -> None:
     ledger._replace(data)
 
 
-def _write_v2_fixture(output_dir: Path, phase: str,
-                      symbols: tuple[str, ...], observations: list[dict],
-                      observed_at: datetime, terminal: str) -> dict:
+def _write_v2_fixture(
+    output_dir: Path,
+    phase: str,
+    symbols: tuple[str, ...],
+    observations: list[dict],
+    observed_at: datetime,
+    terminal: str,
+) -> dict:
     payload = {
-        "phase": phase, "held_symbols": list(symbols),
-        "comparison_acquisition": "FORBIDDEN", "send": 0, "retry": 0,
+        "phase": phase,
+        "held_symbols": list(symbols),
+        "comparison_acquisition": "FORBIDDEN",
+        "send": 0,
+        "retry": 0,
         "terminal": terminal,
-        "observed_at": observed_at.astimezone(timezone.utc).isoformat(),
+        "observed_at": observed_at.astimezone(UTC).isoformat(),
         "observations": observations,
     }
     path = output_dir / "sanitized-fixture.json"
@@ -572,58 +753,70 @@ def _write_v2_fixture(output_dir: Path, phase: str,
     return payload
 
 
-def execute_toss_v2(*, phase: str, held_symbols: tuple[str, ...],
-                    output_dir: Path,
-                    toss_token: Callable[[TossTraceRequest], TossTraceResult],
-                    toss_stocks: Callable[[TossTraceRequest], TossTraceResult],
-                    clock: Callable[[], datetime],
-                    predecessor_readback: Callable[[], tuple[dict, dict]] =
-                    pinned_predecessor_readback) -> dict:
+def execute_toss_v2(
+    *,
+    phase: str,
+    held_symbols: tuple[str, ...],
+    output_dir: Path,
+    toss_token: Callable[[TossTraceRequest], TossTraceResult],
+    toss_stocks: Callable[[TossTraceRequest], TossTraceResult],
+    clock: Callable[[], datetime],
+    predecessor_readback: Callable[[], tuple[dict, dict]] = pinned_predecessor_readback,
+) -> dict:
     """Run the symbol-only membership evidence phase; no vocabulary mapping."""
     if phase != TOSS_V2_PHASE:
         raise SourceContractRefusal("exact_phase_required")
     symbols = _canonical_symbols(held_symbols)
-    ledger = _create_v2_ledger(output_dir, phase, symbols,
-                               predecessor_readback())
+    ledger = _create_v2_ledger(output_dir, phase, symbols, predecessor_readback())
     observations: list[dict] = []
     try:
         for operation, injected, expected in (
-                ("TOKEN", toss_token, ()), ("STOCKS", toss_stocks, symbols)):
+            ("TOKEN", toss_token, ()),
+            ("STOCKS", toss_stocks, symbols),
+        ):
             sequence = _v2_reserve(
-                ledger, phase, operation, operation, predecessor_readback)
+                ledger, phase, operation, operation, predecessor_readback
+            )
             request = TossTraceRequest(phase, operation, expected)
             result = injected(request)
-            valid_digest = (isinstance(result, TossTraceResult)
-                            and len(result.body_sha256) == 64
-                            and all(c in "0123456789abcdef"
-                                    for c in result.body_sha256))
-            if (not isinstance(result, TossTraceResult)
-                    or result.request_identity != operation
-                    or result.status != "success" or result.symbols != expected
-                    or not valid_digest):
-                _v2_settle(ledger, phase, sequence,
-                           "request_identity_disagreement", {})
+            valid_digest = (
+                isinstance(result, TossTraceResult)
+                and len(result.body_sha256) == 64
+                and all(c in "0123456789abcdef" for c in result.body_sha256)
+            )
+            if (
+                not isinstance(result, TossTraceResult)
+                or result.request_identity != operation
+                or result.status != "success"
+                or result.symbols != expected
+                or not valid_digest
+            ):
+                _v2_settle(ledger, phase, sequence, "request_identity_disagreement", {})
                 raise SourceContractRefusal("request_identity_disagreement")
-            observation = {"request_identity": operation, "status": "success",
-                           "body_sha256": result.body_sha256,
-                           "symbols": list(expected)}
+            observation = {
+                "request_identity": operation,
+                "status": "success",
+                "body_sha256": result.body_sha256,
+                "symbols": list(expected),
+            }
             if operation == "STOCKS":
                 if tuple(row.get("symbol") for row in result.stock_info) != symbols:
-                    _v2_settle(ledger, phase, sequence,
-                               "exact_echo_disagreement", observation)
+                    _v2_settle(
+                        ledger, phase, sequence, "exact_echo_disagreement", observation
+                    )
                     raise SourceContractRefusal("exact_echo_disagreement")
                 closed_rows = []
                 for row in result.stock_info:
                     if not isinstance(row, dict):
-                        _v2_settle(ledger, phase, sequence,
-                                   "schema_drift", observation)
+                        _v2_settle(ledger, phase, sequence, "schema_drift", observation)
                         raise SourceContractRefusal("schema_drift")
                     if set(row) != TOSS_MEMBERSHIP_STOCK_INFO_FIELDS:
-                        _v2_settle(ledger, phase, sequence,
-                                   "schema_drift", observation)
+                        _v2_settle(ledger, phase, sequence, "schema_drift", observation)
                         raise SourceContractRefusal("schema_drift")
-                    closed = {name: row[name]
-                              for name in sorted(TOSS_MEMBERSHIP_STOCK_INFO_FIELDS)}
+                    closed = {
+                        name: row[name]
+                        for name in sorted(TOSS_MEMBERSHIP_STOCK_INFO_FIELDS)
+                    }
                     closed_rows.append(closed)
                 observation["stock_info"] = closed_rows
                 observation["schema"] = "raw_stock_info_closed_set"
@@ -631,20 +824,27 @@ def execute_toss_v2(*, phase: str, held_symbols: tuple[str, ...],
             observations.append(observation)
         terminal = "MEMBERSHIP_CONTRACT_COMPLETE"
         _v2_finish(ledger, phase, terminal)
-        return _write_v2_fixture(output_dir, phase, symbols, observations,
-                                 clock(), terminal)
+        return _write_v2_fixture(
+            output_dir, phase, symbols, observations, clock(), terminal
+        )
     except Exception as exc:
         if ledger.path.exists() and _v2_read(ledger, phase)["terminal"] is None:
             _v2_finish(ledger, phase, f"STOP:{type(exc).__name__}")
         raise
 
 
-def execute_dart_v2(*, phase: str, issuers: tuple[HeldIssuer, ...],
-                    years: tuple[str, ...], output_dir: Path, api_key: str,
-                    transport, clock: Callable[[], datetime],
-                    corp_code_pin: dict[str, str | None],
-                    predecessor_readback: Callable[[], tuple[dict, dict]] =
-                    pinned_predecessor_readback) -> dict:
+def execute_dart_v2(
+    *,
+    phase: str,
+    issuers: tuple[HeldIssuer, ...],
+    years: tuple[str, ...],
+    output_dir: Path,
+    api_key: str,
+    transport,
+    clock: Callable[[], datetime],
+    corp_code_pin: dict[str, str | None],
+    predecessor_readback: Callable[[], tuple[dict, dict]] = pinned_predecessor_readback,
+) -> dict:
     """Run the historical EP-1 two-issuer verification campaign.
 
     This bounded executor must never be reused as a production target resolver.
@@ -653,8 +853,9 @@ def execute_dart_v2(*, phase: str, issuers: tuple[HeldIssuer, ...],
     if phase != DART_V2_PHASE:
         raise SourceContractRefusal("exact_phase_required")
     ordered = tuple(sorted(issuers, key=lambda item: item.symbol))
-    if (tuple(item.symbol for item in ordered) != ("000660", "005380")
-            or tuple(sorted(set(years))) != ("2024", "2025")):
+    if tuple(item.symbol for item in ordered) != ("000660", "005380") or tuple(
+        sorted(set(years))
+    ) != ("2024", "2025"):
         raise SourceContractRefusal("dart_matrix_identity_disagreement")
     expected_symbols = {item.symbol for item in ordered}
     if set(corp_code_pin) != expected_symbols:
@@ -663,22 +864,28 @@ def execute_dart_v2(*, phase: str, issuers: tuple[HeldIssuer, ...],
         pinned = corp_code_pin[issuer.symbol]
         if pinned is not None and pinned != issuer.corp_code:
             raise SourceContractRefusal("corp_code_mismatch")
-    corp_codes_validated = all(corp_code_pin[item.symbol] is not None
-                               for item in ordered)
+    corp_codes_validated = all(
+        corp_code_pin[item.symbol] is not None for item in ordered
+    )
     years = ("2024", "2025")
-    ledger = _create_v2_ledger(output_dir, phase,
-                               tuple(item.symbol for item in ordered),
-                               predecessor_readback())
+    ledger = _create_v2_ledger(
+        output_dir,
+        phase,
+        tuple(item.symbol for item in ordered),
+        predecessor_readback(),
+    )
     observations: list[dict] = []
 
     def call(endpoint: str, issuer: HeldIssuer, year: str):
         identity = request_identity(endpoint, issuer.corp_code, year)
-        sequence = _v2_reserve(
-            ledger, phase, endpoint, identity, predecessor_readback)
+        sequence = _v2_reserve(ledger, phase, endpoint, identity, predecessor_readback)
         request = OpenDartTraceJsonRequest(
-            endpoint, issuer.corp_code, year,
+            endpoint,
+            issuer.corp_code,
+            year,
             fs_div="CFS" if endpoint == "fnlttSinglAcntAll" else None,
-            api_key=api_key)
+            api_key=api_key,
+        )
         outcome = transport.trace_json(request)
         if isinstance(outcome, _OpenDartTransportFailure):
             observation = {"request_identity": identity, "failure": outcome.code}
@@ -687,16 +894,19 @@ def execute_dart_v2(*, phase: str, issuers: tuple[HeldIssuer, ...],
         if not isinstance(outcome, _OpenDartTransportSuccess):
             raise SourceContractRefusal("request_identity_disagreement")
         observation, resolved, unresolved = inspect_json_body(
-            outcome.body, identity, endpoint)
+            outcome.body, identity, endpoint
+        )
         rows = observation.get("selected_rows", [])
-        if any(row.get("corp_code") not in (None, issuer.corp_code)
-               for row in rows):
-            _v2_settle(ledger, phase, sequence,
-                       "request_identity_disagreement", observation)
+        if any(row.get("corp_code") not in (None, issuer.corp_code) for row in rows):
+            _v2_settle(
+                ledger, phase, sequence, "request_identity_disagreement", observation
+            )
             raise SourceContractRefusal("request_identity_disagreement")
-        if (endpoint == "fnlttSinglAcntAll" and rows
-                and any("fs_div" in row and row.get("fs_div") != "CFS"
-                        for row in rows)):
+        if (
+            endpoint == "fnlttSinglAcntAll"
+            and rows
+            and any("fs_div" in row and row.get("fs_div") != "CFS" for row in rows)
+        ):
             _v2_settle(ledger, phase, sequence, "schema_drift", observation)
             raise SourceContractRefusal("schema_drift")
         status = observation.get("status")
@@ -710,46 +920,64 @@ def execute_dart_v2(*, phase: str, issuers: tuple[HeldIssuer, ...],
         if not corp_codes_validated:
             identity = request_identity("corpCode")
             sequence = _v2_reserve(
-                ledger, phase, "corpCode", identity, predecessor_readback)
+                ledger, phase, "corpCode", identity, predecessor_readback
+            )
             outcome = transport(build_corp_code_request(api_key=api_key))
             if not isinstance(outcome, _OpenDartTransportSuccess):
                 code = getattr(outcome, "code", "protocol_failure")
-                _v2_settle(ledger, phase, sequence, code,
-                           {"request_identity": identity, "failure": code})
+                _v2_settle(
+                    ledger,
+                    phase,
+                    sequence,
+                    code,
+                    {"request_identity": identity, "failure": code},
+                )
                 raise SourceContractRefusal(code)
             observed_at = clock()
             mappings = []
             for issuer in ordered:
                 mapping = parse_corp_code_zip(
-                    outcome.body, stock_code=issuer.symbol, observed_at=observed_at)
-                if not isinstance(mapping, OpenDartCorpMapping) or mapping.corp_code != issuer.corp_code:
+                    outcome.body, stock_code=issuer.symbol, observed_at=observed_at
+                )
+                if (
+                    not isinstance(mapping, OpenDartCorpMapping)
+                    or mapping.corp_code != issuer.corp_code
+                ):
                     _v2_settle(ledger, phase, sequence, "corp_code_mismatch", {})
                     raise SourceContractRefusal("corp_code_mismatch")
-                mappings.append({"stock_code": issuer.symbol,
-                                 "corp_code": issuer.corp_code})
-            observation = {"request_identity": identity,
-                           "body_sha256": hashlib.sha256(outcome.body).hexdigest(),
-                           "schema": "bounded_zip", "selected_rows": mappings}
+                mappings.append(
+                    {"stock_code": issuer.symbol, "corp_code": issuer.corp_code}
+                )
+            observation = {
+                "request_identity": identity,
+                "body_sha256": hashlib.sha256(outcome.body).hexdigest(),
+                "schema": "bounded_zip",
+                "selected_rows": mappings,
+            }
             _v2_settle(ledger, phase, sequence, "success", observation)
             observations.append(observation)
         for issuer in ordered:
             for year in years:
                 observation, _resolved, unresolved = call(
-                    "fnlttSinglAcnt", issuer, year)
+                    "fnlttSinglAcnt", issuer, year
+                )
                 observations.append(observation)
                 if unresolved:
-                    observation, _resolved, _ = call(
-                        "fnlttSinglAcntAll", issuer, year)
+                    observation, _resolved, _ = call("fnlttSinglAcntAll", issuer, year)
                     observations.append(observation)
-            observation, _resolved, _ = call(
-                "stockTotqySttus", issuer, max(years))
+            observation, _resolved, _ = call("stockTotqySttus", issuer, max(years))
             observation["admissibility"] = "NON_DILUTED_EVIDENCE_ONLY"
             observations.append(observation)
         terminal = "MATRIX_COMPLETE"
         _v2_finish(ledger, phase, terminal)
-        return _write_v2_fixture(output_dir, phase,
-                                 tuple(item.symbol for item in ordered),
-                                 observations, clock(), terminal)
+        return _write_v2_fixture(
+            output_dir,
+            phase,
+            tuple(item.symbol for item in ordered),
+            observations,
+            clock(),
+            terminal,
+        )
     except Exception as exc:
         if ledger.path.exists() and _v2_read(ledger, phase)["terminal"] is None:
             _v2_finish(ledger, phase, f"STOP:{type(exc).__name__}")
@@ -757,10 +985,20 @@ def execute_dart_v2(*, phase: str, issuers: tuple[HeldIssuer, ...],
 
 
 def build_preflight(symbols: tuple[str, ...]) -> dict:
-    return {"phase": PHASE, "mode": "NO_LIVE", "held_symbols": list(symbols),
-            "toss": {"execution_owner": "controller", "token_max": 1,
-                     "stocks_max": 1, "operation": "STOCKS"},
-            "opendart_caps": CAPS, "comparison_operations": [], "retry": 0}
+    return {
+        "phase": PHASE,
+        "mode": "NO_LIVE",
+        "held_symbols": list(symbols),
+        "toss": {
+            "execution_owner": "controller",
+            "token_max": 1,
+            "stocks_max": 1,
+            "operation": "STOCKS",
+        },
+        "opendart_caps": CAPS,
+        "comparison_operations": [],
+        "retry": 0,
+    }
 
 
 def main(argv: list[str] | None = None) -> int:

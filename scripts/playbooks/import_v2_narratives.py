@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Bounded one-shot V2 narrative importer. Default action is private preview only."""
+
 from __future__ import annotations
 
 import argparse
@@ -16,10 +17,11 @@ FROZEN_TRADE_SHA256 = "016d11922aa032256f45d0a140ef4fe5ee81ed03f02df606465014a1e
 # User-approved current Toss identity corrections, verified live 2026-07-29.
 # Keys preserve the exact legacy code/name pair; values are current Toss code/name.
 CURRENT_TOSS_IDENTITY = {
-    ("465110", "KODEX 현대차로보틱스밸류체인Top2플러스"):
-        ("0204D0", "KODEX 현대차로보틱스밸류체인TOP3플러스"),
-    ("479850", "SOL 화장품TOP3플러스"):
-        ("0008T0", "SOL 화장품TOP3플러스"),
+    ("465110", "KODEX 현대차로보틱스밸류체인Top2플러스"): (
+        "0204D0",
+        "KODEX 현대차로보틱스밸류체인TOP3플러스",
+    ),
+    ("479850", "SOL 화장품TOP3플러스"): ("0008T0", "SOL 화장품TOP3플러스"),
 }
 
 
@@ -62,7 +64,12 @@ def normalize_identity(ticker: str, market: str) -> tuple[str, str]:
 
 
 def parse_strategy_playbooks(path: Path) -> list[Narrative]:
-    lines = path.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n").splitlines(keepends=True)
+    lines = (
+        path.read_text(encoding="utf-8")
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
+        .splitlines(keepends=True)
+    )
     in_stocks = False
     rows: list[Narrative] = []
     i = 0
@@ -103,14 +110,26 @@ def parse_strategy_playbooks(path: Path) -> list[Narrative]:
                     i += 1
                 required = ("name", "ticker", "market", "구분", "source_row")
                 if not all(key in current for key in required):
-                    raise ValueError(f"incomplete strategy item near row {current.get('source_row')}")
-                market, code = normalize_identity(str(current["ticker"]), str(current["market"]))
+                    raise ValueError(
+                        f"incomplete strategy item near row {current.get('source_row')}"
+                    )
+                market, code = normalize_identity(
+                    str(current["ticker"]), str(current["market"])
+                )
                 kind = str(current["구분"])
                 scope = {"보유": "personal", "퇴직": "retirement"}.get(kind)
-                rows.append(Narrative(
-                    "v2_strategy_playbook", int(current["source_row"]), str(current["name"]),
-                    str(current["ticker"]), market, code, scope, "".join(payload_lines),
-                ))
+                rows.append(
+                    Narrative(
+                        "v2_strategy_playbook",
+                        int(current["source_row"]),
+                        str(current["name"]),
+                        str(current["ticker"]),
+                        market,
+                        code,
+                        scope,
+                        "".join(payload_lines),
+                    )
+                )
                 continue
         i += 1
     return rows
@@ -134,15 +153,25 @@ def parse_trade_reasons(path: Path) -> tuple[list[Narrative], str]:
         legacy_code = code
         legacy_name = str(row.get("name") or "").strip()
         code, current_name = CURRENT_TOSS_IDENTITY.get(
-            (legacy_code, legacy_name), (legacy_code, legacy_name))
+            (legacy_code, legacy_name), (legacy_code, legacy_name)
+        )
         scope = {"퇴직연금": "retirement"}.get(str(row.get("account") or "").strip())
-        rows.append(Narrative(
-            "v2_trade_history_reason", row_no, current_name,
-            ticker, market, code, scope,
-            reason.replace("\r\n", "\n").replace("\r", "\n"),
-            str(row.get("date") or "unknown"), legacy_trade_key(source_sha, row_no),
-            legacy_code, legacy_name,
-        ))
+        rows.append(
+            Narrative(
+                "v2_trade_history_reason",
+                row_no,
+                current_name,
+                ticker,
+                market,
+                code,
+                scope,
+                reason.replace("\r\n", "\n").replace("\r", "\n"),
+                str(row.get("date") or "unknown"),
+                legacy_trade_key(source_sha, row_no),
+                legacy_code,
+                legacy_name,
+            )
+        )
     return rows, source_sha
 
 
@@ -152,36 +181,62 @@ def proposed_path(row: Narrative) -> str | None:
     return f"{row.scope}/{row.market}/{row.code}.md"
 
 
-def preview_records(strategy: list[Narrative], trades: list[Narrative], strategy_ref: str,
-                    trade_sha: str) -> list[dict]:
+def preview_records(
+    strategy: list[Narrative],
+    trades: list[Narrative],
+    strategy_ref: str,
+    trade_sha: str,
+) -> list[dict]:
     records: list[dict] = []
     for row in [*strategy, *trades]:
-        records.append({
-            "path": proposed_path(row), "resolved": proposed_path(row) is not None,
-            "scope": row.scope, "market": row.market, "instrument_code": row.code,
-            "instrument_name": row.name, "source_kind": row.source_kind,
-            "source_row": row.source_row,
-            "source_ref": strategy_ref if row.source_kind == "v2_strategy_playbook"
-                          else f"trade_history.json#row-{row.source_row}@{trade_sha}",
-            "event_date": row.event_date, "legacy_trade_key": row.legacy_trade_key,
-            "legacy_identity": ({"instrument_code": row.legacy_code,
-                                 "instrument_name": row.legacy_name}
-                                if row.source_kind == "v2_trade_history_reason" else None),
-            "payload": row.payload,
-        })
+        records.append(
+            {
+                "path": proposed_path(row),
+                "resolved": proposed_path(row) is not None,
+                "scope": row.scope,
+                "market": row.market,
+                "instrument_code": row.code,
+                "instrument_name": row.name,
+                "source_kind": row.source_kind,
+                "source_row": row.source_row,
+                "source_ref": strategy_ref
+                if row.source_kind == "v2_strategy_playbook"
+                else f"trade_history.json#row-{row.source_row}@{trade_sha}",
+                "event_date": row.event_date,
+                "legacy_trade_key": row.legacy_trade_key,
+                "legacy_identity": (
+                    {
+                        "instrument_code": row.legacy_code,
+                        "instrument_name": row.legacy_name,
+                    }
+                    if row.source_kind == "v2_trade_history_reason"
+                    else None
+                ),
+                "payload": row.payload,
+            }
+        )
     return records
 
 
 def write_preview(path: Path, records: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"schema_version": 1, "records": records}, ensure_ascii=False,
-                               indent=2) + "\n", encoding="utf-8")
-    print(f"preview written: {path} ({len(records)} records; payload hidden from stdout)")
+    path.write_text(
+        json.dumps(
+            {"schema_version": 1, "records": records}, ensure_ascii=False, indent=2
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    print(
+        f"preview written: {path} ({len(records)} records; payload hidden from stdout)"
+    )
 
 
 def ensure_ignored(path: Path, repo_root: Path) -> None:
     absolute = path.resolve()
-    result = subprocess.run(["git", "check-ignore", "-q", str(absolute)], cwd=repo_root.resolve())
+    result = subprocess.run(
+        ["git", "check-ignore", "-q", str(absolute)], cwd=repo_root.resolve()
+    )
     if result.returncode != 0:
         raise ValueError(f"preview path is not gitignored: {absolute}")
 
@@ -192,7 +247,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--trade-history", type=Path, required=True)
     parser.add_argument("--preview", type=Path, required=True)
     parser.add_argument("--repo-root", type=Path, default=Path.cwd())
-    parser.add_argument("--strategy-ref", default=f"strategy_advisor.yaml@{FROZEN_STRATEGY_SHA}")
+    parser.add_argument(
+        "--strategy-ref", default=f"strategy_advisor.yaml@{FROZEN_STRATEGY_SHA}"
+    )
     parser.add_argument("--allow-source-sha-change", action="store_true")
     args = parser.parse_args(argv)
     trade_sha = file_sha256(args.trade_history)
@@ -204,7 +261,9 @@ def main(argv: list[str] | None = None) -> int:
     records = preview_records(strategy, trades, args.strategy_ref, trade_sha)
     write_preview(args.preview, records)
     resolved = sum(bool(item["resolved"]) for item in records)
-    print(f"inventory: strategy={len(strategy)} trade_reasons={len(trades)} resolved={resolved} unresolved={len(records)-resolved}")
+    print(
+        f"inventory: strategy={len(strategy)} trade_reasons={len(trades)} resolved={resolved} unresolved={len(records) - resolved}"
+    )
     return 0
 
 

@@ -12,9 +12,9 @@ Success is silent: both stdout and stderr are empty on exit 0.
 
 import argparse
 import json
-from pathlib import Path
 import sys
 import time
+from pathlib import Path
 from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,15 +29,21 @@ from tokmo.values.news_collection_diagnostics import failure_diagnostics
 
 def _sanitized_stderr(result) -> str:
     """Fixed sanitized line: code and aggregate counts only."""
-    return json.dumps({
-        "code": result.code,
-        "started": result.started,
-        "target_count": result.target_count,
-        "filings_saved": result.filings_saved,
-        "duplicates": result.duplicates,
-        "conflicts": result.conflicts,
-        "unresolved_count": len(result.unresolved),
-    }, sort_keys=True) + "\n"
+    return (
+        json.dumps(
+            {
+                "code": result.code,
+                "started": result.started,
+                "target_count": result.target_count,
+                "filings_saved": result.filings_saved,
+                "duplicates": result.duplicates,
+                "conflicts": result.conflicts,
+                "unresolved_count": len(result.unresolved),
+            },
+            sort_keys=True,
+        )
+        + "\n"
+    )
 
 
 def main(argv=None) -> int:
@@ -49,9 +55,20 @@ def main(argv=None) -> int:
     try:
         result = run_sec_targeted_operation(home=args.home)
     except Exception as error:
-        print(json.dumps(dict(code="internal_error", diagnostics=failure_diagnostics(
-            error, elapsed_ms=int((time.monotonic() - started) * 1000),
-            trace=uuid4().hex[:16])), separators=(",", ":")), file=sys.stderr)
+        print(
+            json.dumps(
+                dict(
+                    code="internal_error",
+                    diagnostics=failure_diagnostics(
+                        error,
+                        elapsed_ms=int((time.monotonic() - started) * 1000),
+                        trace=uuid4().hex[:16],
+                    ),
+                ),
+                separators=(",", ":"),
+            ),
+            file=sys.stderr,
+        )
         return 1
 
     if result.code == "complete":

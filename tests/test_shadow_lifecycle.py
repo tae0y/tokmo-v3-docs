@@ -10,8 +10,8 @@ environment, and never exposes the token through repr, describe, logs, or
 state.
 """
 
-from datetime import datetime, timedelta, timezone
 import json
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -24,14 +24,17 @@ from tokmo.observability.shadow_lifecycle import (
     build_lifecycle_sink,
 )
 
-UTC = timezone.utc
+UTC = UTC
 NOW = datetime(2026, 8, 2, 6, 30, tzinfo=UTC)
 
 
 def event(kind, *, signature=None, detail=None, at=NOW):
     return HarnessLifecycleEventV1(
-        kind=kind, label="tokmo-v3-48h-shadow", at=at,
-        signature=signature, detail=detail,
+        kind=kind,
+        label="tokmo-v3-48h-shadow",
+        at=at,
+        signature=signature,
+        detail=detail,
     )
 
 
@@ -60,7 +63,9 @@ def test_event_detail_is_token_shaped_never_free_text():
 def test_event_time_must_be_aware():
     with pytest.raises(ValueError):
         HarnessLifecycleEventV1(
-            kind="START", label="x", at=datetime(2026, 8, 2),
+            kind="START",
+            label="x",
+            at=datetime(2026, 8, 2),
         )
 
 
@@ -85,11 +90,11 @@ def test_start_and_finish_admit_exactly_once_durably(tmp_path):
 def test_fatal_same_signature_dedups_within_cooldown(tmp_path):
     moments = {"now": NOW}
     deduper = LifecycleDeduperV1(
-        tmp_path / "dedup.json", clock=lambda: moments["now"],
+        tmp_path / "dedup.json",
+        clock=lambda: moments["now"],
         cooldown_seconds=3600,
     )
-    fatal = lambda: event("FATAL", signature="invoke_RuntimeError",
-                          at=moments["now"])
+    fatal = lambda: event("FATAL", signature="invoke_RuntimeError", at=moments["now"])
     assert deduper.admit(fatal()) is True
     moments["now"] = NOW + timedelta(seconds=600)
     assert deduper.admit(fatal()) is False  # same signature inside cooldown
@@ -99,7 +104,8 @@ def test_fatal_same_signature_dedups_within_cooldown(tmp_path):
     assert deduper.admit(fatal()) is True  # cooldown elapsed: at most one per
     # durable: a fresh instance still honours the last send times
     fresh = LifecycleDeduperV1(
-        tmp_path / "dedup.json", clock=lambda: moments["now"],
+        tmp_path / "dedup.json",
+        clock=lambda: moments["now"],
         cooldown_seconds=3600,
     )
     assert fresh.admit(fatal()) is False
@@ -129,8 +135,10 @@ def test_telegram_sender_reads_env_only_and_uses_stdlib_https(tmp_path):
         sent.append({"url": url, "data": data, "timeout": timeout})
 
     sender = TelegramStockBotSender(
-        environ={"TELEGRAM_STOCK_BOT_TOKEN": "123:secret-token-value",
-                 "TELEGRAM_STOCK_BOT_CHAT_ID": "424242"},
+        environ={
+            "TELEGRAM_STOCK_BOT_TOKEN": "123:secret-token-value",
+            "TELEGRAM_STOCK_BOT_CHAT_ID": "424242",
+        },
         opener=opener,
     )
     sender(event("START", detail="campaign_begin"))
@@ -162,8 +170,10 @@ def test_telegram_send_failure_never_raises_into_the_harness():
         raise OSError("network down")
 
     sender = TelegramStockBotSender(
-        environ={"TELEGRAM_STOCK_BOT_TOKEN": "123:x",
-                 "TELEGRAM_STOCK_BOT_CHAT_ID": "1"},
+        environ={
+            "TELEGRAM_STOCK_BOT_TOKEN": "123:x",
+            "TELEGRAM_STOCK_BOT_CHAT_ID": "1",
+        },
         opener=opener,
     )
     sender(event("FATAL", signature="sig"))  # must not raise
@@ -174,7 +184,10 @@ def test_telegram_send_failure_never_raises_into_the_harness():
 
 def test_build_lifecycle_sink_default_is_dry_run_with_dedup(tmp_path):
     sink = build_lifecycle_sink(
-        "dry-run", state_dir=tmp_path, clock=lambda: NOW, environ={},
+        "dry-run",
+        state_dir=tmp_path,
+        clock=lambda: NOW,
+        environ={},
     )
     sink(event("START"))
     sink(event("START"))  # deduplicated
@@ -185,9 +198,15 @@ def test_build_lifecycle_sink_default_is_dry_run_with_dedup(tmp_path):
 def test_build_lifecycle_sink_telegram_requires_env():
     with pytest.raises(LifecycleTransportError):
         build_lifecycle_sink(
-            "telegram", state_dir=None, clock=lambda: NOW, environ={},
+            "telegram",
+            state_dir=None,
+            clock=lambda: NOW,
+            environ={},
         )
     with pytest.raises(ValueError):
         build_lifecycle_sink(
-            "loudspeaker", state_dir=None, clock=lambda: NOW, environ={},
+            "loudspeaker",
+            state_dir=None,
+            clock=lambda: NOW,
+            environ={},
         )

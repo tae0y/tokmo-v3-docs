@@ -8,10 +8,10 @@ owners of the same operation. TOKEN stays outside governance: each lane
 acquires it lazily per tick and never persists a shared token.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
 from types import MappingProxyType
-from typing import Mapping
 
 from tokmo.values.cadence_policy import CADENCE_OPERATIONS
 
@@ -43,12 +43,15 @@ class OperationLaneV1:
         if not isinstance(self.recurring_owner, OperationLane):
             raise ValueError("invalid recurring owner")
         if self.fallback_owner is not None and not isinstance(
-                self.fallback_owner, OperationLane):
+            self.fallback_owner, OperationLane
+        ):
             raise ValueError("invalid fallback owner")
         if self.cutover_epoch_utc is not None:
-            if (type(self.cutover_epoch_utc) is not int
-                    or self.cutover_epoch_utc < 0
-                    or self.cutover_epoch_utc % _CUTOVER_GRID_SECONDS != 0):
+            if (
+                type(self.cutover_epoch_utc) is not int
+                or self.cutover_epoch_utc < 0
+                or self.cutover_epoch_utc % _CUTOVER_GRID_SECONDS != 0
+            ):
                 raise ValueError("cutover epoch must align to the 300s grid")
             if self.fallback_owner is None:
                 raise ValueError("cutover requires an explicit fallback owner")
@@ -82,9 +85,13 @@ def active_owner(entry: OperationLaneV1, *, epoch: int) -> OperationLane:
     return entry.fallback_owner
 
 
-def validate_lane_startup(registry: OperationLaneRegistryV1, *,
-                          lane: OperationLane,
-                          provider_operations, epoch: int) -> None:
+def validate_lane_startup(
+    registry: OperationLaneRegistryV1,
+    *,
+    lane: OperationLane,
+    provider_operations,
+    epoch: int,
+) -> None:
     """Startup fail-closed ownership check (§8.2/§12.4).
 
     A runner presents the provider operations its configuration would start
@@ -101,19 +108,23 @@ def validate_lane_startup(registry: OperationLaneRegistryV1, *,
             continue
         entry = registry.entries.get(operation)
         if entry is None:
-            raise OperationOwnershipError(
-                f"operation has no lane owner: {operation}")
+            raise OperationOwnershipError(f"operation has no lane owner: {operation}")
         if active_owner(entry, epoch=epoch) is not lane:
             raise OperationOwnershipError(
-                f"lane is not the active owner of {operation}")
+                f"lane is not the active owner of {operation}"
+            )
 
 
 # User-approved G3A operational cutover after token serialization and cadence
 # execution-consumer material-pack validation were repaired.
 G3A_CUTOVER_EPOCH_UTC = 1786443300  # 2026-08-11T10:15:00Z
-_PULSE_PROVIDER_OPERATIONS = frozenset({
-    "PRICE_BATCH", "ORDERS_PAGE", "ORDER_DETAIL",
-})
+_PULSE_PROVIDER_OPERATIONS = frozenset(
+    {
+        "PRICE_BATCH",
+        "ORDERS_PAGE",
+        "ORDER_DETAIL",
+    }
+)
 # Conditional-order SDS v0.4 §4.4: born Pulse-owned — the 300s lane never
 # ran a conditional scan, so there is no cutover boundary and no fallback.
 _PULSE_ONLY_OPERATIONS = frozenset({"CONDITIONAL_ORDERS"})
@@ -124,17 +135,23 @@ def _production_entry(operation: str) -> OperationLaneV1:
         return OperationLaneV1(operation, OperationLane.PULSE_60S, None, None)
     return OperationLaneV1(
         operation,
-        (OperationLane.PULSE_60S
-         if operation in _PULSE_PROVIDER_OPERATIONS
-         else OperationLane.CADENCE_300S),
-        (OperationLane.CADENCE_300S
-         if operation in _PULSE_PROVIDER_OPERATIONS else None),
-        (G3A_CUTOVER_EPOCH_UTC
-         if operation in _PULSE_PROVIDER_OPERATIONS else None),
+        (
+            OperationLane.PULSE_60S
+            if operation in _PULSE_PROVIDER_OPERATIONS
+            else OperationLane.CADENCE_300S
+        ),
+        (
+            OperationLane.CADENCE_300S
+            if operation in _PULSE_PROVIDER_OPERATIONS
+            else None
+        ),
+        (G3A_CUTOVER_EPOCH_UTC if operation in _PULSE_PROVIDER_OPERATIONS else None),
     )
 
 
-OPERATION_LANE_REGISTRY_V1 = OperationLaneRegistryV1(entries={
-    operation: _production_entry(operation)
-    for operation in sorted(LANE_GOVERNED_OPERATIONS)
-})
+OPERATION_LANE_REGISTRY_V1 = OperationLaneRegistryV1(
+    entries={
+        operation: _production_entry(operation)
+        for operation in sorted(LANE_GOVERNED_OPERATIONS)
+    }
+)

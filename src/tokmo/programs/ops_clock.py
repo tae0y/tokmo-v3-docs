@@ -21,14 +21,18 @@ def current_tick(clock) -> TickContext:
     return TickContext(now, tick_id_from_utc(now))
 
 
-COLLECTOR_OFFSETS = MappingProxyType({
-    JobKind.HOLDINGS: 0,
-    JobKind.QUOTES: 20,
-    JobKind.TRADES: 40,
-})
-RUN_CEILINGS = MappingProxyType({
-    JobKind.HOLDINGS: 8,
-    JobKind.QUOTES: 4,
-    JobKind.TRADES: 12,
-})
+COLLECTOR_OFFSETS = MappingProxyType(
+    {
+        JobKind.HOLDINGS: 0,
+        JobKind.QUOTES: 20,
+        JobKind.TRADES: 40,
+    }
+)
+RUN_CEILINGS = MappingProxyType(
+    {
+        JobKind.HOLDINGS: 8,
+        JobKind.QUOTES: 4,
+        JobKind.TRADES: 12,
+    }
+)
 ReservationSeal: TypeAlias = Callable[[str, str, str, str], None]

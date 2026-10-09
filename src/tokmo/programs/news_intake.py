@@ -4,16 +4,25 @@ from pathlib import Path
 
 from tokmo.records.external_news import ExternalNewsStore
 from tokmo.values.external_news import (
-    ContentMode, ContentState, LicenseState, NewsReceipt, NewsWrite,
+    ContentState,
+    LicenseState,
+    NewsReceipt,
+    NewsWrite,
 )
 from tokmo.values.news_connectors import (
-    NewsConnectorSpec, NewsFetchResult, NewsFetchStatus,
+    NewsConnectorSpec,
+    NewsFetchResult,
+    NewsFetchStatus,
 )
 
 
 def persist_news_result(
-    path: Path, spec: NewsConnectorSpec, result: NewsFetchResult, *,
-    target_ref: str, on_saved=None,
+    path: Path,
+    spec: NewsConnectorSpec,
+    result: NewsFetchResult,
+    *,
+    target_ref: str,
+    on_saved=None,
 ) -> tuple[NewsReceipt, ...]:
     """Persist a collected metadata batch item-by-item with atomic receipts.
 
@@ -42,10 +51,14 @@ def persist_news_result(
                 alert_eligible=item.alert_eligible,
                 time_interpretation=item.time_interpretation,
             )
-            receipts.append(store.save_connector_news(
-                spec, value, target_ref=target_ref,
-                bytes_received=result.bytes_received,
-            ))
+            receipts.append(
+                store.save_connector_news(
+                    spec,
+                    value,
+                    target_ref=target_ref,
+                    bytes_received=result.bytes_received,
+                )
+            )
             if on_saved is not None:
                 on_saved(receipts[-1])
     return tuple(receipts)

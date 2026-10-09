@@ -10,7 +10,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from tokmo.values.account_scope_patterns import PENSION_SCOPE_RE  # N1: leaf
+from tokmo.values.account_scope_patterns import (
+    ACCOUNT_SCOPE_RE,
+    PENSION_SCOPE_RE,  # N1: leaf
+)
 from tokmo.values.current_holdings import HoldingItemV1
 from tokmo.values.material_pack import canonical_encode
 from tokmo.values.portfolio_scope import (
@@ -18,7 +21,6 @@ from tokmo.values.portfolio_scope import (
     PortfolioScope,
     ScopeUnresolved,
 )
-from tokmo.values.account_scope_patterns import ACCOUNT_SCOPE_RE
 
 PENSION_SOURCE = "pension-excel-v1"
 PENSION_HOLDINGS_SCHEMA_VERSION = 1
@@ -53,9 +55,9 @@ def pension_raw_identity_fingerprint() -> str:
 
 @dataclass(frozen=True)
 class PensionAccountScopeIdentityV1:
-    account_scope: str       # pension_account_scope() — STABLE across revisions
+    account_scope: str  # pension_account_scope() — STABLE across revisions
     account_type_label: str  # always "pension-excel-v1"
-    ordinal: int             # assigned by composite builder: len(toss_accounts) + 1
+    ordinal: int  # assigned by composite builder: len(toss_accounts) + 1
 
 
 def pension_scope_identity(ordinal: int) -> PensionAccountScopeIdentityV1:
@@ -85,14 +87,16 @@ class PensionHoldingsRevisionV1:
 
     def __post_init__(self):
         if len(self.revision_id) != 32 or not all(
-                c in "0123456789abcdef" for c in self.revision_id):
+            c in "0123456789abcdef" for c in self.revision_id
+        ):
             raise ValueError("invalid revision_id")
         if self.schema_version != PENSION_HOLDINGS_SCHEMA_VERSION:
             raise ValueError("invalid schema_version")
         if len(self.source_content_sha256) != 64:
             raise ValueError("invalid source_content_sha256")
         if not isinstance(self.holdings, tuple) or not all(
-                isinstance(h, HoldingItemV1) for h in self.holdings):
+            isinstance(h, HoldingItemV1) for h in self.holdings
+        ):
             raise ValueError("invalid holdings")
         if len(self.holdings) != self.holding_count:
             raise ValueError("holding_count mismatch")
@@ -119,15 +123,15 @@ class PensionFreshnessV1:
     revision_id: str
     source_as_of: datetime
     source_age_days: int
-    freshness_class: str    # "CURRENT_MANUAL_SOURCE" or "AGED_MANUAL_SOURCE"
+    freshness_class: str  # "CURRENT_MANUAL_SOURCE" or "AGED_MANUAL_SOURCE"
 
 
 def classify_pension_freshness(
-    source_as_of: datetime, tick_now: datetime,
+    source_as_of: datetime,
+    tick_now: datetime,
 ) -> PensionFreshnessV1:
     kst = ZoneInfo("Asia/Seoul")
-    age = (tick_now.astimezone(kst).date()
-           - source_as_of.astimezone(kst).date()).days
+    age = (tick_now.astimezone(kst).date() - source_as_of.astimezone(kst).date()).days
     freshness = "CURRENT_MANUAL_SOURCE" if age <= 30 else "AGED_MANUAL_SOURCE"
     return PensionFreshnessV1(
         revision_id="",
@@ -143,13 +147,20 @@ def pension_semantic_digest(holdings: tuple[HoldingItemV1, ...]) -> str:
         "domain": "tokmo-v3:pension-holdings-semantic:v1",
         "holdings": [
             {
-                "symbol": h.symbol, "quantity": h.quantity,
-                "avg_price": h.avg_price, "currency": h.currency,
+                "symbol": h.symbol,
+                "quantity": h.quantity,
+                "avg_price": h.avg_price,
+                "currency": h.currency,
                 "market_raw": h.market_raw,
             }
-            for h in sorted(holdings, key=lambda h: (
-                h.market_raw or "", h.symbol, h.currency or "",
-            ))
+            for h in sorted(
+                holdings,
+                key=lambda h: (
+                    h.market_raw or "",
+                    h.symbol,
+                    h.currency or "",
+                ),
+            )
         ],
     }
     return hashlib.sha256(canonical_encode(obj)).hexdigest()
@@ -166,16 +177,23 @@ def pension_reconciliation_digest(
         "domain": "tokmo-v3:pension-reconciliation:v1",
         "holdings": [
             {
-                "symbol": h.symbol, "quantity": h.quantity,
-                "avg_price": h.avg_price, "currency": h.currency,
+                "symbol": h.symbol,
+                "quantity": h.quantity,
+                "avg_price": h.avg_price,
+                "currency": h.currency,
                 "market_raw": h.market_raw,
                 "instrument_name": name,
                 "evaluation_amount": (evaluation_amounts or {}).get(h.symbol),
                 "current_price": (current_prices or {}).get(h.symbol),
             }
-            for h, name in sorted(holdings_with_names, key=lambda hn: (
-                hn[0].market_raw or "", hn[0].symbol, hn[0].currency or "",
-            ))
+            for h, name in sorted(
+                holdings_with_names,
+                key=lambda hn: (
+                    hn[0].market_raw or "",
+                    hn[0].symbol,
+                    hn[0].currency or "",
+                ),
+            )
         ],
     }
     return hashlib.sha256(canonical_encode(obj)).hexdigest()
@@ -185,10 +203,12 @@ def make_composite_resolver(
     private_scope_map: dict,
 ) -> AccountScopeResolver:
     """Resolve both toss-acct-* and pension-excel-* scopes."""
+
     def resolver(raw_scope: str):
         if ACCOUNT_SCOPE_RE.fullmatch(raw_scope):
             return private_scope_map.get(raw_scope, ScopeUnresolved.UNRESOLVED)
         if PENSION_SCOPE_RE.fullmatch(raw_scope):
             return PortfolioScope.PENSION
         return ScopeUnresolved.UNRESOLVED
+
     return resolver

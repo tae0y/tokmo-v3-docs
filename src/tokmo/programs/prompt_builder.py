@@ -3,8 +3,8 @@
 from dataclasses import dataclass
 
 from tokmo.values.analysis_contracts import (
-    CandidateDataSegmentV1,
     MODEL_REQUEST_MAX_BYTES,
+    CandidateDataSegmentV1,
     UntrustedTextV1,
 )
 from tokmo.values.material_pack import canonical_encode
@@ -25,18 +25,24 @@ class InstructionSegmentV1:
 
 @dataclass(frozen=True)
 class PromptV1:
-    segments: tuple[InstructionSegmentV1 | UntrustedTextV1 | CandidateDataSegmentV1, ...]
+    segments: tuple[
+        InstructionSegmentV1 | UntrustedTextV1 | CandidateDataSegmentV1, ...
+    ]
 
     def __post_init__(self):
         if type(self.segments) is not tuple or any(
-            not isinstance(item, (InstructionSegmentV1, UntrustedTextV1, CandidateDataSegmentV1))
+            not isinstance(
+                item, (InstructionSegmentV1, UntrustedTextV1, CandidateDataSegmentV1)
+            )
             for item in self.segments
         ):
             raise ValueError("invalid prompt segments")
 
 
 def render_candidate_segment(segment: CandidateDataSegmentV1) -> bytes:
-    return canonical_encode({"candidate_id": segment.candidate_id, "payload": segment.payload})
+    return canonical_encode(
+        {"candidate_id": segment.candidate_id, "payload": segment.payload}
+    )
 
 
 def build_prompt_body(prompt: PromptV1) -> bytes:
@@ -47,23 +53,29 @@ def build_prompt_body(prompt: PromptV1) -> bytes:
         if isinstance(segment, InstructionSegmentV1):
             instructions.append(segment.instruction_id)
         elif isinstance(segment, UntrustedTextV1):
-            untrusted.append({
-                "provenance": segment.provenance,
-                "text": segment.text,
-                "trust_class": segment.trust_class.value,
-                "instruction_authority": segment.instruction_authority,
-            })
+            untrusted.append(
+                {
+                    "provenance": segment.provenance,
+                    "text": segment.text,
+                    "trust_class": segment.trust_class.value,
+                    "instruction_authority": segment.instruction_authority,
+                }
+            )
         else:
-            candidates.append({
-                "candidate_id": segment.candidate_id,
-                "payload": segment.payload,
-            })
-    body = canonical_encode({
-        "schema_version": 1,
-        "instructions": instructions,
-        "untrusted": untrusted,
-        "candidates": candidates,
-    })
+            candidates.append(
+                {
+                    "candidate_id": segment.candidate_id,
+                    "payload": segment.payload,
+                }
+            )
+    body = canonical_encode(
+        {
+            "schema_version": 1,
+            "instructions": instructions,
+            "untrusted": untrusted,
+            "candidates": candidates,
+        }
+    )
     if len(body) > MODEL_REQUEST_MAX_BYTES:
         raise ValueError("prompt oversize")
     return body

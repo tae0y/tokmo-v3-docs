@@ -13,6 +13,7 @@ portal/unknown document resolves only through the closed publisher alias
 map, and every unresolved document collapses into the single unknown
 bucket (at most ONE independence unit per counting population).
 """
+
 import hashlib
 import unicodedata
 
@@ -50,18 +51,21 @@ def persisted_source_id(source_native_key):
     """The exact n5 persistence derivation (§X1) — byte-identical to
     ``external_news.py``'s ``_hash("source", source_native_key)``."""
     return hashlib.sha256(
-        b"source\0" + str(source_native_key).encode("utf-8")).hexdigest()
+        b"source\0" + str(source_native_key).encode("utf-8")
+    ).hexdigest()
 
 
-_HASHED_TABLE = {persisted_source_id(key): entry
-                 for key, entry in PUBLISHER_ORIGINS_V1.items()}
+_HASHED_TABLE = {
+    persisted_source_id(key): entry for key, entry in PUBLISHER_ORIGINS_V1.items()
+}
 
 
 def _normalize_publisher(publisher_name):
     if publisher_name is None:
         return ""
-    collapsed = " ".join(unicodedata.normalize(
-        "NFKC", str(publisher_name)).casefold().split())
+    collapsed = " ".join(
+        unicodedata.normalize("NFKC", str(publisher_name)).casefold().split()
+    )
     return normalize_company_name(collapsed)
 
 
@@ -75,8 +79,7 @@ def resolve_publisher_origin(source_id, publisher_name):
     entry = _HASHED_TABLE.get(str(source_id))
     if entry is not None and entry[0] == "ORIGIN":
         return entry[1]
-    return KNOWN_PUBLISHER_ALIASES_V1.get(
-        _normalize_publisher(publisher_name))
+    return KNOWN_PUBLISHER_ALIASES_V1.get(_normalize_publisher(publisher_name))
 
 
 def count_independent_origins(pairs):

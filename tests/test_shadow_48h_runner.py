@@ -12,11 +12,11 @@ credentials present, sane clock, single instance. Durable state is atomic,
 private (0600), symlink-refusing, and never contains a secret.
 """
 
-from dataclasses import replace
-from datetime import datetime, timedelta, timezone
 import fcntl
 import json
 import os
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -24,13 +24,12 @@ import pytest
 from tokmo.programs.shadow_48h_runner import (
     Shadow48hConfigV1,
     ShadowRunnerDepsV1,
-    ShadowRunnerRefusal,
     run_48h_shadow,
 )
 from tokmo.records.prelaunch_markers import MarkerError
 from tokmo.values.cadence_policy import CADENCE_OPERATIONS
 
-UTC = timezone.utc
+UTC = UTC
 COMMIT = "55b65f63359f0d3a97920ea794b9d5b60bc8003e"
 START = datetime(2026, 8, 1, 21, 30, tzinfo=UTC)  # 2026-08-02T06:30 KST
 
@@ -65,16 +64,27 @@ def make_config(tmp_path, **overrides):
     return Shadow48hConfigV1(**values)
 
 
-def make_deps(fake, *, invoked, emits, summary=None, head=COMMIT,
-              tick_runtime=5, environ=None, marker_error=None):
+def make_deps(
+    fake,
+    *,
+    invoked,
+    emits,
+    summary=None,
+    head=COMMIT,
+    tick_runtime=5,
+    environ=None,
+    marker_error=None,
+):
     def invoke_tick(slot, observed):
         invoked.append((slot, observed))
         fake.now += timedelta(seconds=tick_runtime)
         result = {
-            "outcome": "SKIPPED_CLOSED", "reason": "both_markets_closed",
+            "outcome": "SKIPPED_CLOSED",
+            "reason": "both_markets_closed",
             "exit_code": 0,
             "lag_seconds": (observed - slot).total_seconds(),
-            "mask_digest": None, "open_markets": [],
+            "mask_digest": None,
+            "open_markets": [],
             "wire": {"total_started": 0},
             "bearer": "SECRET-BEARER-VALUE",  # must never reach state
         }
@@ -95,15 +105,14 @@ def make_deps(fake, *, invoked, emits, summary=None, head=COMMIT,
         credentials_check=lambda: True,
         marker_verify=marker_verify,
         environ={} if environ is None else environ,
-        lifecycle_emit=lambda kind, signature=None, detail=None:
-            emits.append((kind, signature)),
+        lifecycle_emit=lambda kind, signature=None, detail=None: emits.append(
+            (kind, signature)
+        ),
     )
 
 
 def read_state(config):
-    return json.loads(
-        (config.shadow_root / "harness" / "state.json").read_text()
-    )
+    return json.loads((config.shadow_root / "harness" / "state.json").read_text())
 
 
 def slots(config, count=None):
@@ -133,7 +142,9 @@ def test_config_validates_mode_alignment_and_commit(tmp_path):
 
 def test_production_config_shape_is_48h_at_300s(tmp_path):
     config = make_config(
-        tmp_path, duration_seconds=172800, interval_seconds=300,
+        tmp_path,
+        duration_seconds=172800,
+        interval_seconds=300,
     )
     assert config.duration_seconds // config.interval_seconds == 576
 
@@ -168,7 +179,8 @@ def test_tick_records_carry_lag_duration_wire_and_receipt_reference(tmp_path):
     invoked, emits = [], []
     config = make_config(tmp_path)
     exit_code = run_48h_shadow(
-        config, make_deps(fake, invoked=invoked, emits=emits),
+        config,
+        make_deps(fake, invoked=invoked, emits=emits),
     )
     assert exit_code == 0
     state = read_state(config)
@@ -190,23 +202,41 @@ def test_tick_records_carry_only_sanitized_stage_evidence(tmp_path):
     invoked, emits = [], []
     config = make_config(tmp_path)
     stages = [
-        {"stage": "history", "status": "ok", "reason": "backfill_deferred",
-         "latency_ms": 3, "bearer": "SECRET-STAGE-VALUE"},
-        {"stage": "quotes", "status": "ok", "reason": None,
-         "latency_ms": "not-a-number"},
+        {
+            "stage": "history",
+            "status": "ok",
+            "reason": "backfill_deferred",
+            "latency_ms": 3,
+            "bearer": "SECRET-STAGE-VALUE",
+        },
+        {
+            "stage": "quotes",
+            "status": "ok",
+            "reason": None,
+            "latency_ms": "not-a-number",
+        },
     ]
-    exit_code = run_48h_shadow(config, make_deps(
-        fake, invoked=invoked, emits=emits, summary={"stages": stages},
-    ))
+    exit_code = run_48h_shadow(
+        config,
+        make_deps(
+            fake,
+            invoked=invoked,
+            emits=emits,
+            summary={"stages": stages},
+        ),
+    )
     assert exit_code == 0
     state = read_state(config)
     record = state["ticks"]["2026-08-01T21:30:00Z"]
     # only the four bounded stage fields survive, with type-checked values
     assert record["stages"] == [
-        {"stage": "history", "status": "ok", "reason": "backfill_deferred",
-         "latency_ms": 3},
-        {"stage": "quotes", "status": "ok", "reason": None,
-         "latency_ms": None},
+        {
+            "stage": "history",
+            "status": "ok",
+            "reason": "backfill_deferred",
+            "latency_ms": 3,
+        },
+        {"stage": "quotes", "status": "ok", "reason": None, "latency_ms": None},
     ]
     assert "SECRET-STAGE-VALUE" not in json.dumps(state)
 
@@ -216,18 +246,30 @@ def test_terminal_reports_history_bootstrap_and_unverified_routes(tmp_path):
     invoked, emits = [], []
     config = make_config(tmp_path)
     summary = {
-        "stages": [{"stage": "history", "status": "ok",
-                    "reason": "backfill_deferred", "latency_ms": 1}],
-        "wire": {"total_started": 1,
-                 "operation_started": {"CALENDAR_DAY_KR": 1}},
+        "stages": [
+            {
+                "stage": "history",
+                "status": "ok",
+                "reason": "backfill_deferred",
+                "latency_ms": 1,
+            }
+        ],
+        "wire": {"total_started": 1, "operation_started": {"CALENDAR_DAY_KR": 1}},
     }
-    exit_code = run_48h_shadow(config, make_deps(
-        fake, invoked=invoked, emits=emits, summary=summary,
-    ))
+    exit_code = run_48h_shadow(
+        config,
+        make_deps(
+            fake,
+            invoked=invoked,
+            emits=emits,
+            summary=summary,
+        ),
+    )
     assert exit_code == 0
     terminal = read_state(config)["terminal"]
     assert terminal["history_bootstrap"] == {
-        "backfill_deferred_ticks": 6, "history_ok_ticks": 6,
+        "backfill_deferred_ticks": 6,
+        "history_ok_ticks": 6,
     }
     assert terminal["unverified_routes"] == sorted(
         set(CADENCE_OPERATIONS) - {"CALENDAR_DAY_KR"}
@@ -275,16 +317,15 @@ def crash_then_resume(tmp_path, *, downtime_slots):
 
 def test_resume_after_crash_marks_downtime_missed_and_never_replays(tmp_path):
     config, first, resumed, _emits = crash_then_resume(
-        tmp_path, downtime_slots=2,
+        tmp_path,
+        downtime_slots=2,
     )
     state = read_state(config)
     # actual_start survives the crash exactly once
     assert state["actual_start"] == "2026-08-01T21:30:00Z"
     # slots 0-1 completed pre-crash; slot 2 crashed mid-invoke; slot 3
     # elapsed while down; both recorded MISSED, never re-invoked
-    all_slots = [
-        slot.isoformat().replace("+00:00", "Z") for slot in slots(config)
-    ]
+    all_slots = [slot.isoformat().replace("+00:00", "Z") for slot in slots(config)]
     statuses = {slot: state["ticks"][slot]["status"] for slot in all_slots}
     assert statuses[all_slots[0]] == "SKIPPED_CLOSED"
     assert statuses[all_slots[1]] == "SKIPPED_CLOSED"
@@ -301,14 +342,22 @@ def test_relaunch_after_complete_is_inert(tmp_path):
     config = make_config(tmp_path)
     fake = FakeTime(START)
     invoked, emits = [], []
-    assert run_48h_shadow(
-        config, make_deps(fake, invoked=invoked, emits=emits),
-    ) == 0
+    assert (
+        run_48h_shadow(
+            config,
+            make_deps(fake, invoked=invoked, emits=emits),
+        )
+        == 0
+    )
     before = read_state(config)
     again, again_emits = [], []
-    assert run_48h_shadow(
-        config, make_deps(fake, invoked=again, emits=again_emits),
-    ) == 0
+    assert (
+        run_48h_shadow(
+            config,
+            make_deps(fake, invoked=again, emits=again_emits),
+        )
+        == 0
+    )
     assert again == []  # no new tick, provider zero
     assert again_emits == []  # no second START or FINISH
     assert read_state(config) == before
@@ -359,7 +408,10 @@ def preflight_case(tmp_path, capsys, token, **deps_overrides):
 
 def test_head_commit_mismatch_fails_closed(tmp_path, capsys):
     preflight_case(
-        tmp_path, capsys, "commit_mismatch", git_head=lambda: "f" * 40,
+        tmp_path,
+        capsys,
+        "commit_mismatch",
+        git_head=lambda: "f" * 40,
     )
 
 
@@ -368,7 +420,10 @@ def test_absent_full_suite_marker_fails_closed(tmp_path, capsys):
     config = make_config(tmp_path)
     invoked, emits = [], []
     deps = make_deps(
-        fake, invoked=invoked, emits=emits, marker_error="full_suite",
+        fake,
+        invoked=invoked,
+        emits=emits,
+        marker_error="full_suite",
     )
     assert run_48h_shadow(config, deps) == 1
     assert invoked == []
@@ -380,7 +435,10 @@ def test_absent_review_marker_fails_closed(tmp_path, capsys):
     config = make_config(tmp_path)
     invoked, emits = [], []
     deps = make_deps(
-        fake, invoked=invoked, emits=emits, marker_error="review",
+        fake,
+        invoked=invoked,
+        emits=emits,
+        marker_error="review",
     )
     assert run_48h_shadow(config, deps) == 1
     assert "refusal=marker_independent_review_invalid" in capsys.readouterr().err
@@ -388,14 +446,18 @@ def test_absent_review_marker_fails_closed(tmp_path, capsys):
 
 def test_missing_credentials_fail_closed(tmp_path, capsys):
     preflight_case(
-        tmp_path, capsys, "credentials_unavailable",
+        tmp_path,
+        capsys,
+        "credentials_unavailable",
         credentials_check=lambda: False,
     )
 
 
 def test_order_write_capability_fails_closed(tmp_path, capsys):
     preflight_case(
-        tmp_path, capsys, "order_write_capability_enabled",
+        tmp_path,
+        capsys,
+        "order_write_capability_enabled",
         environ={"TOKMO_ENABLE_ORDER_WRITES": "1"},
     )
 
@@ -404,9 +466,13 @@ def test_grossly_wrong_clock_fails_closed(tmp_path, capsys):
     config = make_config(tmp_path)
     fake = FakeTime(START - timedelta(days=40))
     invoked, emits = [], []
-    assert run_48h_shadow(
-        config, make_deps(fake, invoked=invoked, emits=emits),
-    ) == 1
+    assert (
+        run_48h_shadow(
+            config,
+            make_deps(fake, invoked=invoked, emits=emits),
+        )
+        == 1
+    )
     assert invoked == []
     assert "refusal=clock_out_of_range" in capsys.readouterr().err
 
@@ -414,13 +480,18 @@ def test_grossly_wrong_clock_fails_closed(tmp_path, capsys):
 def test_production_canonical_root_fails_closed(tmp_path, capsys, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     config = make_config(
-        tmp_path, shadow_root=tmp_path / ".local" / "share" / "tokmo-v3",
+        tmp_path,
+        shadow_root=tmp_path / ".local" / "share" / "tokmo-v3",
     )
     fake = FakeTime(START)
     invoked, emits = [], []
-    assert run_48h_shadow(
-        config, make_deps(fake, invoked=invoked, emits=emits),
-    ) == 1
+    assert (
+        run_48h_shadow(
+            config,
+            make_deps(fake, invoked=invoked, emits=emits),
+        )
+        == 1
+    )
     assert "refusal=unsafe_shadow_root" in capsys.readouterr().err
 
 
@@ -433,9 +504,13 @@ def test_duplicate_launcher_fails_closed_with_provider_zero(tmp_path, capsys):
     try:
         fake = FakeTime(START)
         invoked, emits = [], []
-        assert run_48h_shadow(
-            config, make_deps(fake, invoked=invoked, emits=emits),
-        ) == 1
+        assert (
+            run_48h_shadow(
+                config,
+                make_deps(fake, invoked=invoked, emits=emits),
+            )
+            == 1
+        )
         assert invoked == []
         assert "refusal=duplicate_instance" in capsys.readouterr().err
     finally:
@@ -447,9 +522,13 @@ def test_state_config_mismatch_refuses_resume(tmp_path, capsys):
     config = make_config(tmp_path)
     fake = FakeTime(START)
     invoked, emits = [], []
-    assert run_48h_shadow(
-        config, make_deps(fake, invoked=invoked, emits=emits),
-    ) == 0
+    assert (
+        run_48h_shadow(
+            config,
+            make_deps(fake, invoked=invoked, emits=emits),
+        )
+        == 0
+    )
     other = make_config(tmp_path, expected_commit="a" * 40)
     fresh, fresh_emits = [], []
     deps = make_deps(fake, invoked=fresh, emits=fresh_emits, head="a" * 40)
@@ -467,9 +546,13 @@ def test_symlinked_state_fails_closed(tmp_path, capsys):
     (harness / "state.json").symlink_to(victim)
     fake = FakeTime(START)
     invoked, emits = [], []
-    assert run_48h_shadow(
-        config, make_deps(fake, invoked=invoked, emits=emits),
-    ) == 1
+    assert (
+        run_48h_shadow(
+            config,
+            make_deps(fake, invoked=invoked, emits=emits),
+        )
+        == 1
+    )
     assert "refusal=state_unsafe" in capsys.readouterr().err
     assert victim.read_text() == "{}"
 
@@ -481,11 +564,17 @@ def test_state_is_private_and_never_contains_secrets(tmp_path):
     config = make_config(tmp_path)
     fake = FakeTime(START)
     invoked, emits = [], []
-    environ = {"TELEGRAM_STOCK_BOT_TOKEN": "123:telegram-secret",
-               "TOSS_CLIENT_SECRET": "toss-secret"}
-    assert run_48h_shadow(
-        config, make_deps(fake, invoked=invoked, emits=emits, environ=environ),
-    ) == 0
+    environ = {
+        "TELEGRAM_STOCK_BOT_TOKEN": "123:telegram-secret",
+        "TOSS_CLIENT_SECRET": "toss-secret",
+    }
+    assert (
+        run_48h_shadow(
+            config,
+            make_deps(fake, invoked=invoked, emits=emits, environ=environ),
+        )
+        == 0
+    )
     state_path = config.shadow_root / "harness" / "state.json"
     assert oct(state_path.stat().st_mode & 0o777) == "0o600"
     text = state_path.read_text()

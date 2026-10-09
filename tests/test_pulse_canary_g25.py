@@ -22,59 +22,67 @@ G2.5 third final targeted repair (this commit):
 - m1/m2: fixture composition moved to tools, t0 dead param removed.
 """
 
-from datetime import datetime, timezone, timedelta
-from email.message import Message
-from pathlib import Path
 import io
 import json
 import os
-import urllib.parse
-import urllib.request
-import urllib.response
-
-import pytest
 
 # Import build_canary_live_deps from the tool file (outside the seal)
 import sys as _sys
+import urllib.parse
+import urllib.request
+import urllib.response
+from datetime import UTC, datetime, timedelta
+from email.message import Message
+from pathlib import Path
+
+import pytest
+
 _tool_path = Path(__file__).resolve().parent.parent / "tools"
 if str(_tool_path) not in _sys.path:
     _sys.path.insert(0, str(_tool_path))
 from run_tokmo_pulse_canary import build_canary_live_deps
 from run_tokmo_pulse_canary_fixture import build_fixture_deps, run_fixture_cli
 
-T0 = datetime(2026, 8, 11, 0, 0, tzinfo=timezone.utc)
+T0 = datetime(2026, 8, 11, 0, 0, tzinfo=UTC)
 
 
 # ═══════════════════════════════════════════════════════════════════════
 # Helpers: fake transport for production-shaped tests (item 1, 2)
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def _json_response(body: bytes, status=200):
     headers = Message()
     resp = urllib.response.addinfourl(
-        io.BytesIO(body), headers,
-        "https://openapi.tossinvest.com/x", code=status)
-    setattr(resp, "msg", "OK")
+        io.BytesIO(body), headers, "https://openapi.tossinvest.com/x", code=status
+    )
+    resp.msg = "OK"
     return resp
 
 
 def _token_body():
-    return json.dumps({
-        "access_token": "test-bearer-token-1234567890",
-        "expires_in": 3600,
-        "token_type": "Bearer",
-    }).encode()
+    return json.dumps(
+        {
+            "access_token": "test-bearer-token-1234567890",
+            "expires_in": 3600,
+            "token_type": "Bearer",
+        }
+    ).encode()
 
 
 def _price_body(symbol="005930", price="72500"):
-    return json.dumps({
-        "result": [{
-            "symbol": symbol,
-            "lastPrice": price,
-            "currency": "KRW",
-            "timestamp": "2026-08-11T00:00:00Z",
-        }]
-    }).encode()
+    return json.dumps(
+        {
+            "result": [
+                {
+                    "symbol": symbol,
+                    "lastPrice": price,
+                    "currency": "KRW",
+                    "timestamp": "2026-08-11T00:00:00Z",
+                }
+            ]
+        }
+    ).encode()
 
 
 def _make_scripted_handler(responses):
@@ -99,22 +107,27 @@ def _credential_file(project_root):
     project_root = Path(project_root)
     project_root.mkdir(parents=True, exist_ok=True)
     (project_root / ".env.toss").write_text(
-        "TOSS_CLIENT_ID=test-client-id-12345\n"
-        "TOSS_CLIENT_SECRET=test-secret-abcdef\n")
+        "TOSS_CLIENT_ID=test-client-id-12345\nTOSS_CLIENT_SECRET=test-secret-abcdef\n"
+    )
 
 
 def _write_fixture(tmp_path):
     fixture_path = tmp_path / "fixture.json"
-    fixture_path.write_text(json.dumps({
-        "token": "fixture-token",
-        "quotes": {
-            "005930": {
-                "last_price": "72500", "currency": "KRW",
-                "timestamp": "2026-08-11T00:00:00Z",
-                "fetched_at": "2026-08-11T00:00:00Z",
+    fixture_path.write_text(
+        json.dumps(
+            {
+                "token": "fixture-token",
+                "quotes": {
+                    "005930": {
+                        "last_price": "72500",
+                        "currency": "KRW",
+                        "timestamp": "2026-08-11T00:00:00Z",
+                        "fetched_at": "2026-08-11T00:00:00Z",
+                    }
+                },
             }
-        },
-    }))
+        )
+    )
     return fixture_path
 
 
@@ -124,13 +137,22 @@ def _make_success_quotes_fetch():
     from tokmo.values.market_observations import TossCurrentPriceFact
 
     def quotes_fetch(market, symbols, *, bearer=None):
-        return PulseQuoteBatchOutcomeV1("success", tuple(
-            TossCurrentPriceFact(
-                source="toss-current-price-v1", symbol=sym,
-                last_price="50000", currency_raw="KRW",
-                timestamp=T0, fetched_at=T0,
-            ) for sym in symbols
-        ), ())
+        return PulseQuoteBatchOutcomeV1(
+            "success",
+            tuple(
+                TossCurrentPriceFact(
+                    source="toss-current-price-v1",
+                    symbol=sym,
+                    last_price="50000",
+                    currency_raw="KRW",
+                    timestamp=T0,
+                    fetched_at=T0,
+                )
+                for sym in symbols
+            ),
+            (),
+        )
+
     return quotes_fetch
 
 
@@ -138,11 +160,14 @@ def _make_success_quotes_fetch():
 # Item 1+2: Positive control — live branch with fake production transport
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def test_live_branch_with_fake_production_transport_proves_10_calls(tmp_path):
     """Item 1+2: Traverse live CLI branch with fake injected production
     transport. Exact counters prove TOKEN=1, PRICE_BATCH=5, total=6."""
     from tokmo.programs.pulse_canary import (
-        CanaryConfigV1, CanaryDepsV1, run_canary_session,
+        CanaryConfigV1,
+        CanaryDepsV1,
+        run_canary_session,
     )
     from tokmo.values.session_gate import Market
 
@@ -151,10 +176,14 @@ def test_live_branch_with_fake_production_transport_proves_10_calls(tmp_path):
 
     # v3 per-tick: TOKEN,PRICE interleaved 5 times = 10 responses
     handler_cls, wire_log = _make_scripted_handler(
-        [resp for pair in zip(
-            [_json_response(_token_body()) for _ in range(5)],
-            [_json_response(_price_body()) for _ in range(5)],
-        ) for resp in pair]
+        [
+            resp
+            for pair in zip(
+                [_json_response(_token_body()) for _ in range(5)],
+                [_json_response(_price_body()) for _ in range(5)],
+            )
+            for resp in pair
+        ]
     )
 
     # Virtual clock that advances per tick
@@ -173,27 +202,39 @@ def test_live_branch_with_fake_production_transport_proves_10_calls(tmp_path):
     )
     # Override sleep_until with virtual
     deps = CanaryDepsV1(
-        clock=deps.clock, token_fetch=deps.token_fetch,
+        clock=deps.clock,
+        token_fetch=deps.token_fetch,
         quotes_fetch=deps.quotes_fetch,
         sleep_until=virtual_sleep,
     )
 
     cfg = CanaryConfigV1(
-        market=Market.KR, symbol="005930",
-        max_ticks=5, max_provider_starts=10,
+        market=Market.KR,
+        symbol="005930",
+        max_ticks=5,
+        max_provider_starts=10,
     )
 
     evidence_root = tmp_path / "evidence"
     result = run_canary_session(
-        root=evidence_root, config=cfg, deps=deps, t0=T0,
+        root=evidence_root,
+        config=cfg,
+        deps=deps,
+        t0=T0,
     )
 
     # Item 2: exact counters
     token_calls = [w for w in wire_log if w[1] == "/oauth2/token"]
     price_calls = [w for w in wire_log if w[1] == "/api/v1/prices"]
-    assert len(token_calls) == 5, f"Expected 5 TOKEN calls (per-tick), got {len(token_calls)}"
-    assert len(price_calls) == 5, f"Expected 5 PRICE_BATCH calls, got {len(price_calls)}"
-    assert len(wire_log) == 10, f"Expected 10 total (5 TOKEN + 5 PRICE per-tick), got {len(wire_log)}"
+    assert len(token_calls) == 5, (
+        f"Expected 5 TOKEN calls (per-tick), got {len(token_calls)}"
+    )
+    assert len(price_calls) == 5, (
+        f"Expected 5 PRICE_BATCH calls, got {len(price_calls)}"
+    )
+    assert len(wire_log) == 10, (
+        f"Expected 10 total (5 TOKEN + 5 PRICE per-tick), got {len(wire_log)}"
+    )
     assert result.completed_ticks == 5
     assert result.total_provider_starts == 10
     assert result.stop_reason == "all_ticks_complete"
@@ -205,7 +246,9 @@ def test_mutate_hidden_token_call_breaks_test(tmp_path):
     # This test verifies that our live_deps quotes_fetch does NOT call
     # token_fetch internally — the bearer is passed explicitly.
     from tokmo.programs.pulse_canary import (
-        CanaryConfigV1, CanaryDepsV1, run_canary_session,
+        CanaryConfigV1,
+        CanaryDepsV1,
+        run_canary_session,
     )
     from tokmo.values.session_gate import Market
 
@@ -213,10 +256,14 @@ def test_mutate_hidden_token_call_breaks_test(tmp_path):
     _credential_file(project_root)
 
     handler_cls, wire_log = _make_scripted_handler(
-        [resp for pair in zip(
-            [_json_response(_token_body()) for _ in range(5)],
-            [_json_response(_price_body()) for _ in range(5)],
-        ) for resp in pair]
+        [
+            resp
+            for pair in zip(
+                [_json_response(_token_body()) for _ in range(5)],
+                [_json_response(_price_body()) for _ in range(5)],
+            )
+            for resp in pair
+        ]
     )
 
     clock_state = {"t": T0}
@@ -255,14 +302,20 @@ def test_mutate_hidden_token_call_breaks_test(tmp_path):
     )
 
     cfg = CanaryConfigV1(
-        market=Market.KR, symbol="005930",
-        max_ticks=5, max_provider_starts=10,
+        market=Market.KR,
+        symbol="005930",
+        max_ticks=5,
+        max_provider_starts=10,
     )
     result = run_canary_session(
-        root=tmp_path / "evidence", config=cfg, deps=deps, t0=T0,
+        root=tmp_path / "evidence",
+        config=cfg,
+        deps=deps,
+        t0=T0,
     )
     assert token_call_count["n"] == 5, (
-        f"Token must be fetched per-tick (5 times), got {token_call_count['n']}")
+        f"Token must be fetched per-tick (5 times), got {token_call_count['n']}"
+    )
     # Total wire calls must be exactly 10: one TOKEN + one PRICE per tick
     assert len(wire_log) == 10
 
@@ -271,12 +324,15 @@ def test_mutate_hidden_token_call_breaks_test(tmp_path):
 # Item 3: Crash after write-ahead intent, restart sees consumed count (B4)
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def test_crash_after_writeahead_intent_restart_sees_consumed(tmp_path):
     """Item 3: A crash after write-ahead intent (before settle) means the
     restart sees the consumed provider start from the purpose ledger."""
     from tokmo.programs.pulse_canary import (
-        CanaryConfigV1, CanaryDepsV1, run_canary_session,
+        CanaryConfigV1,
+        CanaryDepsV1,
         compute_purpose_identity,
+        run_canary_session,
     )
     from tokmo.records.pulse_canary_evidence import CanaryEvidenceStore
     from tokmo.values.session_gate import Market
@@ -302,11 +358,16 @@ def test_crash_after_writeahead_intent_restart_sees_consumed(tmp_path):
         sleep_until=lambda target: None,
     )
     cfg = CanaryConfigV1(
-        market=Market.KR, symbol="005930",
-        max_ticks=5, max_provider_starts=10,
+        market=Market.KR,
+        symbol="005930",
+        max_ticks=5,
+        max_provider_starts=10,
     )
     result = run_canary_session(
-        root=evidence_root, config=cfg, deps=deps, t0=T0,
+        root=evidence_root,
+        config=cfg,
+        deps=deps,
+        t0=T0,
     )
 
     # The crash was caught as provider failure
@@ -330,7 +391,10 @@ def test_crash_after_writeahead_intent_restart_sees_consumed(tmp_path):
         sleep_until=lambda target: None,
     )
     result2 = run_canary_session(
-        root=evidence_root, config=cfg, deps=deps2, t0=T0,
+        root=evidence_root,
+        config=cfg,
+        deps=deps2,
+        t0=T0,
     )
     # The cumulative includes the consumed start from the crash
     assert result2.total_provider_starts >= 6  # 1 crash + 1 token + 5 prices
@@ -340,10 +404,13 @@ def test_crash_after_writeahead_intent_restart_sees_consumed(tmp_path):
 # Item 4: Provider failure tick1 => stops exactly there, nonzero (B5)
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def test_provider_failure_stops_immediately_at_tick(tmp_path):
     """Item 4: Provider failure at tick 1 => stops at tick 1, not tick 5."""
     from tokmo.programs.pulse_canary import (
-        CanaryConfigV1, CanaryDepsV1, run_canary_session,
+        CanaryConfigV1,
+        CanaryDepsV1,
+        run_canary_session,
     )
     from tokmo.values.session_gate import Market
 
@@ -355,24 +422,32 @@ def test_provider_failure_stops_immediately_at_tick(tmp_path):
     def quotes_fetch(market, symbols, *, bearer=None):
         call_count["quotes"] += 1
         from tokmo.programs.pulse_quotes import PulseQuoteBatchOutcomeV1
+
         return PulseQuoteBatchOutcomeV1("http_500", (), tuple(symbols))
 
     deps = CanaryDepsV1(
-        clock=lambda: T0, token_fetch=token_fetch,
+        clock=lambda: T0,
+        token_fetch=token_fetch,
         quotes_fetch=quotes_fetch,
         sleep_until=lambda target: None,
     )
     cfg = CanaryConfigV1(
-        market=Market.KR, symbol="005930",
-        max_ticks=5, max_provider_starts=10,
+        market=Market.KR,
+        symbol="005930",
+        max_ticks=5,
+        max_provider_starts=10,
     )
     result = run_canary_session(
-        root=tmp_path, config=cfg, deps=deps, t0=T0,
+        root=tmp_path,
+        config=cfg,
+        deps=deps,
+        t0=T0,
     )
     assert result.stop_reason == "provider_failed"
     # B5: stops at tick 0+1=1, not 5
     assert call_count["quotes"] == 1, (
-        f"Should have stopped after 1 quote call, got {call_count['quotes']}")
+        f"Should have stopped after 1 quote call, got {call_count['quotes']}"
+    )
     assert result.completed_ticks == 1
 
 
@@ -380,11 +455,14 @@ def test_provider_failure_stops_immediately_at_tick(tmp_path):
 # Item 5: Fingerprint mutation => nonzero (M1)
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def test_fingerprint_mutation_stops_with_nonzero(tmp_path):
     """Item 5: If canonical root changes during canary, fingerprint compare
     fails and stop_reason = canonical_fingerprint_mutated."""
     from tokmo.programs.pulse_canary import (
-        CanaryConfigV1, CanaryDepsV1, run_canary_session,
+        CanaryConfigV1,
+        CanaryDepsV1,
+        run_canary_session,
     )
     from tokmo.values.session_gate import Market
 
@@ -406,25 +484,40 @@ def test_fingerprint_mutation_stops_with_nonzero(tmp_path):
             mutation_done["done"] = True
         from tokmo.programs.pulse_quotes import PulseQuoteBatchOutcomeV1
         from tokmo.values.market_observations import TossCurrentPriceFact
-        return PulseQuoteBatchOutcomeV1("success", tuple(
-            TossCurrentPriceFact(
-                source="toss-current-price-v1", symbol=sym,
-                last_price="50000", currency_raw="KRW",
-                timestamp=T0, fetched_at=T0,
-            ) for sym in symbols
-        ), ())
+
+        return PulseQuoteBatchOutcomeV1(
+            "success",
+            tuple(
+                TossCurrentPriceFact(
+                    source="toss-current-price-v1",
+                    symbol=sym,
+                    last_price="50000",
+                    currency_raw="KRW",
+                    timestamp=T0,
+                    fetched_at=T0,
+                )
+                for sym in symbols
+            ),
+            (),
+        )
 
     deps = CanaryDepsV1(
-        clock=lambda: T0, token_fetch=token_fetch,
+        clock=lambda: T0,
+        token_fetch=token_fetch,
         quotes_fetch=quotes_fetch,
         sleep_until=lambda target: None,
     )
     cfg = CanaryConfigV1(
-        market=Market.KR, symbol="005930",
-        max_ticks=5, max_provider_starts=10,
+        market=Market.KR,
+        symbol="005930",
+        max_ticks=5,
+        max_provider_starts=10,
     )
     result = run_canary_session(
-        root=evidence_root, config=cfg, deps=deps, t0=T0,
+        root=evidence_root,
+        config=cfg,
+        deps=deps,
+        t0=T0,
         canonical_root=canonical,
     )
     assert result.stop_reason == "canonical_fingerprint_mutated"
@@ -434,6 +527,7 @@ def test_fingerprint_mutation_stops_with_nonzero(tmp_path):
 # Item 6: Wrong/dirty commit => provider calls 0 (M4)
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def test_wrong_commit_blocks_live_call(tmp_path):
     """Item 6: Wrong base-commit => provider calls 0."""
     from tokmo.programs.pulse_canary import run_canary_cli
@@ -442,54 +536,81 @@ def test_wrong_commit_blocks_live_call(tmp_path):
     project_root.mkdir()
     # Initialize a git repo
     import subprocess
-    subprocess.run(["git", "init"], cwd=str(project_root),
-                   capture_output=True)
-    subprocess.run(["git", "config", "user.email", "test@test.com"],
-                   cwd=str(project_root), capture_output=True)
-    subprocess.run(["git", "config", "user.name", "Test"],
-                   cwd=str(project_root), capture_output=True)
+
+    subprocess.run(["git", "init"], cwd=str(project_root), capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"],
+        cwd=str(project_root),
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=str(project_root),
+        capture_output=True,
+    )
     (project_root / "README.md").write_text("test")
-    subprocess.run(["git", "add", "."], cwd=str(project_root),
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "init"],
-                   cwd=str(project_root), capture_output=True)
+    subprocess.run(["git", "add", "."], cwd=str(project_root), capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"], cwd=str(project_root), capture_output=True
+    )
 
     canonical = tmp_path / "canonical"
     canonical.mkdir()
 
-    result = run_canary_cli([
-        "--mode", "bounded-live-canary",
-        "--market", "KR", "--symbol", "005930",
-        "--canonical-root", str(canonical),
-        "--project-root", str(project_root),
-        "--max-ticks", "5", "--max-provider-starts", "10",
-        "--base-commit", "ffffffffffffffffffffffffffffffffffffffff",
-    ], evidence_root_override=tmp_path / "evidence")
+    result = run_canary_cli(
+        [
+            "--mode",
+            "bounded-live-canary",
+            "--market",
+            "KR",
+            "--symbol",
+            "005930",
+            "--canonical-root",
+            str(canonical),
+            "--project-root",
+            str(project_root),
+            "--max-ticks",
+            "5",
+            "--max-provider-starts",
+            "10",
+            "--base-commit",
+            "ffffffffffffffffffffffffffffffffffffffff",
+        ],
+        evidence_root_override=tmp_path / "evidence",
+    )
     assert result == 1  # refusal
 
 
 def test_dirty_tree_blocks_live_call(tmp_path):
     """Item 6: Dirty tracked tree => provider calls 0."""
-    from tokmo.programs.pulse_canary import run_canary_cli
     import subprocess
+
+    from tokmo.programs.pulse_canary import run_canary_cli
 
     project_root = tmp_path / "project"
     project_root.mkdir()
-    subprocess.run(["git", "init"], cwd=str(project_root),
-                   capture_output=True)
-    subprocess.run(["git", "config", "user.email", "test@test.com"],
-                   cwd=str(project_root), capture_output=True)
-    subprocess.run(["git", "config", "user.name", "Test"],
-                   cwd=str(project_root), capture_output=True)
+    subprocess.run(["git", "init"], cwd=str(project_root), capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"],
+        cwd=str(project_root),
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=str(project_root),
+        capture_output=True,
+    )
     (project_root / "tracked.py").write_text("# original")
-    subprocess.run(["git", "add", "."], cwd=str(project_root),
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "init"],
-                   cwd=str(project_root), capture_output=True)
+    subprocess.run(["git", "add", "."], cwd=str(project_root), capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"], cwd=str(project_root), capture_output=True
+    )
     # Get actual HEAD
     head = subprocess.run(
         ["git", "rev-parse", "HEAD"],
-        cwd=str(project_root), capture_output=True, text=True
+        cwd=str(project_root),
+        capture_output=True,
+        text=True,
     ).stdout.strip()
 
     # Dirty the tracked file
@@ -498,20 +619,34 @@ def test_dirty_tree_blocks_live_call(tmp_path):
     canonical = tmp_path / "canonical"
     canonical.mkdir()
 
-    result = run_canary_cli([
-        "--mode", "bounded-live-canary",
-        "--market", "KR", "--symbol", "005930",
-        "--canonical-root", str(canonical),
-        "--project-root", str(project_root),
-        "--max-ticks", "5", "--max-provider-starts", "10",
-        "--base-commit", head,
-    ], evidence_root_override=tmp_path / "evidence")
+    result = run_canary_cli(
+        [
+            "--mode",
+            "bounded-live-canary",
+            "--market",
+            "KR",
+            "--symbol",
+            "005930",
+            "--canonical-root",
+            str(canonical),
+            "--project-root",
+            str(project_root),
+            "--max-ticks",
+            "5",
+            "--max-provider-starts",
+            "10",
+            "--base-commit",
+            head,
+        ],
+        evidence_root_override=tmp_path / "evidence",
+    )
     assert result == 1  # dirty_tree refusal
 
 
 # ═══════════════════════════════════════════════════════════════════════
 # Item 7: Root alias/symlink/nesting => provider calls 0 (M5)
 # ═══════════════════════════════════════════════════════════════════════
+
 
 def test_symlink_evidence_root_blocks(tmp_path):
     """Item 7: Symlink as evidence root => refusal."""
@@ -520,14 +655,26 @@ def test_symlink_evidence_root_blocks(tmp_path):
     symlink = tmp_path / "symlink"
     os.symlink(real_dir, symlink)
 
-    result = run_fixture_cli([
-        "--mode", "bounded-live-canary",
-        "--market", "KR", "--symbol", "005930",
-        "--root", str(symlink),
-        "--project-root", str(tmp_path),
-        "--max-ticks", "5", "--max-provider-starts", "10",
-        "--fixture", str(_write_fixture(tmp_path)),
-    ])
+    result = run_fixture_cli(
+        [
+            "--mode",
+            "bounded-live-canary",
+            "--market",
+            "KR",
+            "--symbol",
+            "005930",
+            "--root",
+            str(symlink),
+            "--project-root",
+            str(tmp_path),
+            "--max-ticks",
+            "5",
+            "--max-provider-starts",
+            "10",
+            "--fixture",
+            str(_write_fixture(tmp_path)),
+        ]
+    )
     assert result == 1
 
 
@@ -537,15 +684,28 @@ def test_canonical_root_nesting_blocks(tmp_path):
     canonical.mkdir()
     evidence = canonical / "evidence"  # nested inside canonical
 
-    result = run_fixture_cli([
-        "--mode", "bounded-live-canary",
-        "--market", "KR", "--symbol", "005930",
-        "--root", str(evidence),
-        "--canonical-root", str(canonical),
-        "--project-root", str(tmp_path),
-        "--max-ticks", "5", "--max-provider-starts", "10",
-        "--fixture", str(_write_fixture(tmp_path)),
-    ])
+    result = run_fixture_cli(
+        [
+            "--mode",
+            "bounded-live-canary",
+            "--market",
+            "KR",
+            "--symbol",
+            "005930",
+            "--root",
+            str(evidence),
+            "--canonical-root",
+            str(canonical),
+            "--project-root",
+            str(tmp_path),
+            "--max-ticks",
+            "5",
+            "--max-provider-starts",
+            "10",
+            "--fixture",
+            str(_write_fixture(tmp_path)),
+        ]
+    )
     assert result == 1
 
 
@@ -553,10 +713,13 @@ def test_canonical_root_nesting_blocks(tmp_path):
 # Item 8: Past-slot restart => MISSED/non-call and future-only (B2)
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def test_past_slot_restart_does_not_replay(tmp_path):
     """Item 8: On restart, past slots are MISSED, not burst-replayed."""
     from tokmo.programs.pulse_canary import (
-        CanaryConfigV1, CanaryDepsV1, run_canary_session,
+        CanaryConfigV1,
+        CanaryDepsV1,
+        run_canary_session,
     )
     from tokmo.records.pulse_canary_evidence import CanaryEvidenceStore
     from tokmo.values.session_gate import Market
@@ -570,13 +733,22 @@ def test_past_slot_restart_does_not_replay(tmp_path):
         quotes_calls["n"] += 1
         from tokmo.programs.pulse_quotes import PulseQuoteBatchOutcomeV1
         from tokmo.values.market_observations import TossCurrentPriceFact
-        return PulseQuoteBatchOutcomeV1("success", tuple(
-            TossCurrentPriceFact(
-                source="toss-current-price-v1", symbol=sym,
-                last_price="50000", currency_raw="KRW",
-                timestamp=T0, fetched_at=T0,
-            ) for sym in symbols
-        ), ())
+
+        return PulseQuoteBatchOutcomeV1(
+            "success",
+            tuple(
+                TossCurrentPriceFact(
+                    source="toss-current-price-v1",
+                    symbol=sym,
+                    last_price="50000",
+                    currency_raw="KRW",
+                    timestamp=T0,
+                    fetched_at=T0,
+                )
+                for sym in symbols
+            ),
+            (),
+        )
 
     # First run: only tick 0 completes (clock at T0)
     deps = CanaryDepsV1(
@@ -586,8 +758,10 @@ def test_past_slot_restart_does_not_replay(tmp_path):
         sleep_until=lambda target: None,
     )
     cfg = CanaryConfigV1(
-        market=Market.KR, symbol="005930",
-        max_ticks=5, max_provider_starts=10,
+        market=Market.KR,
+        symbol="005930",
+        max_ticks=5,
+        max_provider_starts=10,
     )
 
     # We simulate a partial run by manually recording one tick and then
@@ -597,7 +771,10 @@ def test_past_slot_restart_does_not_replay(tmp_path):
 
     # Simulate first tick completed
     r1 = run_canary_session(
-        root=evidence_root, config=cfg, deps=deps, t0=T0,
+        root=evidence_root,
+        config=cfg,
+        deps=deps,
+        t0=T0,
     )
     # This will run all 5 ticks since clock is T0 for all
     assert r1.completed_ticks == 5
@@ -614,7 +791,10 @@ def test_past_slot_restart_does_not_replay(tmp_path):
         sleep_until=lambda target: None,
     )
     r2 = run_canary_session(
-        root=evidence_root2, config=cfg, deps=deps2, t0=T0,
+        root=evidence_root2,
+        config=cfg,
+        deps=deps2,
+        t0=T0,
     )
 
     # All slots 0-4 are past (observed > scheduled + grace for all)
@@ -625,8 +805,7 @@ def test_past_slot_restart_does_not_replay(tmp_path):
     ticks = store2.read_ticks()
     # Verify all ticks are marked missed_past_slot and zero provider calls
     past_slots = sum(1 for t in ticks if t["outcome"] == "missed_past_slot")
-    assert past_slots == 5, (
-        f"Expected 5 missed past slots, got {past_slots}")
+    assert past_slots == 5, f"Expected 5 missed past slots, got {past_slots}"
     # No additional quotes calls (all slots were missed)
     assert quotes_calls["n"] == 5  # unchanged from first run
 
@@ -634,7 +813,9 @@ def test_past_slot_restart_does_not_replay(tmp_path):
 def test_wall_clock_pacing_via_sleep_until(tmp_path):
     """B2: sleep_until is called with correct scheduled times."""
     from tokmo.programs.pulse_canary import (
-        CanaryConfigV1, CanaryDepsV1, run_canary_session,
+        CanaryConfigV1,
+        CanaryDepsV1,
+        run_canary_session,
     )
     from tokmo.values.session_gate import Market
 
@@ -655,24 +836,40 @@ def test_wall_clock_pacing_via_sleep_until(tmp_path):
     def quotes_fetch(market, symbols, *, bearer=None):
         from tokmo.programs.pulse_quotes import PulseQuoteBatchOutcomeV1
         from tokmo.values.market_observations import TossCurrentPriceFact
-        return PulseQuoteBatchOutcomeV1("success", tuple(
-            TossCurrentPriceFact(
-                source="toss-current-price-v1", symbol=sym,
-                last_price="50000", currency_raw="KRW",
-                timestamp=T0, fetched_at=T0,
-            ) for sym in symbols
-        ), ())
+
+        return PulseQuoteBatchOutcomeV1(
+            "success",
+            tuple(
+                TossCurrentPriceFact(
+                    source="toss-current-price-v1",
+                    symbol=sym,
+                    last_price="50000",
+                    currency_raw="KRW",
+                    timestamp=T0,
+                    fetched_at=T0,
+                )
+                for sym in symbols
+            ),
+            (),
+        )
 
     deps = CanaryDepsV1(
-        clock=clock, token_fetch=token_fetch,
-        quotes_fetch=quotes_fetch, sleep_until=sleep_fn,
+        clock=clock,
+        token_fetch=token_fetch,
+        quotes_fetch=quotes_fetch,
+        sleep_until=sleep_fn,
     )
     cfg = CanaryConfigV1(
-        market=Market.KR, symbol="005930",
-        max_ticks=5, max_provider_starts=10,
+        market=Market.KR,
+        symbol="005930",
+        max_ticks=5,
+        max_provider_starts=10,
     )
     result = run_canary_session(
-        root=tmp_path, config=cfg, deps=deps, t0=T0,
+        root=tmp_path,
+        config=cfg,
+        deps=deps,
+        t0=T0,
     )
     assert result.completed_ticks == 5
     # Verify sleep_until was called for ticks 1-4 (tick 0 is at T0 = clock)
@@ -682,18 +879,22 @@ def test_wall_clock_pacing_via_sleep_until(tmp_path):
     for i, target in enumerate(sleep_calls):
         expected = T0 + timedelta(seconds=60 * (i + 1))
         assert target == expected, (
-            f"sleep_until call {i}: expected {expected}, got {target}")
+            f"sleep_until call {i}: expected {expected}, got {target}"
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════
 # Item 9: Completion rerun => calls 0 and nonzero refusal (M2)
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def test_completion_rerun_nonzero_and_zero_calls(tmp_path):
     """Item 9: Completion rerun => already_complete with nonzero exit
     and zero additional provider calls."""
     from tokmo.programs.pulse_canary import (
-        CanaryConfigV1, CanaryDepsV1, run_canary_session,
+        CanaryConfigV1,
+        CanaryDepsV1,
+        run_canary_session,
     )
     from tokmo.values.session_gate import Market
 
@@ -706,20 +907,26 @@ def test_completion_rerun_nonzero_and_zero_calls(tmp_path):
     quotes_fetch = _make_success_quotes_fetch()
 
     deps = CanaryDepsV1(
-        clock=lambda: T0, token_fetch=token_fetch,
+        clock=lambda: T0,
+        token_fetch=token_fetch,
         quotes_fetch=lambda m, s, *, bearer=None: (
-            call_count.__setitem__("n", call_count["n"] + 1) or
-            quotes_fetch(m, s, bearer=bearer)
+            call_count.__setitem__("n", call_count["n"] + 1)
+            or quotes_fetch(m, s, bearer=bearer)
         ),
         sleep_until=lambda target: None,
     )
     cfg = CanaryConfigV1(
-        market=Market.KR, symbol="005930",
-        max_ticks=5, max_provider_starts=10,
+        market=Market.KR,
+        symbol="005930",
+        max_ticks=5,
+        max_provider_starts=10,
     )
     # First run: 6 calls (1 token + 5 quotes)
     r1 = run_canary_session(
-        root=tmp_path, config=cfg, deps=deps, t0=T0,
+        root=tmp_path,
+        config=cfg,
+        deps=deps,
+        t0=T0,
     )
     assert r1.stop_reason == "all_ticks_complete"
     assert r1.is_fresh is True
@@ -727,7 +934,10 @@ def test_completion_rerun_nonzero_and_zero_calls(tmp_path):
 
     # Rerun: already_complete, is_fresh=False, zero additional calls
     r2 = run_canary_session(
-        root=tmp_path, config=cfg, deps=deps, t0=T0,
+        root=tmp_path,
+        config=cfg,
+        deps=deps,
+        t0=T0,
     )
     assert r2.stop_reason == "already_complete"
     assert r2.is_fresh is False
@@ -737,15 +947,28 @@ def test_completion_rerun_nonzero_and_zero_calls(tmp_path):
 def test_cli_exit_code_all_ticks_complete_is_zero(tmp_path):
     """M2: CLI exit 0 only for fresh all_ticks_complete."""
     fixture_path = _write_fixture(tmp_path)
-    result = run_fixture_cli([
-        "--mode", "bounded-live-canary",
-        "--market", "KR", "--symbol", "005930",
-        "--root", str(tmp_path / "evidence"),
-        "--project-root", str(tmp_path),
-        "--max-ticks", "5", "--max-provider-starts", "10",
-        "--fixture", str(fixture_path),
-        "--t0", "2026-08-11T00:00:00Z",
-    ])
+    result = run_fixture_cli(
+        [
+            "--mode",
+            "bounded-live-canary",
+            "--market",
+            "KR",
+            "--symbol",
+            "005930",
+            "--root",
+            str(tmp_path / "evidence"),
+            "--project-root",
+            str(tmp_path),
+            "--max-ticks",
+            "5",
+            "--max-provider-starts",
+            "10",
+            "--fixture",
+            str(fixture_path),
+            "--t0",
+            "2026-08-11T00:00:00Z",
+        ]
+    )
     assert result == 0
 
 
@@ -754,13 +977,24 @@ def test_cli_exit_code_rerun_is_nonzero(tmp_path):
     fixture_path = _write_fixture(tmp_path)
     evidence_root = tmp_path / "evidence"
     args = [
-        "--mode", "bounded-live-canary",
-        "--market", "KR", "--symbol", "005930",
-        "--root", str(evidence_root),
-        "--project-root", str(tmp_path),
-        "--max-ticks", "5", "--max-provider-starts", "10",
-        "--fixture", str(fixture_path),
-        "--t0", "2026-08-11T00:00:00Z",
+        "--mode",
+        "bounded-live-canary",
+        "--market",
+        "KR",
+        "--symbol",
+        "005930",
+        "--root",
+        str(evidence_root),
+        "--project-root",
+        str(tmp_path),
+        "--max-ticks",
+        "5",
+        "--max-provider-starts",
+        "10",
+        "--fixture",
+        str(fixture_path),
+        "--t0",
+        "2026-08-11T00:00:00Z",
     ]
     r1 = run_fixture_cli(args)
     assert r1 == 0
@@ -772,14 +1006,22 @@ def test_cli_exit_code_rerun_is_nonzero(tmp_path):
 # Item 10: pulse_main, registry, 300s owner, cron unchanged
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def test_pulse_main_refuses_production_mode():
     """pulse_main still refuses production mode."""
     from tokmo.programs.integrated_pulse import pulse_main
 
-    result = pulse_main([
-        "--once", "--mode", "production", "--root", "/tmp/test",
-        "--scheduled-for", "2026-08-10T00:00:00Z",
-    ])
+    result = pulse_main(
+        [
+            "--once",
+            "--mode",
+            "production",
+            "--root",
+            "/tmp/test",
+            "--scheduled-for",
+            "2026-08-10T00:00:00Z",
+        ]
+    )
     assert result == 1
 
 
@@ -787,16 +1029,24 @@ def test_pulse_main_refuses_unknown_mode():
     """pulse_main refuses modes other than production/fixture."""
     from tokmo.programs.integrated_pulse import pulse_main
 
-    result = pulse_main([
-        "--once", "--mode", "bounded-live-canary", "--root", "/tmp/test",
-        "--scheduled-for", "2026-08-10T00:00:00Z",
-    ])
+    result = pulse_main(
+        [
+            "--once",
+            "--mode",
+            "bounded-live-canary",
+            "--root",
+            "/tmp/test",
+            "--scheduled-for",
+            "2026-08-10T00:00:00Z",
+        ]
+    )
     assert result == 1
 
 
 def test_operation_lane_registry_has_future_g3a_cutover():
     from tokmo.values.operation_lane_registry import (
-        OPERATION_LANE_REGISTRY_V1, OperationLane,
+        OPERATION_LANE_REGISTRY_V1,
+        OperationLane,
     )
 
     for operation, entry in OPERATION_LANE_REGISTRY_V1.entries.items():
@@ -820,7 +1070,8 @@ def test_pulse_policy_registry_preserves_canary_policy_and_inert_quant_policy():
     from tokmo.values.pulse_policy import PULSE_POLICY_REGISTRY
 
     assert set(PULSE_POLICY_REGISTRY) == {
-        "pulse-60s-v1", "pulse-60s-quant-market-close-v1",
+        "pulse-60s-v1",
+        "pulse-60s-quant-market-close-v1",
     }
 
 
@@ -828,14 +1079,17 @@ def test_pulse_policy_registry_preserves_canary_policy_and_inert_quant_policy():
 # Config validation tests (M3)
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def test_config_requires_explicit_market_and_symbol():
     """The config must have explicit market + symbol authority."""
     from tokmo.programs.pulse_canary import CanaryConfigV1
     from tokmo.values.session_gate import Market
 
     cfg = CanaryConfigV1(
-        market=Market.KR, symbol="005930",
-        max_ticks=5, max_provider_starts=10,
+        market=Market.KR,
+        symbol="005930",
+        max_ticks=5,
+        max_provider_starts=10,
     )
     assert cfg.market is Market.KR
     assert cfg.symbol == "005930"
@@ -861,15 +1115,19 @@ def test_config_rejects_excessive_provider_starts():
 
     with pytest.raises(Exception):
         CanaryConfigV1(
-            market=Market.KR, symbol="005930",
-            max_ticks=5, max_provider_starts=33,
+            market=Market.KR,
+            symbol="005930",
+            max_ticks=5,
+            max_provider_starts=33,
         )
 
 
 def test_config_mismatch_refusal_on_restart(tmp_path):
     """M3: Stored config mismatch on restart => refusal."""
     from tokmo.programs.pulse_canary import (
-        CanaryConfigV1, CanaryDepsV1, run_canary_session,
+        CanaryConfigV1,
+        CanaryDepsV1,
+        run_canary_session,
     )
     from tokmo.values.session_gate import Market
 
@@ -879,26 +1137,37 @@ def test_config_mismatch_refusal_on_restart(tmp_path):
     quotes_fetch = _make_success_quotes_fetch()
 
     deps = CanaryDepsV1(
-        clock=lambda: T0, token_fetch=token_fetch,
+        clock=lambda: T0,
+        token_fetch=token_fetch,
         quotes_fetch=quotes_fetch,
         sleep_until=lambda target: None,
     )
     cfg1 = CanaryConfigV1(
-        market=Market.KR, symbol="005930",
-        max_ticks=5, max_provider_starts=10,
+        market=Market.KR,
+        symbol="005930",
+        max_ticks=5,
+        max_provider_starts=10,
     )
     r1 = run_canary_session(
-        root=tmp_path, config=cfg1, deps=deps, t0=T0,
+        root=tmp_path,
+        config=cfg1,
+        deps=deps,
+        t0=T0,
     )
     assert r1.stop_reason == "all_ticks_complete"
 
     # Restart with different max_provider_starts => refusal
     cfg2 = CanaryConfigV1(
-        market=Market.KR, symbol="005930",
-        max_ticks=5, max_provider_starts=8,
+        market=Market.KR,
+        symbol="005930",
+        max_ticks=5,
+        max_provider_starts=8,
     )
     r2 = run_canary_session(
-        root=tmp_path, config=cfg2, deps=deps, t0=T0,
+        root=tmp_path,
+        config=cfg2,
+        deps=deps,
+        t0=T0,
     )
     assert r2.stop_reason == "config_mismatch_refusal"
 
@@ -907,10 +1176,13 @@ def test_config_mismatch_refusal_on_restart(tmp_path):
 # B3: Token lifecycle (per tick)
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def test_token_is_fetched_per_tick_not_amortized(tmp_path):
     """B3: TOKEN is started once and reused for all ticks in the session."""
     from tokmo.programs.pulse_canary import (
-        CanaryConfigV1, CanaryDepsV1, run_canary_session,
+        CanaryConfigV1,
+        CanaryDepsV1,
+        run_canary_session,
     )
     from tokmo.values.session_gate import Market
 
@@ -923,16 +1195,22 @@ def test_token_is_fetched_per_tick_not_amortized(tmp_path):
     quotes_fetch = _make_success_quotes_fetch()
 
     deps = CanaryDepsV1(
-        clock=lambda: T0, token_fetch=token_fetch,
+        clock=lambda: T0,
+        token_fetch=token_fetch,
         quotes_fetch=quotes_fetch,
         sleep_until=lambda target: None,
     )
     cfg = CanaryConfigV1(
-        market=Market.KR, symbol="005930",
-        max_ticks=5, max_provider_starts=10,
+        market=Market.KR,
+        symbol="005930",
+        max_ticks=5,
+        max_provider_starts=10,
     )
     result = run_canary_session(
-        root=tmp_path, config=cfg, deps=deps, t0=T0,
+        root=tmp_path,
+        config=cfg,
+        deps=deps,
+        t0=T0,
     )
     assert result.completed_ticks == 5
     assert token_count["n"] == 5
@@ -941,7 +1219,9 @@ def test_token_is_fetched_per_tick_not_amortized(tmp_path):
 def test_bearer_is_passed_explicitly(tmp_path):
     """B3: The tick's bearer is passed explicitly to quotes_fetch."""
     from tokmo.programs.pulse_canary import (
-        CanaryConfigV1, CanaryDepsV1, run_canary_session,
+        CanaryConfigV1,
+        CanaryDepsV1,
+        run_canary_session,
     )
     from tokmo.values.session_gate import Market
 
@@ -954,25 +1234,40 @@ def test_bearer_is_passed_explicitly(tmp_path):
         received_bearers.append(bearer)
         from tokmo.programs.pulse_quotes import PulseQuoteBatchOutcomeV1
         from tokmo.values.market_observations import TossCurrentPriceFact
-        return PulseQuoteBatchOutcomeV1("success", tuple(
-            TossCurrentPriceFact(
-                source="toss-current-price-v1", symbol=sym,
-                last_price="50000", currency_raw="KRW",
-                timestamp=T0, fetched_at=T0,
-            ) for sym in symbols
-        ), ())
+
+        return PulseQuoteBatchOutcomeV1(
+            "success",
+            tuple(
+                TossCurrentPriceFact(
+                    source="toss-current-price-v1",
+                    symbol=sym,
+                    last_price="50000",
+                    currency_raw="KRW",
+                    timestamp=T0,
+                    fetched_at=T0,
+                )
+                for sym in symbols
+            ),
+            (),
+        )
 
     deps = CanaryDepsV1(
-        clock=lambda: T0, token_fetch=token_fetch,
+        clock=lambda: T0,
+        token_fetch=token_fetch,
         quotes_fetch=quotes_fetch,
         sleep_until=lambda target: None,
     )
     cfg = CanaryConfigV1(
-        market=Market.KR, symbol="005930",
-        max_ticks=5, max_provider_starts=10,
+        market=Market.KR,
+        symbol="005930",
+        max_ticks=5,
+        max_provider_starts=10,
     )
     result = run_canary_session(
-        root=tmp_path, config=cfg, deps=deps, t0=T0,
+        root=tmp_path,
+        config=cfg,
+        deps=deps,
+        t0=T0,
     )
     assert result.completed_ticks == 5
     # Every call received the same bearer
@@ -984,33 +1279,44 @@ def test_bearer_is_passed_explicitly(tmp_path):
 # CanaryDepsV1 structural tests
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def test_canary_deps_has_no_forbidden_seams():
     """CanaryDepsV1 must structurally lack execution/dialogue/AI/
     Telegram/orders/accounts/holdings access."""
-    from tokmo.programs.pulse_canary import CanaryDepsV1
     from dataclasses import fields as dc_fields
+
+    from tokmo.programs.pulse_canary import CanaryDepsV1
 
     field_names = {f.name for f in dc_fields(CanaryDepsV1)}
     forbidden = {
-        "orders_page_fetch", "order_detail_fetch",
-        "telegram_sender", "ai_evaluator",
-        "dialogue_store", "updates_provider",
-        "holdings_reader", "accounts_fetch",
-        "ledger_store", "scan_state_store",
+        "orders_page_fetch",
+        "order_detail_fetch",
+        "telegram_sender",
+        "ai_evaluator",
+        "dialogue_store",
+        "updates_provider",
+        "holdings_reader",
+        "accounts_fetch",
+        "ledger_store",
+        "scan_state_store",
         "native_refs_reader",
     }
     assert not (field_names & forbidden), (
-        f"forbidden fields present: {field_names & forbidden}")
+        f"forbidden fields present: {field_names & forbidden}"
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════
 # Cumulative cap tests (B4)
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def test_cumulative_cap_tracks_provider_starts(tmp_path):
     """Provider starts are tracked cumulatively across ticks; cap stops."""
     from tokmo.programs.pulse_canary import (
-        CanaryConfigV1, CanaryDepsV1, run_canary_session,
+        CanaryConfigV1,
+        CanaryDepsV1,
+        run_canary_session,
     )
     from tokmo.values.session_gate import Market
 
@@ -1024,25 +1330,40 @@ def test_cumulative_cap_tracks_provider_starts(tmp_path):
         starts["count"] += 1
         from tokmo.programs.pulse_quotes import PulseQuoteBatchOutcomeV1
         from tokmo.values.market_observations import TossCurrentPriceFact
-        return PulseQuoteBatchOutcomeV1("success", tuple(
-            TossCurrentPriceFact(
-                source="toss-current-price-v1", symbol=sym,
-                last_price="50000", currency_raw="KRW",
-                timestamp=T0, fetched_at=T0,
-            ) for sym in symbols
-        ), ())
+
+        return PulseQuoteBatchOutcomeV1(
+            "success",
+            tuple(
+                TossCurrentPriceFact(
+                    source="toss-current-price-v1",
+                    symbol=sym,
+                    last_price="50000",
+                    currency_raw="KRW",
+                    timestamp=T0,
+                    fetched_at=T0,
+                )
+                for sym in symbols
+            ),
+            (),
+        )
 
     deps = CanaryDepsV1(
-        clock=lambda: T0, token_fetch=token_fetch,
+        clock=lambda: T0,
+        token_fetch=token_fetch,
         quotes_fetch=quotes_fetch,
         sleep_until=lambda target: None,
     )
     cfg = CanaryConfigV1(
-        market=Market.KR, symbol="005930",
-        max_ticks=5, max_provider_starts=10,
+        market=Market.KR,
+        symbol="005930",
+        max_ticks=5,
+        max_provider_starts=10,
     )
     result = run_canary_session(
-        root=tmp_path, config=cfg, deps=deps, t0=T0,
+        root=tmp_path,
+        config=cfg,
+        deps=deps,
+        t0=T0,
     )
     assert result.completed_ticks == 5
     assert result.total_provider_starts == 10  # 5 TOKEN + 5 PRICE_BATCH (v3 per-tick)
@@ -1052,7 +1373,9 @@ def test_cumulative_cap_tracks_provider_starts(tmp_path):
 def test_cap_exceeded_stops_session(tmp_path):
     """When the cumulative cap is exceeded, the session stops immediately."""
     from tokmo.programs.pulse_canary import (
-        CanaryConfigV1, CanaryDepsV1, run_canary_session,
+        CanaryConfigV1,
+        CanaryDepsV1,
+        run_canary_session,
     )
     from tokmo.values.session_gate import Market
 
@@ -1062,16 +1385,22 @@ def test_cap_exceeded_stops_session(tmp_path):
     quotes_fetch = _make_success_quotes_fetch()
 
     deps = CanaryDepsV1(
-        clock=lambda: T0, token_fetch=token_fetch,
+        clock=lambda: T0,
+        token_fetch=token_fetch,
         quotes_fetch=quotes_fetch,
         sleep_until=lambda target: None,
     )
     cfg = CanaryConfigV1(
-        market=Market.KR, symbol="005930",
-        max_ticks=5, max_provider_starts=3,
+        market=Market.KR,
+        symbol="005930",
+        max_ticks=5,
+        max_provider_starts=3,
     )
     result = run_canary_session(
-        root=tmp_path, config=cfg, deps=deps, t0=T0,
+        root=tmp_path,
+        config=cfg,
+        deps=deps,
+        t0=T0,
     )
     assert result.total_provider_starts <= 3
     assert result.stop_reason == "provider_start_cap_exceeded"
@@ -1081,10 +1410,13 @@ def test_cap_exceeded_stops_session(tmp_path):
 # Durable progress across restart
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def test_durable_progress_picks_up_where_left_off(tmp_path):
     """If max_ticks is 5 and only 2 completed (via cap), restart resumes."""
     from tokmo.programs.pulse_canary import (
-        CanaryConfigV1, CanaryDepsV1, run_canary_session,
+        CanaryConfigV1,
+        CanaryDepsV1,
+        run_canary_session,
     )
     from tokmo.values.session_gate import Market
 
@@ -1097,46 +1429,66 @@ def test_durable_progress_picks_up_where_left_off(tmp_path):
         quotes_calls["n"] += 1
         from tokmo.programs.pulse_quotes import PulseQuoteBatchOutcomeV1
         from tokmo.values.market_observations import TossCurrentPriceFact
-        return PulseQuoteBatchOutcomeV1("success", tuple(
-            TossCurrentPriceFact(
-                source="toss-current-price-v1", symbol=sym,
-                last_price="50000", currency_raw="KRW",
-                timestamp=T0, fetched_at=T0,
-            ) for sym in symbols
-        ), ())
+
+        return PulseQuoteBatchOutcomeV1(
+            "success",
+            tuple(
+                TossCurrentPriceFact(
+                    source="toss-current-price-v1",
+                    symbol=sym,
+                    last_price="50000",
+                    currency_raw="KRW",
+                    timestamp=T0,
+                    fetched_at=T0,
+                )
+                for sym in symbols
+            ),
+            (),
+        )
 
     deps_factory = lambda: CanaryDepsV1(
-        clock=lambda: T0, token_fetch=token_fetch,
+        clock=lambda: T0,
+        token_fetch=token_fetch,
         quotes_fetch=quotes_fetch,
         sleep_until=lambda target: None,
     )
     cfg = CanaryConfigV1(
-        market=Market.KR, symbol="005930",
-        max_ticks=5, max_provider_starts=4,
+        market=Market.KR,
+        symbol="005930",
+        max_ticks=5,
+        max_provider_starts=4,
     )
     r1 = run_canary_session(
-        root=tmp_path, config=cfg, deps=deps_factory(), t0=T0,
+        root=tmp_path,
+        config=cfg,
+        deps=deps_factory(),
+        t0=T0,
     )
     assert r1.completed_ticks <= 3
     assert r1.stop_reason == "provider_start_cap_exceeded"
 
     # Restart with same config
     r2 = run_canary_session(
-        root=tmp_path, config=cfg, deps=deps_factory(), t0=T0,
+        root=tmp_path,
+        config=cfg,
+        deps=deps_factory(),
+        t0=T0,
     )
     # Already cap-exceeded from purpose ledger
-    assert r2.stop_reason in (
-        "provider_start_cap_exceeded", "config_mismatch_refusal")
+    assert r2.stop_reason in ("provider_start_cap_exceeded", "config_mismatch_refusal")
 
 
 # ═══════════════════════════════════════════════════════════════════════
 # Evidence sanitization tests
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def test_evidence_contains_no_secrets_or_paths(tmp_path):
     """Evidence records must not contain tokens, secrets, paths, URLs."""
     from tokmo.programs.pulse_canary import (
-        CanaryConfigV1, CanaryDepsV1, run_canary_session,
+        CanaryConfigV1,
+        CanaryDepsV1,
+        run_canary_session,
     )
     from tokmo.records.pulse_canary_evidence import CanaryEvidenceStore
     from tokmo.values.session_gate import Market
@@ -1151,16 +1503,22 @@ def test_evidence_contains_no_secrets_or_paths(tmp_path):
     quotes_fetch = _make_success_quotes_fetch()
 
     deps = CanaryDepsV1(
-        clock=lambda: T0, token_fetch=token_fetch,
+        clock=lambda: T0,
+        token_fetch=token_fetch,
         quotes_fetch=quotes_fetch,
         sleep_until=lambda target: None,
     )
     cfg = CanaryConfigV1(
-        market=Market.KR, symbol="005930",
-        max_ticks=5, max_provider_starts=10,
+        market=Market.KR,
+        symbol="005930",
+        max_ticks=5,
+        max_provider_starts=10,
     )
     result = run_canary_session(
-        root=tmp_path, config=cfg, deps=deps, t0=T0,
+        root=tmp_path,
+        config=cfg,
+        deps=deps,
+        t0=T0,
     )
     assert result.completed_ticks == 5
 
@@ -1184,11 +1542,14 @@ def test_evidence_contains_no_secrets_or_paths(tmp_path):
 # No order/account write test
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def test_no_order_or_account_write_seams(tmp_path):
     """The canary runner has no path to write orders, accounts, or
     dialogue. It only writes to the isolated evidence store."""
     from tokmo.programs.pulse_canary import (
-        CanaryConfigV1, CanaryDepsV1, run_canary_session,
+        CanaryConfigV1,
+        CanaryDepsV1,
+        run_canary_session,
     )
     from tokmo.values.session_gate import Market
 
@@ -1198,16 +1559,22 @@ def test_no_order_or_account_write_seams(tmp_path):
     quotes_fetch = _make_success_quotes_fetch()
 
     deps = CanaryDepsV1(
-        clock=lambda: T0, token_fetch=token_fetch,
+        clock=lambda: T0,
+        token_fetch=token_fetch,
         quotes_fetch=quotes_fetch,
         sleep_until=lambda target: None,
     )
     cfg = CanaryConfigV1(
-        market=Market.KR, symbol="005930",
-        max_ticks=5, max_provider_starts=10,
+        market=Market.KR,
+        symbol="005930",
+        max_ticks=5,
+        max_provider_starts=10,
     )
     result = run_canary_session(
-        root=tmp_path, config=cfg, deps=deps, t0=T0,
+        root=tmp_path,
+        config=cfg,
+        deps=deps,
+        t0=T0,
     )
     assert result.completed_ticks == 5
     sqlite_files = list(tmp_path.rglob("*.sqlite3"))
@@ -1219,10 +1586,13 @@ def test_no_order_or_account_write_seams(tmp_path):
 # 5-slot timing receipt
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def test_five_slot_timing_60s_intervals(tmp_path):
     """Ticks are at t0, t0+60, t0+120, t0+180, t0+240 (240s span)."""
     from tokmo.programs.pulse_canary import (
-        CanaryConfigV1, CanaryDepsV1, run_canary_session,
+        CanaryConfigV1,
+        CanaryDepsV1,
+        run_canary_session,
     )
     from tokmo.records.pulse_canary_evidence import CanaryEvidenceStore
     from tokmo.values.session_gate import Market
@@ -1244,11 +1614,16 @@ def test_five_slot_timing_60s_intervals(tmp_path):
         sleep_until=sleep_fn,
     )
     cfg = CanaryConfigV1(
-        market=Market.KR, symbol="005930",
-        max_ticks=5, max_provider_starts=10,
+        market=Market.KR,
+        symbol="005930",
+        max_ticks=5,
+        max_provider_starts=10,
     )
     result = run_canary_session(
-        root=tmp_path, config=cfg, deps=deps, t0=T0,
+        root=tmp_path,
+        config=cfg,
+        deps=deps,
+        t0=T0,
     )
     assert result.completed_ticks == 5
 
@@ -1267,10 +1642,13 @@ def test_five_slot_timing_60s_intervals(tmp_path):
 # Per-tick receipt
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def test_per_tick_receipt_has_duration_lag_result(tmp_path):
     """Each tick receipt has duration_ms, lag_seconds, outcome, reason."""
     from tokmo.programs.pulse_canary import (
-        CanaryConfigV1, CanaryDepsV1, run_canary_session,
+        CanaryConfigV1,
+        CanaryDepsV1,
+        run_canary_session,
     )
     from tokmo.records.pulse_canary_evidence import CanaryEvidenceStore
     from tokmo.values.session_gate import Market
@@ -1281,25 +1659,40 @@ def test_per_tick_receipt_has_duration_lag_result(tmp_path):
     def quotes_fetch(market, symbols, *, bearer=None):
         from tokmo.programs.pulse_quotes import PulseQuoteBatchOutcomeV1
         from tokmo.values.market_observations import TossCurrentPriceFact
-        return PulseQuoteBatchOutcomeV1("success", tuple(
-            TossCurrentPriceFact(
-                source="toss-current-price-v1", symbol=sym,
-                last_price="72500", currency_raw="KRW",
-                timestamp=T0, fetched_at=T0,
-            ) for sym in symbols
-        ), ())
+
+        return PulseQuoteBatchOutcomeV1(
+            "success",
+            tuple(
+                TossCurrentPriceFact(
+                    source="toss-current-price-v1",
+                    symbol=sym,
+                    last_price="72500",
+                    currency_raw="KRW",
+                    timestamp=T0,
+                    fetched_at=T0,
+                )
+                for sym in symbols
+            ),
+            (),
+        )
 
     deps = CanaryDepsV1(
-        clock=lambda: T0, token_fetch=token_fetch,
+        clock=lambda: T0,
+        token_fetch=token_fetch,
         quotes_fetch=quotes_fetch,
         sleep_until=lambda target: None,
     )
     cfg = CanaryConfigV1(
-        market=Market.KR, symbol="005930",
-        max_ticks=5, max_provider_starts=10,
+        market=Market.KR,
+        symbol="005930",
+        max_ticks=5,
+        max_provider_starts=10,
     )
     result = run_canary_session(
-        root=tmp_path, config=cfg, deps=deps, t0=T0,
+        root=tmp_path,
+        config=cfg,
+        deps=deps,
+        t0=T0,
     )
     assert result.completed_ticks == 5
 
@@ -1323,11 +1716,14 @@ def test_per_tick_receipt_has_duration_lag_result(tmp_path):
 # Canonical fingerprint invariant (no mutation = success)
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def test_canonical_fingerprint_invariant(tmp_path):
     """Pre/post canonical fingerprint must be identical after canary."""
     from tokmo.programs.pulse_canary import (
-        CanaryConfigV1, CanaryDepsV1, run_canary_session,
+        CanaryConfigV1,
+        CanaryDepsV1,
         fingerprint_directory,
+        run_canary_session,
     )
     from tokmo.values.session_gate import Market
 
@@ -1344,18 +1740,24 @@ def test_canonical_fingerprint_invariant(tmp_path):
     quotes_fetch = _make_success_quotes_fetch()
 
     deps = CanaryDepsV1(
-        clock=lambda: T0, token_fetch=token_fetch,
+        clock=lambda: T0,
+        token_fetch=token_fetch,
         quotes_fetch=quotes_fetch,
         sleep_until=lambda target: None,
     )
     cfg = CanaryConfigV1(
-        market=Market.KR, symbol="005930",
-        max_ticks=5, max_provider_starts=10,
+        market=Market.KR,
+        symbol="005930",
+        max_ticks=5,
+        max_provider_starts=10,
     )
 
     pre = fingerprint_directory(canonical)
     result = run_canary_session(
-        root=evidence_root, config=cfg, deps=deps, t0=T0,
+        root=evidence_root,
+        config=cfg,
+        deps=deps,
+        t0=T0,
         canonical_root=canonical,
     )
     post = fingerprint_directory(canonical)
@@ -1367,41 +1769,74 @@ def test_canonical_fingerprint_invariant(tmp_path):
 # CLI mode tests
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def test_cli_entrypoint_rejects_non_canary_mode():
     from tokmo.programs.pulse_canary import run_canary_cli
 
-    result = run_canary_cli([
-        "--mode", "production",
-        "--market", "KR", "--symbol", "005930",
-        "--project-root", "/tmp/test-project",
-        "--max-ticks", "5", "--max-provider-starts", "10",
-    ], evidence_root_override=Path("/tmp/test-canary"))
+    result = run_canary_cli(
+        [
+            "--mode",
+            "production",
+            "--market",
+            "KR",
+            "--symbol",
+            "005930",
+            "--project-root",
+            "/tmp/test-project",
+            "--max-ticks",
+            "5",
+            "--max-provider-starts",
+            "10",
+        ],
+        evidence_root_override=Path("/tmp/test-canary"),
+    )
     assert result == 1
 
 
 def test_cli_entrypoint_requires_explicit_args():
     from tokmo.programs.pulse_canary import run_canary_cli
 
-    result = run_canary_cli([
-        "--mode", "bounded-live-canary",
-        "--symbol", "005930",
-        "--project-root", "/tmp/test-project",
-        "--max-ticks", "5", "--max-provider-starts", "10",
-    ], evidence_root_override=Path("/tmp/test-canary"))
+    result = run_canary_cli(
+        [
+            "--mode",
+            "bounded-live-canary",
+            "--symbol",
+            "005930",
+            "--project-root",
+            "/tmp/test-project",
+            "--max-ticks",
+            "5",
+            "--max-provider-starts",
+            "10",
+        ],
+        evidence_root_override=Path("/tmp/test-canary"),
+    )
     assert result == 1
 
 
 def test_cli_rejects_wrong_max_ticks(tmp_path):
     """M3: CLI rejects max-ticks != 5."""
     fixture_path = _write_fixture(tmp_path)
-    result = run_fixture_cli([
-        "--mode", "bounded-live-canary",
-        "--market", "KR", "--symbol", "005930",
-        "--root", str(tmp_path / "evidence"),
-        "--project-root", str(tmp_path),
-        "--max-ticks", "6", "--max-provider-starts", "10",
-        "--fixture", str(fixture_path),
-    ])
+    result = run_fixture_cli(
+        [
+            "--mode",
+            "bounded-live-canary",
+            "--market",
+            "KR",
+            "--symbol",
+            "005930",
+            "--root",
+            str(tmp_path / "evidence"),
+            "--project-root",
+            str(tmp_path),
+            "--max-ticks",
+            "6",
+            "--max-provider-starts",
+            "10",
+            "--fixture",
+            str(fixture_path),
+        ]
+    )
     assert result == 1
 
 
@@ -1409,12 +1844,23 @@ def test_cli_rejects_excessive_max_provider_starts():
     """M3: CLI rejects max-provider-starts != 22 (v3 exact cap)."""
     from tokmo.programs.pulse_canary import run_canary_cli
 
-    result = run_canary_cli([
-        "--mode", "bounded-live-canary",
-        "--market", "KR", "--symbol", "005930",
-        "--project-root", "/tmp/test-project",
-        "--max-ticks", "5", "--max-provider-starts", "100000",
-    ], evidence_root_override=Path("/tmp/test-canary"))
+    result = run_canary_cli(
+        [
+            "--mode",
+            "bounded-live-canary",
+            "--market",
+            "KR",
+            "--symbol",
+            "005930",
+            "--project-root",
+            "/tmp/test-project",
+            "--max-ticks",
+            "5",
+            "--max-provider-starts",
+            "100000",
+        ],
+        evidence_root_override=Path("/tmp/test-canary"),
+    )
     assert result == 1
 
 
@@ -1422,13 +1868,25 @@ def test_cli_live_mode_requires_base_commit(tmp_path):
     """M4: Live mode requires --base-commit."""
     from tokmo.programs.pulse_canary import run_canary_cli
 
-    result = run_canary_cli([
-        "--mode", "bounded-live-canary",
-        "--market", "KR", "--symbol", "005930",
-        "--canonical-root", str(tmp_path / "canonical"),
-        "--project-root", str(tmp_path),
-        "--max-ticks", "5", "--max-provider-starts", "10",
-    ], evidence_root_override=tmp_path / "evidence")
+    result = run_canary_cli(
+        [
+            "--mode",
+            "bounded-live-canary",
+            "--market",
+            "KR",
+            "--symbol",
+            "005930",
+            "--canonical-root",
+            str(tmp_path / "canonical"),
+            "--project-root",
+            str(tmp_path),
+            "--max-ticks",
+            "5",
+            "--max-provider-starts",
+            "10",
+        ],
+        evidence_root_override=tmp_path / "evidence",
+    )
     assert result == 1
 
 
@@ -1436,28 +1894,30 @@ def test_cli_live_mode_requires_base_commit(tmp_path):
 # B-1: Absolute campaign root anchor tests (third final targeted repair)
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def test_b1_anchor_root_is_absolute_and_outside_canonical():
     """B-1: campaign_evidence_anchor_root returns an absolute path derived
     from Path.home(), under .local/share/tokmo-v3-canary/."""
     from tokmo.programs.pulse_canary import (
-        campaign_evidence_anchor_root, _CAMPAIGN_EVIDENCE_REL,
         CANARY_CAMPAIGN_ID,
+        campaign_evidence_anchor_root,
     )
 
     root = campaign_evidence_anchor_root()
     assert root.is_absolute(), f"Anchor root must be absolute, got {root}"
     # Must be derived from Path.home()
     assert str(root).startswith(str(Path.home())), (
-        f"Anchor root must be under Path.home(), got {root}")
+        f"Anchor root must be under Path.home(), got {root}"
+    )
     # Must contain the immutable relative path components
     assert ".local/share/tokmo-v3-canary" in str(root).replace("\\", "/"), (
-        f"Anchor root must be under .local/share/tokmo-v3-canary/, got {root}")
+        f"Anchor root must be under .local/share/tokmo-v3-canary/, got {root}"
+    )
     assert CANARY_CAMPAIGN_ID in str(root), (
-        f"Anchor root must contain campaign_id, got {root}")
-    assert "KR" in str(root), (
-        f"Anchor root must contain market KR, got {root}")
-    assert "005930" in str(root), (
-        f"Anchor root must contain symbol 005930, got {root}")
+        f"Anchor root must contain campaign_id, got {root}"
+    )
+    assert "KR" in str(root), f"Anchor root must contain market KR, got {root}"
+    assert "005930" in str(root), f"Anchor root must contain symbol 005930, got {root}"
 
 
 def test_b1_anchor_root_is_deterministic():
@@ -1472,17 +1932,20 @@ def test_b1_anchor_root_is_deterministic():
 def test_b1_anchor_root_not_hardcoded_home():
     """B-1: The anchor root must not contain a hardcoded user home string.
     It must be derived from Path.home() at runtime."""
-    from tokmo.programs.pulse_canary import campaign_evidence_anchor_root
     import getpass
+
+    from tokmo.programs.pulse_canary import campaign_evidence_anchor_root
 
     root = campaign_evidence_anchor_root()
     username = getpass.getuser()
     # The relative portion should be the constant, not a home path
-    rel = Path(*root.parts[len(Path.home().parts):])
+    rel = Path(*root.parts[len(Path.home().parts) :])
     assert "tokmo" not in str(rel), (
-        f"Relative path must not contain username, got {rel}")
+        f"Relative path must not contain username, got {rel}"
+    )
     assert "/Users/" not in str(rel), (
-        f"Relative path must not contain /Users/, got {rel}")
+        f"Relative path must not contain /Users/, got {rel}"
+    )
 
 
 def test_b1_purpose_identity_excludes_t0():
@@ -1490,8 +1953,8 @@ def test_b1_purpose_identity_excludes_t0():
     from tokmo.programs.pulse_canary import compute_purpose_identity
     from tokmo.values.session_gate import Market
 
-    t0a = datetime(2026, 8, 11, 0, 0, tzinfo=timezone.utc)
-    t0b = datetime(2026, 8, 11, 1, 0, tzinfo=timezone.utc)
+    t0a = datetime(2026, 8, 11, 0, 0, tzinfo=UTC)
+    t0b = datetime(2026, 8, 11, 1, 0, tzinfo=UTC)
 
     # t0 is no longer a parameter — identity is always campaign-constant
     p1 = compute_purpose_identity(Market.KR, "005930")
@@ -1507,7 +1970,9 @@ def test_b1_cumulative_cap_across_distinct_t0_same_root(tmp_path):
     cannot exceed remaining 4 starts and returns nonzero without hidden starts.
     """
     from tokmo.programs.pulse_canary import (
-        CanaryConfigV1, CanaryDepsV1, run_canary_session,
+        CanaryConfigV1,
+        CanaryDepsV1,
+        run_canary_session,
     )
     from tokmo.values.session_gate import Market
 
@@ -1517,20 +1982,26 @@ def test_b1_cumulative_cap_across_distinct_t0_same_root(tmp_path):
 
     def make_deps():
         return CanaryDepsV1(
-            clock=lambda: T0, token_fetch=lambda: "fake-token",
+            clock=lambda: T0,
+            token_fetch=lambda: "fake-token",
             quotes_fetch=quotes_fetch,
             sleep_until=lambda target: None,
         )
 
     cfg = CanaryConfigV1(
-        market=Market.KR, symbol="005930",
-        max_ticks=5, max_provider_starts=10,
+        market=Market.KR,
+        symbol="005930",
+        max_ticks=5,
+        max_provider_starts=10,
     )
 
     # Run 1 with t0_a
     t0_a = T0
     r1 = run_canary_session(
-        root=evidence_root, config=cfg, deps=make_deps(), t0=t0_a,
+        root=evidence_root,
+        config=cfg,
+        deps=make_deps(),
+        t0=t0_a,
     )
     assert r1.stop_reason == "all_ticks_complete"
     assert r1.total_provider_starts == 10
@@ -1538,7 +2009,10 @@ def test_b1_cumulative_cap_across_distinct_t0_same_root(tmp_path):
     # Run 2 with t0_b (distinct t0, same evidence root)
     t0_b = T0 + timedelta(seconds=3600)
     r2 = run_canary_session(
-        root=evidence_root, config=cfg, deps=make_deps(), t0=t0_b,
+        root=evidence_root,
+        config=cfg,
+        deps=make_deps(),
+        t0=t0_b,
     )
     # Same campaign => same session_id => already_complete, not a fresh run
     assert r2.stop_reason == "already_complete"
@@ -1551,14 +2025,27 @@ def test_b1_cli_rejects_wrong_market(tmp_path):
     """B-1: Live CLI rejects market != KR before provider assembly."""
     from tokmo.programs.pulse_canary import run_canary_cli
 
-    result = run_canary_cli([
-        "--mode", "bounded-live-canary",
-        "--market", "US", "--symbol", "005930",
-        "--canonical-root", str(tmp_path / "canonical"),
-        "--project-root", str(tmp_path / "project"),
-        "--max-ticks", "5", "--max-provider-starts", "10",
-        "--base-commit", "deadbeef",
-    ], evidence_root_override=tmp_path / "evidence")
+    result = run_canary_cli(
+        [
+            "--mode",
+            "bounded-live-canary",
+            "--market",
+            "US",
+            "--symbol",
+            "005930",
+            "--canonical-root",
+            str(tmp_path / "canonical"),
+            "--project-root",
+            str(tmp_path / "project"),
+            "--max-ticks",
+            "5",
+            "--max-provider-starts",
+            "10",
+            "--base-commit",
+            "deadbeef",
+        ],
+        evidence_root_override=tmp_path / "evidence",
+    )
     assert result == 1
 
 
@@ -1566,14 +2053,27 @@ def test_b1_cli_rejects_wrong_symbol(tmp_path):
     """B-1: Live CLI rejects symbol != 005930 before provider assembly."""
     from tokmo.programs.pulse_canary import run_canary_cli
 
-    result = run_canary_cli([
-        "--mode", "bounded-live-canary",
-        "--market", "KR", "--symbol", "000660",
-        "--canonical-root", str(tmp_path / "canonical"),
-        "--project-root", str(tmp_path / "project"),
-        "--max-ticks", "5", "--max-provider-starts", "10",
-        "--base-commit", "deadbeef",
-    ], evidence_root_override=tmp_path / "evidence")
+    result = run_canary_cli(
+        [
+            "--mode",
+            "bounded-live-canary",
+            "--market",
+            "KR",
+            "--symbol",
+            "000660",
+            "--canonical-root",
+            str(tmp_path / "canonical"),
+            "--project-root",
+            str(tmp_path / "project"),
+            "--max-ticks",
+            "5",
+            "--max-provider-starts",
+            "10",
+            "--base-commit",
+            "deadbeef",
+        ],
+        evidence_root_override=tmp_path / "evidence",
+    )
     assert result == 1
 
 
@@ -1586,26 +2086,39 @@ def test_b1_baseA_baseB_alternate_all_refused_before_provider(tmp_path):
 
     # The live CLI no longer accepts --root at all.
     # Passing wrong market/symbol is refused before credential.
-    for market, symbol in [("KR", "000660"), ("US", "AAPL"),
-                           ("KR", "035420")]:
-        result = run_canary_cli([
-            "--mode", "bounded-live-canary",
-            "--market", market, "--symbol", symbol,
-            "--canonical-root", str(tmp_path / "canonical"),
-            "--project-root", str(tmp_path / "project"),
-            "--max-ticks", "5", "--max-provider-starts", "10",
-            "--base-commit", "deadbeef",
-        ], evidence_root_override=tmp_path / "evidence")
-        assert result == 1, (
-            f"Wrong market={market} symbol={symbol} must be refused")
+    for market, symbol in [("KR", "000660"), ("US", "AAPL"), ("KR", "035420")]:
+        result = run_canary_cli(
+            [
+                "--mode",
+                "bounded-live-canary",
+                "--market",
+                market,
+                "--symbol",
+                symbol,
+                "--canonical-root",
+                str(tmp_path / "canonical"),
+                "--project-root",
+                str(tmp_path / "project"),
+                "--max-ticks",
+                "5",
+                "--max-provider-starts",
+                "10",
+                "--base-commit",
+                "deadbeef",
+            ],
+            evidence_root_override=tmp_path / "evidence",
+        )
+        assert result == 1, f"Wrong market={market} symbol={symbol} must be refused"
 
 
 def test_b1_across_restart_cap_remains_within_the_family_cap(tmp_path):
     """B-1: Across distinct t0 and restarts at the anchored root, cap
     remains 10. Multiple restarts cannot exceed the cap."""
     from tokmo.programs.pulse_canary import (
-        CanaryConfigV1, CanaryDepsV1, run_canary_session,
+        CanaryConfigV1,
+        CanaryDepsV1,
         compute_purpose_identity,
+        run_canary_session,
     )
     from tokmo.records.pulse_canary_evidence import CanaryEvidenceStore
     from tokmo.values.session_gate import Market
@@ -1616,16 +2129,21 @@ def test_b1_across_restart_cap_remains_within_the_family_cap(tmp_path):
     quotes_fetch = _make_success_quotes_fetch()
 
     cfg = CanaryConfigV1(
-        market=Market.KR, symbol="005930",
-        max_ticks=5, max_provider_starts=10,
+        market=Market.KR,
+        symbol="005930",
+        max_ticks=5,
+        max_provider_starts=10,
     )
 
     # Run 1: 6 starts, all complete
     r1 = run_canary_session(
-        root=evidence_root, config=cfg,
+        root=evidence_root,
+        config=cfg,
         deps=CanaryDepsV1(
-            clock=lambda: T0, token_fetch=lambda: "t1",
-            quotes_fetch=quotes_fetch, sleep_until=lambda t: None,
+            clock=lambda: T0,
+            token_fetch=lambda: "t1",
+            quotes_fetch=quotes_fetch,
+            sleep_until=lambda t: None,
         ),
         t0=T0,
     )
@@ -1638,10 +2156,13 @@ def test_b1_across_restart_cap_remains_within_the_family_cap(tmp_path):
 
     # Run 2: already_complete — cumulative stays at 10
     r2 = run_canary_session(
-        root=evidence_root, config=cfg,
+        root=evidence_root,
+        config=cfg,
         deps=CanaryDepsV1(
-            clock=lambda: T0, token_fetch=lambda: "t2",
-            quotes_fetch=quotes_fetch, sleep_until=lambda t: None,
+            clock=lambda: T0,
+            token_fetch=lambda: "t2",
+            quotes_fetch=quotes_fetch,
+            sleep_until=lambda t: None,
         ),
         t0=T0 + timedelta(hours=1),
     )
@@ -1656,6 +2177,7 @@ def test_b1_across_restart_cap_remains_within_the_family_cap(tmp_path):
 # M-1: Durable MISSED crash-boundary test (third final targeted repair)
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def test_m1_crash_boundary_durable_missed_prevents_all_ticks_complete(tmp_path):
     """M-1: Run A writes 3 MISSED then crashes; run B completes remaining 2.
     Final outcome must be missed_past_slots (nonzero), never all_ticks_complete.
@@ -1664,7 +2186,9 @@ def test_m1_crash_boundary_durable_missed_prevents_all_ticks_complete(tmp_path):
     not an in-memory counter that resets across crash boundaries.
     """
     from tokmo.programs.pulse_canary import (
-        CanaryConfigV1, CanaryDepsV1, run_canary_session,
+        CanaryConfigV1,
+        CanaryDepsV1,
+        run_canary_session,
     )
     from tokmo.records.pulse_canary_evidence import CanaryEvidenceStore
     from tokmo.values.session_gate import Market
@@ -1674,8 +2198,10 @@ def test_m1_crash_boundary_durable_missed_prevents_all_ticks_complete(tmp_path):
 
     quotes_fetch = _make_success_quotes_fetch()
     cfg = CanaryConfigV1(
-        market=Market.KR, symbol="005930",
-        max_ticks=5, max_provider_starts=10,
+        market=Market.KR,
+        symbol="005930",
+        max_ticks=5,
+        max_provider_starts=10,
     )
 
     # Run A: clock at T0+150s (past slots 0,1,2; slot 3 is near future)
@@ -1701,7 +2227,10 @@ def test_m1_crash_boundary_durable_missed_prevents_all_ticks_complete(tmp_path):
     )
 
     r_a = run_canary_session(
-        root=evidence_root, config=cfg, deps=deps_a, t0=T0,
+        root=evidence_root,
+        config=cfg,
+        deps=deps_a,
+        t0=T0,
     )
 
     # Run A: 3 missed past slots + 2 future slots completed
@@ -1714,14 +2243,16 @@ def test_m1_crash_boundary_durable_missed_prevents_all_ticks_complete(tmp_path):
 
     # M-1: final outcome must be missed_past_slots, NOT all_ticks_complete
     assert r_a.stop_reason == "missed_past_slots", (
-        f"Expected missed_past_slots, got {r_a.stop_reason}")
+        f"Expected missed_past_slots, got {r_a.stop_reason}"
+    )
     assert r_a.stop_reason != "all_ticks_complete"
 
     # M-1: Run B restart (fresh session at same evidence root).
     # Even though all ticks are durable now, the durable MISSED ticks
     # from run A must prevent all_ticks_complete.
     r_b = run_canary_session(
-        root=evidence_root, config=cfg,
+        root=evidence_root,
+        config=cfg,
         deps=CanaryDepsV1(
             clock=lambda: T0,
             token_fetch=lambda: "restart-token",
@@ -1741,7 +2272,9 @@ def test_m1_all_missed_no_provider_calls(tmp_path):
     """M-1: When all slots are past on restart, zero provider calls,
     outcome = missed_past_slots."""
     from tokmo.programs.pulse_canary import (
-        CanaryConfigV1, CanaryDepsV1, run_canary_session,
+        CanaryConfigV1,
+        CanaryDepsV1,
+        run_canary_session,
     )
     from tokmo.values.session_gate import Market
 
@@ -1757,17 +2290,28 @@ def test_m1_all_missed_no_provider_calls(tmp_path):
         provider_calls["quotes"] += 1
         from tokmo.programs.pulse_quotes import PulseQuoteBatchOutcomeV1
         from tokmo.values.market_observations import TossCurrentPriceFact
-        return PulseQuoteBatchOutcomeV1("success", tuple(
-            TossCurrentPriceFact(
-                source="toss-current-price-v1", symbol=sym,
-                last_price="50000", currency_raw="KRW",
-                timestamp=T0, fetched_at=T0,
-            ) for sym in symbols
-        ), ())
+
+        return PulseQuoteBatchOutcomeV1(
+            "success",
+            tuple(
+                TossCurrentPriceFact(
+                    source="toss-current-price-v1",
+                    symbol=sym,
+                    last_price="50000",
+                    currency_raw="KRW",
+                    timestamp=T0,
+                    fetched_at=T0,
+                )
+                for sym in symbols
+            ),
+            (),
+        )
 
     cfg = CanaryConfigV1(
-        market=Market.KR, symbol="005930",
-        max_ticks=5, max_provider_starts=10,
+        market=Market.KR,
+        symbol="005930",
+        max_ticks=5,
+        max_provider_starts=10,
     )
 
     # Restart at t0+300 (5 minutes later) — all 5 slots are past
@@ -1782,14 +2326,19 @@ def test_m1_all_missed_no_provider_calls(tmp_path):
         sleep_until=lambda target: sleep_calls.append(target),
     )
     result = run_canary_session(
-        root=evidence_root, config=cfg, deps=deps, t0=T0,
+        root=evidence_root,
+        config=cfg,
+        deps=deps,
+        t0=T0,
     )
 
     # M-1: all past slots => MISSED, zero provider calls for them
     assert provider_calls["token"] == 0, (
-        f"Expected 0 token calls, got {provider_calls['token']}")
+        f"Expected 0 token calls, got {provider_calls['token']}"
+    )
     assert provider_calls["quotes"] == 0, (
-        f"Expected 0 quotes calls, got {provider_calls['quotes']}")
+        f"Expected 0 quotes calls, got {provider_calls['quotes']}"
+    )
     # No sleep_until for past slots
     assert len(sleep_calls) == 0
     # Nonzero stop reason — NOT all_ticks_complete
@@ -1800,13 +2349,16 @@ def test_m1_all_missed_no_provider_calls(tmp_path):
 def test_m1_grace_is_less_than_tick_interval():
     """M-1: _PAST_SLOT_GRACE_SECONDS must be < 60s tick interval."""
     from tokmo.programs.pulse_canary import _PAST_SLOT_GRACE_SECONDS
+
     assert _PAST_SLOT_GRACE_SECONDS <= 5, (
-        f"Grace must be <=5s, got {_PAST_SLOT_GRACE_SECONDS}")
+        f"Grace must be <=5s, got {_PAST_SLOT_GRACE_SECONDS}"
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════
 # M-2: Missing canonical-root live refusal provider0
 # ═══════════════════════════════════════════════════════════════════════
+
 
 def test_m2_live_missing_canonical_root_refused(tmp_path):
     """M-2: Live mode without --canonical-root => refusal before
@@ -1816,14 +2368,26 @@ def test_m2_live_missing_canonical_root_refused(tmp_path):
     project_root = tmp_path / "project"
     project_root.mkdir()
 
-    result = run_canary_cli([
-        "--mode", "bounded-live-canary",
-        "--market", "KR", "--symbol", "005930",
-        # NOTE: --canonical-root intentionally OMITTED
-        "--project-root", str(project_root),
-        "--max-ticks", "5", "--max-provider-starts", "10",
-        "--base-commit", "deadbeef",
-    ], evidence_root_override=tmp_path / "evidence")
+    result = run_canary_cli(
+        [
+            "--mode",
+            "bounded-live-canary",
+            "--market",
+            "KR",
+            "--symbol",
+            "005930",
+            # NOTE: --canonical-root intentionally OMITTED
+            "--project-root",
+            str(project_root),
+            "--max-ticks",
+            "5",
+            "--max-provider-starts",
+            "10",
+            "--base-commit",
+            "deadbeef",
+        ],
+        evidence_root_override=tmp_path / "evidence",
+    )
     assert result == 1  # canonical_root_required_for_live_mode
 
 
@@ -1831,25 +2395,36 @@ def test_m2_live_missing_canonical_root_refused(tmp_path):
 # m-3: Dirty parsing matrix
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def test_m3_dirty_parsing_unstaged_modification(tmp_path):
     """m-3: Unstaged modification (' M path') is detected."""
-    from tokmo.programs.pulse_canary import run_canary_cli
     import subprocess
+
+    from tokmo.programs.pulse_canary import run_canary_cli
 
     project_root = tmp_path / "project"
     project_root.mkdir()
     subprocess.run(["git", "init"], cwd=str(project_root), capture_output=True)
-    subprocess.run(["git", "config", "user.email", "test@test.com"],
-                   cwd=str(project_root), capture_output=True)
-    subprocess.run(["git", "config", "user.name", "Test"],
-                   cwd=str(project_root), capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"],
+        cwd=str(project_root),
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=str(project_root),
+        capture_output=True,
+    )
     (project_root / "tracked.py").write_text("# original")
     subprocess.run(["git", "add", "."], cwd=str(project_root), capture_output=True)
-    subprocess.run(["git", "commit", "-m", "init"],
-                   cwd=str(project_root), capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"], cwd=str(project_root), capture_output=True
+    )
     head = subprocess.run(
         ["git", "rev-parse", "HEAD"],
-        cwd=str(project_root), capture_output=True, text=True
+        cwd=str(project_root),
+        capture_output=True,
+        text=True,
     ).stdout.strip()
 
     # Unstaged modification — porcelain shows ' M tracked.py'
@@ -1858,37 +2433,60 @@ def test_m3_dirty_parsing_unstaged_modification(tmp_path):
     canonical = tmp_path / "canonical"
     canonical.mkdir()
 
-    result = run_canary_cli([
-        "--mode", "bounded-live-canary",
-        "--market", "KR", "--symbol", "005930",
-        "--canonical-root", str(canonical),
-        "--project-root", str(project_root),
-        "--max-ticks", "5", "--max-provider-starts", "10",
-        "--base-commit", head,
-    ], evidence_root_override=tmp_path / "evidence")
+    result = run_canary_cli(
+        [
+            "--mode",
+            "bounded-live-canary",
+            "--market",
+            "KR",
+            "--symbol",
+            "005930",
+            "--canonical-root",
+            str(canonical),
+            "--project-root",
+            str(project_root),
+            "--max-ticks",
+            "5",
+            "--max-provider-starts",
+            "10",
+            "--base-commit",
+            head,
+        ],
+        evidence_root_override=tmp_path / "evidence",
+    )
     assert result == 1  # dirty_tracked_tree
 
 
 def test_m3_dirty_parsing_typechange(tmp_path):
     """m-3: Typechange (' T path') is detected."""
-    from tokmo.programs.pulse_canary import run_canary_cli
     import subprocess
+
+    from tokmo.programs.pulse_canary import run_canary_cli
 
     project_root = tmp_path / "project"
     project_root.mkdir()
     subprocess.run(["git", "init"], cwd=str(project_root), capture_output=True)
-    subprocess.run(["git", "config", "user.email", "test@test.com"],
-                   cwd=str(project_root), capture_output=True)
-    subprocess.run(["git", "config", "user.name", "Test"],
-                   cwd=str(project_root), capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"],
+        cwd=str(project_root),
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=str(project_root),
+        capture_output=True,
+    )
     # Create a file, commit, then replace it with a symlink (typechange)
     (project_root / "item").write_text("file content")
     subprocess.run(["git", "add", "."], cwd=str(project_root), capture_output=True)
-    subprocess.run(["git", "commit", "-m", "init"],
-                   cwd=str(project_root), capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"], cwd=str(project_root), capture_output=True
+    )
     head = subprocess.run(
         ["git", "rev-parse", "HEAD"],
-        cwd=str(project_root), capture_output=True, text=True
+        cwd=str(project_root),
+        capture_output=True,
+        text=True,
     ).stdout.strip()
 
     # Create typechange: file -> symlink
@@ -1898,78 +2496,125 @@ def test_m3_dirty_parsing_typechange(tmp_path):
     canonical = tmp_path / "canonical"
     canonical.mkdir()
 
-    result = run_canary_cli([
-        "--mode", "bounded-live-canary",
-        "--market", "KR", "--symbol", "005930",
-        "--canonical-root", str(canonical),
-        "--project-root", str(project_root),
-        "--max-ticks", "5", "--max-provider-starts", "10",
-        "--base-commit", head,
-    ], evidence_root_override=tmp_path / "evidence")
+    result = run_canary_cli(
+        [
+            "--mode",
+            "bounded-live-canary",
+            "--market",
+            "KR",
+            "--symbol",
+            "005930",
+            "--canonical-root",
+            str(canonical),
+            "--project-root",
+            str(project_root),
+            "--max-ticks",
+            "5",
+            "--max-provider-starts",
+            "10",
+            "--base-commit",
+            head,
+        ],
+        evidence_root_override=tmp_path / "evidence",
+    )
     assert result == 1  # dirty_tracked_tree (typechange)
 
 
 def test_m3_dirty_parsing_staged_addition(tmp_path):
     """m-3: Staged addition ('A  path') is detected."""
-    from tokmo.programs.pulse_canary import run_canary_cli
     import subprocess
+
+    from tokmo.programs.pulse_canary import run_canary_cli
 
     project_root = tmp_path / "project"
     project_root.mkdir()
     subprocess.run(["git", "init"], cwd=str(project_root), capture_output=True)
-    subprocess.run(["git", "config", "user.email", "test@test.com"],
-                   cwd=str(project_root), capture_output=True)
-    subprocess.run(["git", "config", "user.name", "Test"],
-                   cwd=str(project_root), capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"],
+        cwd=str(project_root),
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=str(project_root),
+        capture_output=True,
+    )
     (project_root / "original.py").write_text("# v1")
     subprocess.run(["git", "add", "."], cwd=str(project_root), capture_output=True)
-    subprocess.run(["git", "commit", "-m", "init"],
-                   cwd=str(project_root), capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"], cwd=str(project_root), capture_output=True
+    )
     head = subprocess.run(
         ["git", "rev-parse", "HEAD"],
-        cwd=str(project_root), capture_output=True, text=True
+        cwd=str(project_root),
+        capture_output=True,
+        text=True,
     ).stdout.strip()
 
     # Stage a new file — porcelain shows 'A  new_file.py'
     (project_root / "new_file.py").write_text("# new")
-    subprocess.run(["git", "add", "new_file.py"], cwd=str(project_root),
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "new_file.py"], cwd=str(project_root), capture_output=True
+    )
 
     canonical = tmp_path / "canonical"
     canonical.mkdir()
 
-    result = run_canary_cli([
-        "--mode", "bounded-live-canary",
-        "--market", "KR", "--symbol", "005930",
-        "--canonical-root", str(canonical),
-        "--project-root", str(project_root),
-        "--max-ticks", "5", "--max-provider-starts", "10",
-        "--base-commit", head,
-    ], evidence_root_override=tmp_path / "evidence")
+    result = run_canary_cli(
+        [
+            "--mode",
+            "bounded-live-canary",
+            "--market",
+            "KR",
+            "--symbol",
+            "005930",
+            "--canonical-root",
+            str(canonical),
+            "--project-root",
+            str(project_root),
+            "--max-ticks",
+            "5",
+            "--max-provider-starts",
+            "10",
+            "--base-commit",
+            head,
+        ],
+        evidence_root_override=tmp_path / "evidence",
+    )
     assert result == 1  # dirty_tracked_tree
 
 
 def test_m3_dirty_parsing_first_line_unstaged(tmp_path):
     """m-3: Multiple unstaged files including ' M' as first line
     are all detected (the .strip() bug from Opus)."""
-    from tokmo.programs.pulse_canary import run_canary_cli
     import subprocess
+
+    from tokmo.programs.pulse_canary import run_canary_cli
 
     project_root = tmp_path / "project"
     project_root.mkdir()
     subprocess.run(["git", "init"], cwd=str(project_root), capture_output=True)
-    subprocess.run(["git", "config", "user.email", "test@test.com"],
-                   cwd=str(project_root), capture_output=True)
-    subprocess.run(["git", "config", "user.name", "Test"],
-                   cwd=str(project_root), capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"],
+        cwd=str(project_root),
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=str(project_root),
+        capture_output=True,
+    )
     (project_root / "a.py").write_text("# a")
     (project_root / "z.py").write_text("# z")
     subprocess.run(["git", "add", "."], cwd=str(project_root), capture_output=True)
-    subprocess.run(["git", "commit", "-m", "init"],
-                   cwd=str(project_root), capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"], cwd=str(project_root), capture_output=True
+    )
     head = subprocess.run(
         ["git", "rev-parse", "HEAD"],
-        cwd=str(project_root), capture_output=True, text=True
+        cwd=str(project_root),
+        capture_output=True,
+        text=True,
     ).stdout.strip()
 
     # Modify both — porcelain will show:
@@ -1980,20 +2625,34 @@ def test_m3_dirty_parsing_first_line_unstaged(tmp_path):
     canonical = tmp_path / "canonical"
     canonical.mkdir()
 
-    result = run_canary_cli([
-        "--mode", "bounded-live-canary",
-        "--market", "KR", "--symbol", "005930",
-        "--canonical-root", str(canonical),
-        "--project-root", str(project_root),
-        "--max-ticks", "5", "--max-provider-starts", "10",
-        "--base-commit", head,
-    ], evidence_root_override=tmp_path / "evidence")
+    result = run_canary_cli(
+        [
+            "--mode",
+            "bounded-live-canary",
+            "--market",
+            "KR",
+            "--symbol",
+            "005930",
+            "--canonical-root",
+            str(canonical),
+            "--project-root",
+            str(project_root),
+            "--max-ticks",
+            "5",
+            "--max-provider-starts",
+            "10",
+            "--base-commit",
+            head,
+        ],
+        evidence_root_override=tmp_path / "evidence",
+    )
     assert result == 1
 
 
 # ═══════════════════════════════════════════════════════════════════════
 # m-2: Fixture composition moved out of src production module
 # ═══════════════════════════════════════════════════════════════════════
+
 
 def test_m2_fixture_deps_not_in_src_module():
     """m-2: The production src module (pulse_canary.py) must NOT contain
@@ -2002,15 +2661,18 @@ def test_m2_fixture_deps_not_in_src_module():
 
     # _build_fixture_deps should not exist in the src module
     assert not hasattr(pulse_canary, "_build_fixture_deps"), (
-        "_build_fixture_deps must not be in src production module")
+        "_build_fixture_deps must not be in src production module"
+    )
     assert not hasattr(pulse_canary, "build_fixture_deps"), (
-        "build_fixture_deps must not be in src production module")
+        "build_fixture_deps must not be in src production module"
+    )
 
 
 def test_m2_fixture_deps_in_tools():
     """m-2: build_fixture_deps exists in tools/run_tokmo_pulse_canary_fixture.py."""
     assert callable(build_fixture_deps), (
-        "build_fixture_deps must be callable from tools")
+        "build_fixture_deps must be callable from tools"
+    )
 
 
 def test_m2_fixture_deps_returns_canary_deps():
@@ -2021,18 +2683,22 @@ def test_m2_fixture_deps_returns_canary_deps():
     if not fixture_path.exists():
         # Use a temp fixture
         import tempfile
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json",
-                                         delete=False) as f:
-            json.dump({
-                "token": "test-token",
-                "quotes": {
-                    "005930": {
-                        "last_price": "72500", "currency": "KRW",
-                        "timestamp": "2026-08-11T00:00:00Z",
-                        "fetched_at": "2026-08-11T00:00:00Z",
-                    }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(
+                {
+                    "token": "test-token",
+                    "quotes": {
+                        "005930": {
+                            "last_price": "72500",
+                            "currency": "KRW",
+                            "timestamp": "2026-08-11T00:00:00Z",
+                            "fetched_at": "2026-08-11T00:00:00Z",
+                        }
+                    },
                 },
-            }, f)
+                f,
+            )
             fixture_path = Path(f.name)
 
     deps = build_fixture_deps(str(fixture_path), T0)
@@ -2043,8 +2709,10 @@ def test_m2_fixture_deps_returns_canary_deps():
 def test_m2_no_t0_param_in_compute_purpose_identity():
     """m (cleanup): compute_purpose_identity no longer accepts t0 parameter."""
     import inspect
+
     from tokmo.programs.pulse_canary import compute_purpose_identity
 
     sig = inspect.signature(compute_purpose_identity)
     assert "t0" not in sig.parameters, (
-        "compute_purpose_identity must not have t0 parameter")
+        "compute_purpose_identity must not have t0 parameter"
+    )

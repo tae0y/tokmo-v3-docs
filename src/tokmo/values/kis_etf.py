@@ -1,11 +1,16 @@
 """Credential-redacted KIS ETF read vocabulary."""
-from dataclasses import dataclass, field
+
 import re
+from dataclasses import dataclass, field
 
 
 class KisError(ValueError):
     def __init__(self, code):
-        self.code = code if isinstance(code, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,48}", code) else "provider_failure"
+        self.code = (
+            code
+            if isinstance(code, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,48}", code)
+            else "provider_failure"
+        )
         super().__init__(self.code)
 
 

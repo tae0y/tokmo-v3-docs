@@ -11,17 +11,17 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from enum import Enum
 
 __all__ = [
     "MacroCandleObservation",
-    "MacroInvestorObservation",
-    "MacroSourceRefV1",
     "MacroCoverageState",
     "MacroDataCoverageV1",
+    "MacroInvestorObservation",
     "MacroObservationSeriesV1",
+    "MacroSourceRefV1",
     "compute_series_digest",
 ]
 
@@ -57,6 +57,7 @@ def _require_finite_decimal_text(value, field_name: str) -> None:
 # ==========================================================================
 # §4.1  MacroCandleObservation
 # ==========================================================================
+
 
 @dataclass(frozen=True)
 class MacroCandleObservation:
@@ -94,6 +95,7 @@ class MacroCandleObservation:
 # §4.2  MacroInvestorObservation
 # ==========================================================================
 
+
 @dataclass(frozen=True)
 class MacroInvestorObservation:
     session_date: date
@@ -116,9 +118,12 @@ class MacroInvestorObservation:
         if self.available_at < self.observed_at:
             raise ValueError("available_at must be >= observed_at")
         for fname in (
-            "foreign_buy", "foreign_sell",
-            "individual_buy", "individual_sell",
-            "institution_buy", "institution_sell",
+            "foreign_buy",
+            "foreign_sell",
+            "individual_buy",
+            "individual_sell",
+            "institution_buy",
+            "institution_sell",
         ):
             _require_finite_decimal_text(getattr(self, fname), fname)
 
@@ -126,6 +131,7 @@ class MacroInvestorObservation:
 # ==========================================================================
 # §4.3  MacroSourceRefV1
 # ==========================================================================
+
 
 @dataclass(frozen=True)
 class MacroSourceRefV1:
@@ -181,9 +187,15 @@ _CANDLE_DIGEST_FIELDS = (
     "currency",
 )
 
-_CANDLE_DECIMAL_FIELDS = frozenset({
-    "open_price", "high_price", "low_price", "close_price", "volume",
-})
+_CANDLE_DECIMAL_FIELDS = frozenset(
+    {
+        "open_price",
+        "high_price",
+        "low_price",
+        "close_price",
+        "volume",
+    }
+)
 
 _INVESTOR_DIGEST_FIELDS = (
     "session_date",
@@ -196,11 +208,16 @@ _INVESTOR_DIGEST_FIELDS = (
     "institution_sell",
 )
 
-_INVESTOR_DECIMAL_FIELDS = frozenset({
-    "foreign_buy", "foreign_sell",
-    "individual_buy", "individual_sell",
-    "institution_buy", "institution_sell",
-})
+_INVESTOR_DECIMAL_FIELDS = frozenset(
+    {
+        "foreign_buy",
+        "foreign_sell",
+        "individual_buy",
+        "individual_sell",
+        "institution_buy",
+        "institution_sell",
+    }
+)
 
 
 def _canonical_utc_iso(dt: datetime) -> str:
@@ -209,9 +226,8 @@ def _canonical_utc_iso(dt: datetime) -> str:
     Per §4.3.1 rule 4: truncate to microseconds, always emit exactly 6
     fractional digits.
     """
-    from datetime import timezone as _tz
 
-    utc_dt = dt.astimezone(_tz.utc)
+    utc_dt = dt.astimezone(UTC)
     return f"{utc_dt:%Y-%m-%dT%H:%M:%S}.{utc_dt.microsecond:06d}Z"
 
 
@@ -270,6 +286,7 @@ def compute_series_digest(observations: tuple) -> str:
 # §4.4  Coverage state and data
 # ==========================================================================
 
+
 class MacroCoverageState(Enum):
     COVERED = "COVERED"
     PARTIAL = "PARTIAL"
@@ -294,6 +311,7 @@ class MacroDataCoverageV1:
 # ==========================================================================
 # §4.5  MacroObservationSeriesV1 — the normalized input bundle
 # ==========================================================================
+
 
 @dataclass(frozen=True)
 class MacroObservationSeriesV1:

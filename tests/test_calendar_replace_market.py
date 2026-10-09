@@ -7,7 +7,7 @@ STARTED/claimed kernel rows. A forged, unclaimed, terminal, or already
 consumed receipt mutates nothing.
 """
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -35,19 +35,25 @@ from tokmo.values.toss_market_calendar import (
     UsMarketDay,
 )
 
-NOW = datetime(2026, 8, 1, 19, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 1, 19, 0, tzinfo=UTC)
 ROLE = ProducerRole.COLLECTOR
 CHILD_LIMITS = TradesChildLimitsV1(orders_page_starts=0, order_detail_starts=0)
 
 
 def policy():
     return CadencePolicyV1(
-        policy_version="cadence-test-v1", cadence_seconds=60,
-        max_start_lag_seconds=10, child_timeout_seconds=40,
+        policy_version="cadence-test-v1",
+        cadence_seconds=60,
+        max_start_lag_seconds=10,
+        child_timeout_seconds=40,
         termination_margin_seconds=10,
         request_limits=TickRequestLimitsV1(
-            total_wire_starts=27, token_starts=0, calendar_starts=2,
-            holdings_starts=0, quote_starts=0, trades_starts=0,
+            total_wire_starts=27,
+            token_starts=0,
+            calendar_starts=2,
+            holdings_starts=0,
+            quote_starts=0,
+            trades_starts=0,
         ),
     )
 
@@ -59,8 +65,13 @@ def make_kernel(tmp_path, name="kernel"):
 def issue_receipt(kernel, market, trade_date, *, slot=NOW, claim=True):
     kernel.plan_calendar_slot(ROLE, market, trade_date, slot, now=slot)
     receipt = kernel.start_calendar_attempt(
-        ROLE, policy(), scheduled_for_utc=slot, market=market,
-        market_local_date=trade_date, eligible_slot_utc=slot, now=slot,
+        ROLE,
+        policy(),
+        scheduled_for_utc=slot,
+        market=market,
+        market_local_date=trade_date,
+        eligible_slot_utc=slot,
+        now=slot,
         child_limits=CHILD_LIMITS,
     )
     if claim:
@@ -71,27 +82,36 @@ def issue_receipt(kernel, market, trade_date, *, slot=NOW, claim=True):
 def make_receipt(market, trade_date, ordinal=0):
     """Value-level receipt for typed-identity tests; NOT kernel authority."""
     return CalendarStartReceiptV1(
-        "cadence-test-v1", NOW, market, trade_date, ordinal,
-        f"calendar:{market.value}:{trade_date.isoformat()}:{ordinal}", "STARTED",
+        "cadence-test-v1",
+        NOW,
+        market,
+        trade_date,
+        ordinal,
+        f"calendar:{market.value}:{trade_date.isoformat()}:{ordinal}",
+        "STARTED",
     )
 
 
 def kr_day(trade_date=date(2026, 8, 2), start_hour=0):
     session = CalendarSession(
-        datetime(trade_date.year, trade_date.month, trade_date.day, start_hour, 0, tzinfo=timezone.utc),
-        datetime(trade_date.year, trade_date.month, trade_date.day, 6, 30, tzinfo=timezone.utc),
+        datetime(
+            trade_date.year, trade_date.month, trade_date.day, start_hour, 0, tzinfo=UTC
+        ),
+        datetime(trade_date.year, trade_date.month, trade_date.day, 6, 30, tzinfo=UTC),
     )
     return KrMarketDay(trade_date, IntegratedHour(regular_market=session))
 
 
 def kr_fetch(receipt, trade_date=date(2026, 8, 2), start_hour=0):
-    return CalendarFetchResult(Market.KR, trade_date, kr_day(trade_date, start_hour), receipt)
+    return CalendarFetchResult(
+        Market.KR, trade_date, kr_day(trade_date, start_hour), receipt
+    )
 
 
 def us_fetch(receipt, trade_date=date(2026, 8, 1)):
     session = CalendarSession(
-        datetime(trade_date.year, trade_date.month, trade_date.day, 13, 30, tzinfo=timezone.utc),
-        datetime(trade_date.year, trade_date.month, trade_date.day, 20, 0, tzinfo=timezone.utc),
+        datetime(trade_date.year, trade_date.month, trade_date.day, 13, 30, tzinfo=UTC),
+        datetime(trade_date.year, trade_date.month, trade_date.day, 20, 0, tzinfo=UTC),
     )
     day = UsMarketDay(trade_date, regular_market=session)
     return CalendarFetchResult(Market.US, trade_date, day, receipt)
@@ -107,37 +127,60 @@ def test_fetch_result_requires_a_matching_started_receipt():
         CalendarFetchResult(Market.KR, date(2026, 8, 2), day, None)
     with pytest.raises(CalendarIdentityError):
         CalendarFetchResult(
-            Market.KR, date(2026, 8, 2), day, make_receipt(Market.US, date(2026, 8, 2)),
+            Market.KR,
+            date(2026, 8, 2),
+            day,
+            make_receipt(Market.US, date(2026, 8, 2)),
         )
     from tokmo.values.calendar_refresh import CalendarDateError
 
     with pytest.raises(CalendarDateError):
         CalendarFetchResult(
-            Market.KR, date(2026, 8, 2), day, make_receipt(Market.KR, date(2026, 8, 9)),
+            Market.KR,
+            date(2026, 8, 2),
+            day,
+            make_receipt(Market.KR, date(2026, 8, 9)),
         )
 
 
 def make_store(tmp_path):
-    return CalendarCacheStore(tmp_path / "ops" / "calendar_cache.json", clock=lambda: NOW)
+    return CalendarCacheStore(
+        tmp_path / "ops" / "calendar_cache.json", clock=lambda: NOW
+    )
 
 
 def test_replace_market_commits_target_and_preserves_counterpart_exactly(tmp_path):
-    from tokmo.records.calendar_cache import CalendarReplaceResult, calendar_market_digest
+    from tokmo.records.calendar_cache import (
+        CalendarReplaceResult,
+        calendar_market_digest,
+    )
 
     store = make_store(tmp_path)
     kernel = make_kernel(tmp_path)
     us_receipt = issue_receipt(kernel, Market.US, date(2026, 8, 1))
     kr_receipt = issue_receipt(kernel, Market.KR, date(2026, 8, 2))
-    assert store.replace_market(
-        Market.US, None, us_fetch(us_receipt), authority=kernel,
-    ) is CalendarReplaceResult.REPLACED
+    assert (
+        store.replace_market(
+            Market.US,
+            None,
+            us_fetch(us_receipt),
+            authority=kernel,
+        )
+        is CalendarReplaceResult.REPLACED
+    )
     us_before = store.read().us
 
     digest = calendar_market_digest(store.read().kr)
     assert digest is None
-    assert store.replace_market(
-        Market.KR, None, kr_fetch(kr_receipt), authority=kernel,
-    ) is CalendarReplaceResult.REPLACED
+    assert (
+        store.replace_market(
+            Market.KR,
+            None,
+            kr_fetch(kr_receipt),
+            authority=kernel,
+        )
+        is CalendarReplaceResult.REPLACED
+    )
 
     loaded = store.read()
     assert loaded.kr.trade_date == "2026-08-02"
@@ -171,12 +214,17 @@ def test_replace_market_cas_conflict_never_overwrites(tmp_path):
 
 
 def test_replace_market_same_date_exact_content_is_noop(tmp_path):
-    from tokmo.records.calendar_cache import CalendarReplaceResult, calendar_market_digest
+    from tokmo.records.calendar_cache import (
+        CalendarReplaceResult,
+        calendar_market_digest,
+    )
 
     store = make_store(tmp_path)
     kernel = make_kernel(tmp_path)
     store.replace_market(
-        Market.KR, None, kr_fetch(issue_receipt(kernel, Market.KR, date(2026, 8, 2))),
+        Market.KR,
+        None,
+        kr_fetch(issue_receipt(kernel, Market.KR, date(2026, 8, 2))),
         authority=kernel,
     )
     before = (tmp_path / "ops" / "calendar_cache.json").read_bytes()
@@ -186,9 +234,15 @@ def test_replace_market_same_date_exact_content_is_noop(tmp_path):
     # exact same content: a no-op, never a second file write.
     racing_kernel = make_kernel(tmp_path, name="racing")
     replay = kr_fetch(issue_receipt(racing_kernel, Market.KR, date(2026, 8, 2)))
-    assert store.replace_market(
-        Market.KR, digest, replay, authority=racing_kernel,
-    ) is CalendarReplaceResult.UNCHANGED
+    assert (
+        store.replace_market(
+            Market.KR,
+            digest,
+            replay,
+            authority=racing_kernel,
+        )
+        is CalendarReplaceResult.UNCHANGED
+    )
     assert (tmp_path / "ops" / "calendar_cache.json").read_bytes() == before
 
 
@@ -201,7 +255,9 @@ def test_replace_market_same_date_conflicting_content_is_explicit_conflict(tmp_p
     store = make_store(tmp_path)
     kernel = make_kernel(tmp_path)
     store.replace_market(
-        Market.KR, None, kr_fetch(issue_receipt(kernel, Market.KR, date(2026, 8, 2))),
+        Market.KR,
+        None,
+        kr_fetch(issue_receipt(kernel, Market.KR, date(2026, 8, 2))),
         authority=kernel,
     )
     before = (tmp_path / "ops" / "calendar_cache.json").read_bytes()
@@ -209,7 +265,8 @@ def test_replace_market_same_date_conflicting_content_is_explicit_conflict(tmp_p
 
     racing_kernel = make_kernel(tmp_path, name="racing")
     conflicting = kr_fetch(
-        issue_receipt(racing_kernel, Market.KR, date(2026, 8, 2)), start_hour=1,
+        issue_receipt(racing_kernel, Market.KR, date(2026, 8, 2)),
+        start_hour=1,
     )
     with pytest.raises(CalendarCacheSameDateConflictError):
         store.replace_market(Market.KR, digest, conflicting, authority=racing_kernel)
@@ -220,7 +277,9 @@ def test_replace_market_fsync_failure_preserves_previous_file(tmp_path, monkeypa
     store = make_store(tmp_path)
     kernel = make_kernel(tmp_path)
     store.replace_market(
-        Market.KR, None, kr_fetch(issue_receipt(kernel, Market.KR, date(2026, 8, 2))),
+        Market.KR,
+        None,
+        kr_fetch(issue_receipt(kernel, Market.KR, date(2026, 8, 2))),
         authority=kernel,
     )
     before = (tmp_path / "ops" / "calendar_cache.json").read_bytes()
@@ -234,7 +293,9 @@ def test_replace_market_fsync_failure_preserves_previous_file(tmp_path, monkeypa
     next_receipt = issue_receipt(kernel, Market.KR, date(2026, 8, 3))
     with pytest.raises(OSError):
         store.replace_market(
-            Market.KR, digest, kr_fetch(next_receipt, trade_date=date(2026, 8, 3)),
+            Market.KR,
+            digest,
+            kr_fetch(next_receipt, trade_date=date(2026, 8, 3)),
             authority=kernel,
         )
     monkeypatch.undo()
@@ -257,7 +318,9 @@ def test_replace_market_corrupt_cache_fails_closed_without_write(tmp_path):
     kernel = make_kernel(tmp_path)
     path = tmp_path / "ops" / "calendar_cache.json"
     store.replace_market(
-        Market.KR, None, kr_fetch(issue_receipt(kernel, Market.KR, date(2026, 8, 2))),
+        Market.KR,
+        None,
+        kr_fetch(issue_receipt(kernel, Market.KR, date(2026, 8, 2))),
         authority=kernel,
     )
     path.write_bytes(b"{corrupt")
@@ -304,7 +367,11 @@ def test_direct_replace_with_terminal_receipt_mutates_nothing(tmp_path):
     kernel = make_kernel(tmp_path)
     receipt = issue_receipt(kernel, Market.KR, date(2026, 8, 2))
     kernel.settle_calendar_attempt(
-        ROLE, Market.KR, date(2026, 8, 2), receipt.attempt_ordinal, "FAILED",
+        ROLE,
+        Market.KR,
+        date(2026, 8, 2),
+        receipt.attempt_ordinal,
+        "FAILED",
         now=NOW + timedelta(minutes=1),
     )
     with pytest.raises(OpsKernelError):
@@ -321,7 +388,8 @@ def test_direct_replace_with_consumed_receipt_mutates_nothing(tmp_path):
     before = (tmp_path / "ops" / "calendar_cache.json").read_bytes()
 
     second = CalendarCacheStore(
-        tmp_path / "ops" / "calendar_cache_second.json", clock=lambda: NOW,
+        tmp_path / "ops" / "calendar_cache_second.json",
+        clock=lambda: NOW,
     )
     with pytest.raises(OpsKernelError):
         second.replace_market(Market.KR, None, fetch, authority=kernel)

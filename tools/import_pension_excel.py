@@ -33,6 +33,7 @@ Approved entrypoints
 Both take a snapshot of current pension holdings, and verify the read-back,
 BEFORE they mutate anything.
 """
+
 from __future__ import annotations
 
 import sys

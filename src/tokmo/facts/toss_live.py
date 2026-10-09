@@ -65,15 +65,16 @@ class TossDataLiveTransport:
         self.opener = build_live_opener(https_handler)
 
     def __call__(
-            self,
-            request: TossDataRequest) -> _TossTransportSuccess | _TossTransportFailure:
+        self, request: TossDataRequest
+    ) -> _TossTransportSuccess | _TossTransportFailure:
         try:
             url = _wire_url(request)
             headers = _wire_headers(request)
             if url is None or headers is None:
                 return _TossTransportFailure(code="protocol_failure")
             wire = urllib.request.Request(
-                url, data=None, method=METHOD, headers=headers)
+                url, data=None, method=METHOD, headers=headers
+            )
             with self.opener.open(wire, timeout=request.timeout_seconds) as response:
                 return _read_success(response)
         except urllib.error.HTTPError as err:
@@ -114,7 +115,12 @@ def _wire_url(request: TossDataRequest) -> str | None:
     url = f"https://{TOSS_HOST}{path}"
     parts = urllib.parse.urlsplit(url)
     if (parts.scheme, parts.hostname, parts.path, parts.port, parts.query) != (
-            "https", TOSS_HOST, path, None, ""):
+        "https",
+        TOSS_HOST,
+        path,
+        None,
+        "",
+    ):
         return None
     return url
 
@@ -122,8 +128,10 @@ def _wire_url(request: TossDataRequest) -> str | None:
 def _wire_headers(request: TossDataRequest) -> dict[str, str] | None:
     if not valid_token(request.token):
         return None
-    headers = {"Authorization": f"{AUTH_SCHEME} {request.token}",
-               "Accept-Encoding": "identity"}
+    headers = {
+        "Authorization": f"{AUTH_SCHEME} {request.token}",
+        "Accept-Encoding": "identity",
+    }
     if request.endpoint_id == HOLDINGS_ENDPOINT_ID:
         if not valid_account_seq(request.account_seq):
             return None
@@ -150,7 +158,8 @@ def _read_success(response) -> _TossTransportSuccess | _TossTransportFailure:
     return _TossTransportSuccess(
         body=body,
         rate_limit_remaining=_bounded_int(
-            response.headers.get("X-RateLimit-Remaining"), MAX_RATE_LIMIT_REMAINING),
+            response.headers.get("X-RateLimit-Remaining"), MAX_RATE_LIMIT_REMAINING
+        ),
     )
 
 
@@ -162,8 +171,8 @@ def _map_http_error(err: urllib.error.HTTPError) -> _TossTransportFailure:
         return _TossTransportFailure(
             code="http_429",
             retry_after=_bounded_int(
-                err.headers.get("Retry-After") if err.headers else None,
-                MAX_RETRY_AFTER),
+                err.headers.get("Retry-After") if err.headers else None, MAX_RETRY_AFTER
+            ),
         )
     if code == 401:
         return _TossTransportFailure(code="auth_rejection")

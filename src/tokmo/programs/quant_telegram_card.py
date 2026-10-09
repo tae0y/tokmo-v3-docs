@@ -61,19 +61,26 @@ the process environment; transports are injected as plain callables.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timedelta
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import re
 import unicodedata
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from tokmo.programs.execution_dialogue import _kst
-from tokmo.programs.portfolio_calculations import FX_MAX_AGE_SECONDS_V1, fx_content_hash_v1
+from tokmo.programs.portfolio_calculations import (
+    FX_MAX_AGE_SECONDS_V1,
+    fx_content_hash_v1,
+)
 from tokmo.values.instrument_display import display_or_symbol
 from tokmo.values.news_payload import contains_private_markers
 from tokmo.values.portfolio_calculations import FxEvidenceEnvelopeV1
 from tokmo.values.quant_discovery import (
-    DecisionCardV1, FactorOrientation, FactorStatus, QuantRunReportV1, QuantUnavailableCode,
+    DecisionCardV1,
+    FactorOrientation,
+    FactorStatus,
+    QuantRunReportV1,
+    QuantUnavailableCode,
 )
 
 MARKETS = ("KR", "US")
@@ -99,13 +106,43 @@ STANDING_FACTORS = (
     ("realized_vol_63", "변동성 안정성"),
     ("max_drawdown", "최대낙폭 방어력"),
 )
-HERMES_START, HERMES_END = "<!-- HERMES_CURRENT_START -->", "<!-- HERMES_CURRENT_END -->"
+HERMES_START, HERMES_END = (
+    "<!-- HERMES_CURRENT_START -->",
+    "<!-- HERMES_CURRENT_END -->",
+)
 THESIS_START, THESIS_END = "<!-- USER_THESIS_START -->", "<!-- USER_THESIS_END -->"
 STANCE_LABELS = {"ACCUMULATE": "매수·확대", "HOLD": "보유 유지", "REDUCE": "축소·정리"}
 _STANCE_WORDS = {
-    "ACCUMULATE": ("추가 매수", "추가매수", "비중 확대", "분할 매수", "분할매수", "저가 매수", "매수 관점", "확대"),
-    "HOLD": ("보유 유지", "장기 보유", "장기보유", "홀딩", "안 팔", "안팔", "계속 보유", "유지"),
-    "REDUCE": ("전량 매도", "비중 축소", "부분매도", "부분 매도", "익절", "손절", "정리", "축소"),
+    "ACCUMULATE": (
+        "추가 매수",
+        "추가매수",
+        "비중 확대",
+        "분할 매수",
+        "분할매수",
+        "저가 매수",
+        "매수 관점",
+        "확대",
+    ),
+    "HOLD": (
+        "보유 유지",
+        "장기 보유",
+        "장기보유",
+        "홀딩",
+        "안 팔",
+        "안팔",
+        "계속 보유",
+        "유지",
+    ),
+    "REDUCE": (
+        "전량 매도",
+        "비중 축소",
+        "부분매도",
+        "부분 매도",
+        "익절",
+        "손절",
+        "정리",
+        "축소",
+    ),
 }
 _ANCHOR_RE = re.compile(r'<a id="entry-([^"]+)"></a>')
 _SUMMARY_RE = re.compile(r"- `trade_summary`: `(BUY|SELL) ")
@@ -122,6 +159,7 @@ _SIDE_KR = {"BUY": "매수", "SELL": "매도"}
 
 
 # --- context values supplied by the controller ------------------------------
+
 
 @dataclass(frozen=True)
 class QuoteContextV1:
@@ -238,6 +276,7 @@ class PositionV1:
 
 # --- formatting helpers -----------------------------------------------------
 
+
 def _pct(value: Decimal | None, *, signed: bool = True) -> str:
     if value is None:
         return "산출 불가"
@@ -252,8 +291,9 @@ def _chars(text: str) -> int:
 
 
 def _display_width(text: str) -> int:
-    return sum(2 if unicodedata.east_asian_width(char) in {"W", "F"} else 1
-               for char in text)
+    return sum(
+        2 if unicodedata.east_asian_width(char) in {"W", "F"} else 1 for char in text
+    )
 
 
 def _center_display(text: str, width: int) -> str:
@@ -299,14 +339,17 @@ def _returns_table(card: DecisionCardV1) -> tuple[str, str]:
     """Two rows for a monospace block: ``5일 / 20일 / 120일`` centred over
     ``-4.9% / -0.7% / +70.1%`` by CJK display width."""
     labels = ("5일", "20일", "120일")
-    values = tuple(_pct(_factor(card, name))
-                   for name in ("ret_5", "ret_20", "ret_120"))
-    widths = tuple(max(_display_width(label), _display_width(value))
-                   for label, value in zip(labels, values))
-    label_row = RETURN_SEPARATOR.join(_center_display(label, width)
-                                      for label, width in zip(labels, widths)).rstrip()
-    value_row = RETURN_SEPARATOR.join(_center_display(value, width)
-                                      for value, width in zip(values, widths)).rstrip()
+    values = tuple(_pct(_factor(card, name)) for name in ("ret_5", "ret_20", "ret_120"))
+    widths = tuple(
+        max(_display_width(label), _display_width(value))
+        for label, value in zip(labels, values)
+    )
+    label_row = RETURN_SEPARATOR.join(
+        _center_display(label, width) for label, width in zip(labels, widths)
+    ).rstrip()
+    value_row = RETURN_SEPARATOR.join(
+        _center_display(value, width) for value, width in zip(values, widths)
+    ).rstrip()
     return label_row, value_row
 
 
@@ -343,7 +386,7 @@ def telegram_pre_message(text: str) -> tuple:
 
 def format_price(value: Decimal, currency: str) -> str:
     if currency == "KRW":
-        return f"{int(value.quantize(Decimal('1'), rounding=ROUND_HALF_UP)):,}원"
+        return f"{int(value.quantize(Decimal(1), rounding=ROUND_HALF_UP)):,}원"
     if currency == "USD":
         return f"${value.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP):,.2f}"
     return f"{value.normalize():f} {currency}"
@@ -363,7 +406,10 @@ def _factor(card: DecisionCardV1, name: str) -> Decimal | None:
     return None
 
 
-ZONE_RSI_LOWER, ZONE_RSI_UPPER = Decimal(45), Decimal(65)  # quant_discovery_entry TREND_PULLBACK contract
+ZONE_RSI_LOWER, ZONE_RSI_UPPER = (
+    Decimal(45),
+    Decimal(65),
+)  # quant_discovery_entry TREND_PULLBACK contract
 
 
 def entry_zone_condition_checks(card: DecisionCardV1) -> tuple:
@@ -374,8 +420,11 @@ def entry_zone_condition_checks(card: DecisionCardV1) -> tuple:
     factors ``close/SMA − 1``: SMA20 > SMA60 ⇔ close_to_sma_60 > close_to_sma_20
     (both ratios share the same close). The ATR/support conditions need the
     price series and are NOT re-derived here."""
-    sma_20, sma_60, rsi = (_factor(card, "close_to_sma_20"), _factor(card, "close_to_sma_60"),
-                           _factor(card, "rsi_14"))
+    sma_20, sma_60, rsi = (
+        _factor(card, "close_to_sma_20"),
+        _factor(card, "close_to_sma_60"),
+        _factor(card, "rsi_14"),
+    )
     checks = []
     if sma_20 is None:
         checks.append(("종가>SMA20", None, "20일선 대비 지표 없음"))
@@ -384,13 +433,25 @@ def entry_zone_condition_checks(card: DecisionCardV1) -> tuple:
     if sma_20 is None or sma_60 is None:
         checks.append(("SMA20>SMA60", None, "20일선/60일선 대비 지표 없음"))
     else:
-        checks.append(("SMA20>SMA60", sma_60 > sma_20,
-                       f"60일선 대비 {_pct(sma_60)} vs 20일선 대비 {_pct(sma_20)}"))
+        checks.append(
+            (
+                "SMA20>SMA60",
+                sma_60 > sma_20,
+                f"60일선 대비 {_pct(sma_60)} vs 20일선 대비 {_pct(sma_20)}",
+            )
+        )
     if rsi is None:
-        checks.append((f"RSI14 {ZONE_RSI_LOWER}~{ZONE_RSI_UPPER}", None, "RSI14 지표 없음"))
+        checks.append(
+            (f"RSI14 {ZONE_RSI_LOWER}~{ZONE_RSI_UPPER}", None, "RSI14 지표 없음")
+        )
     else:
-        checks.append((f"RSI14 {ZONE_RSI_LOWER}~{ZONE_RSI_UPPER}", ZONE_RSI_LOWER <= rsi <= ZONE_RSI_UPPER,
-                       f"RSI14 {rsi.quantize(Decimal('0.1'))}"))
+        checks.append(
+            (
+                f"RSI14 {ZONE_RSI_LOWER}~{ZONE_RSI_UPPER}",
+                ZONE_RSI_LOWER <= rsi <= ZONE_RSI_UPPER,
+                f"RSI14 {rsi.quantize(Decimal('0.1'))}",
+            )
+        )
     return tuple(checks)
 
 
@@ -406,9 +467,19 @@ def _zone_unavailable_lines(card: DecisionCardV1) -> tuple:
     manufactured zone, a softened rule or a blanket "자료 미연결".
     ``verdict`` is "미성립" or "판정 불가"."""
     checks = entry_zone_condition_checks(card)
-    failed = [f"{label} 불충족 · {detail}" for label, passed, detail in checks if passed is False]
-    unknown = [f"{label} 판정 불가 · {detail}" for label, passed, detail in checks if passed is None]
-    met = [f"{label} 충족 · {detail}" for label, passed, detail in checks if passed is True]
+    failed = [
+        f"{label} 불충족 · {detail}"
+        for label, passed, detail in checks
+        if passed is False
+    ]
+    unknown = [
+        f"{label} 판정 불가 · {detail}"
+        for label, passed, detail in checks
+        if passed is None
+    ]
+    met = [
+        f"{label} 충족 · {detail}" for label, passed, detail in checks if passed is True
+    ]
     # a missing required factor wins the verdict: "지표 연결됨" may only be claimed
     # when every required indicator is present (review M1, 2026-09-04)
     if unknown:
@@ -420,7 +491,11 @@ def _zone_unavailable_lines(card: DecisionCardV1) -> tuple:
     else:
         verdict, situation = "미성립", "지표 조건 충족"
     lines = [f"관찰구간 : {verdict}"]
-    lines += [line for item in (situation, *failed, *unknown, *met) for line in wrap_mobile(item)]
+    lines += [
+        line
+        for item in (situation, *failed, *unknown, *met)
+        for line in wrap_mobile(item)
+    ]
     if not failed and not unknown:
         lines.append("ATR14/지지선 : 시계열 미확보 · 리포트 밖")
     return lines, verdict
@@ -446,15 +521,19 @@ def _vol_label(value: Decimal) -> str:
 
 def _private(text: str) -> bool:
     lowered = text.lower()
-    return contains_private_markers(text) or any(marker in lowered for marker in _EXTRA_PRIVATE)
+    return contains_private_markers(text) or any(
+        marker in lowered for marker in _EXTRA_PRIVATE
+    )
 
 
 def extract_playbook_layers(text: str) -> tuple:
     """(2층 사용자의 원문, 1층 헤르의 생각) raw blocks; None when a block is absent."""
+
     def between(start: str, end: str):
         if text.count(start) != 1 or text.count(end) != 1:
             return None
         return text.split(start, 1)[1].split(end, 1)[0]
+
     return between(THESIS_START, THESIS_END), between(HERMES_START, HERMES_END)
 
 
@@ -462,12 +541,17 @@ def _layer_present(block) -> bool:
     if block is None:
         return False
     lines = [line.strip() for line in block.replace("\r\n", "\n").split("\n")]
-    return any(line and not line.startswith(("## ", "> ", "- `", "<!--")) for line in lines)
+    return any(
+        line and not line.startswith(("## ", "> ", "- `", "<!--")) for line in lines
+    )
 
 
 def classify_stance(text: str) -> str | None:
     """Deterministic keyword classification; None when no clear majority."""
-    scores = {stance: sum(text.count(word) for word in words) for stance, words in _STANCE_WORDS.items()}
+    scores = {
+        stance: sum(text.count(word) for word in words)
+        for stance, words in _STANCE_WORDS.items()
+    }
     best = max(scores.values())
     if best == 0:
         return None
@@ -481,11 +565,18 @@ def synthesize_playbook(text: str, *, scope_label: str) -> PlaybookSynthesisV1:
     entries = len(_ANCHOR_RE.findall(text))
     sides = _SUMMARY_RE.findall(text)
     stance = classify_stance("\n".join(block for block in (hermes, thesis) if block))
-    return PlaybookSynthesisV1(scope_label, _layer_present(thesis), _layer_present(hermes),
-                               entries, sides[0] if sides else None, stance)
+    return PlaybookSynthesisV1(
+        scope_label,
+        _layer_present(thesis),
+        _layer_present(hermes),
+        entries,
+        sides[0] if sides else None,
+        stance,
+    )
 
 
 # --- weights -------------------------------------------------------------------
+
 
 def fx_usd_krw_from_evidence(envelope, *, now: datetime) -> tuple:
     """(rate, None) for a valid canonical Toss USD/KRW envelope, else (None, reason)."""
@@ -497,9 +588,15 @@ def fx_usd_krw_from_evidence(envelope, *, now: datetime) -> tuple:
         rate = Decimal(envelope.rate)
     except (InvalidOperation, TypeError, ValueError):
         return None, "환율 값 불량"
-    if (envelope.schema_version != 1 or envelope.source != FX_SOURCE or envelope.base_currency != "USD"
-            or envelope.quote_currency != "KRW" or not rate.is_finite() or rate <= 0
-            or envelope.max_age_seconds != FX_MAX_AGE_SECONDS_V1):
+    if (
+        envelope.schema_version != 1
+        or envelope.source != FX_SOURCE
+        or envelope.base_currency != "USD"
+        or envelope.quote_currency != "KRW"
+        or not rate.is_finite()
+        or rate <= 0
+        or envelope.max_age_seconds != FX_MAX_AGE_SECONDS_V1
+    ):
         return None, "환율 근거 계약 불일치"
     try:
         if fx_content_hash_v1(envelope) != envelope.content_hash:
@@ -507,13 +604,16 @@ def fx_usd_krw_from_evidence(envelope, *, now: datetime) -> tuple:
     except Exception:
         return None, "환율 근거 해시 불일치"
     now_utc = now.astimezone(envelope.observed_at.tzinfo)
-    if not (envelope.valid_from <= now_utc <= envelope.valid_until) \
-            or now_utc - envelope.observed_at > timedelta(seconds=FX_MAX_AGE_SECONDS_V1):
+    if not (
+        envelope.valid_from <= now_utc <= envelope.valid_until
+    ) or now_utc - envelope.observed_at > timedelta(seconds=FX_MAX_AGE_SECONDS_V1):
         return None, "환율 근거 유효기간 경과"
     return rate, None
 
 
-def compute_weights(positions: tuple, *, fx_usd_krw: Decimal | None, fx_reason: str | None) -> dict:
+def compute_weights(
+    positions: tuple, *, fx_usd_krw: Decimal | None, fx_reason: str | None
+) -> dict:
     """{(scope_key, market, symbol): WeightContextV1} over exact labelled denominators.
 
     Market weight: this position's valuation over the sum of ALL stock
@@ -526,7 +626,9 @@ def compute_weights(positions: tuple, *, fx_usd_krw: Decimal | None, fx_reason: 
     result = {}
     for position in positions:
         group = by_market[(position.scope_key, position.market)]
-        valuation = None if position.price is None else position.quantity * position.price
+        valuation = (
+            None if position.price is None else position.quantity * position.price
+        )
         market_label = f"{position.scope_label} {position.market} 주식"
         if valuation is None:
             market = (None, market_label, position.price_reason or "현재가 미확인")
@@ -535,9 +637,14 @@ def compute_weights(positions: tuple, *, fx_usd_krw: Decimal | None, fx_reason: 
             market = (None, market_label, f"같은 시장 보유 {missing}종목 시세 미확인")
         else:
             denominator = sum(other.quantity * other.price for other in group)
-            market = (valuation / denominator if denominator > 0 else None, market_label,
-                      None if denominator > 0 else "평가액 0")
-        scope_positions = [other for other in positions if other.scope_key == position.scope_key]
+            market = (
+                valuation / denominator if denominator > 0 else None,
+                market_label,
+                None if denominator > 0 else "평가액 0",
+            )
+        scope_positions = [
+            other for other in positions if other.scope_key == position.scope_key
+        ]
         if valuation is None:
             total = (None, position.price_reason or "현재가 미확인")
         elif any(other.price is None for other in scope_positions):
@@ -547,18 +654,24 @@ def compute_weights(positions: tuple, *, fx_usd_krw: Decimal | None, fx_reason: 
             if needs_fx and fx_usd_krw is None:
                 total = (None, fx_reason or "USD/KRW 환율 근거 없음")
             else:
+
                 def krw(other):
                     value = other.quantity * other.price
                     return value if other.currency == "KRW" else value * fx_usd_krw
+
                 denominator = sum(krw(other) for other in scope_positions)
-                total = (krw(position) / denominator if denominator > 0 else None,
-                         None if denominator > 0 else "평가액 0")
-        result[(position.scope_key, position.market, position.symbol)] = WeightContextV1(
-            market[0], market[1], market[2], total[0], total[1])
+                total = (
+                    krw(position) / denominator if denominator > 0 else None,
+                    None if denominator > 0 else "평가액 0",
+                )
+        result[(position.scope_key, position.market, position.symbol)] = (
+            WeightContextV1(market[0], market[1], market[2], total[0], total[1])
+        )
     return result
 
 
 # --- standings --------------------------------------------------------------
+
 
 def compute_standings(cards: tuple) -> dict:
     """Competition ordinals per factor over the supplied cards only."""
@@ -584,16 +697,23 @@ def compute_standings(cards: tuple) -> dict:
     headline = {}
     means = {}
     for card in cards:
-        ordinals = [per_factor[name][card.symbol][0] for name, _ in STANDING_FACTORS
-                    if card.symbol in per_factor[name]]
+        ordinals = [
+            per_factor[name][card.symbol][0]
+            for name, _ in STANDING_FACTORS
+            if card.symbol in per_factor[name]
+        ]
         if ordinals:
             means[card.symbol] = Decimal(sum(ordinals)) / Decimal(len(ordinals))
     for symbol, mean in means.items():
-        headline[symbol] = (1 + sum(1 for other in means.values() if other < mean), len(means))
+        headline[symbol] = (
+            1 + sum(1 for other in means.values() if other < mean),
+            len(means),
+        )
     return {"factors": per_factor, "headline": headline, "sample_size": len(cards)}
 
 
 # --- judgment (deterministic, provisional) ----------------------------------
+
 
 def _trend(card: DecisionCardV1) -> str:
     ret_120, sma_120 = _factor(card, "ret_120"), _factor(card, "close_to_sma_120")
@@ -606,11 +726,24 @@ def _trend(card: DecisionCardV1) -> str:
     return "mixed"
 
 
-def _judgment(card: DecisionCardV1, context: CardContextV1, standings: dict, *, analysed: bool = False) -> dict:
+def _judgment(
+    card: DecisionCardV1,
+    context: CardContextV1,
+    standings: dict,
+    *,
+    analysed: bool = False,
+) -> dict:
     ret_20, ret_120 = _factor(card, "ret_20"), _factor(card, "ret_120")
-    sma_20, sma_60, sma_120 = (_factor(card, "close_to_sma_20"), _factor(card, "close_to_sma_60"),
-                               _factor(card, "close_to_sma_120"))
-    rsi, vol, drawdown = _factor(card, "rsi_14"), _factor(card, "realized_vol_63"), _factor(card, "max_drawdown")
+    sma_20, sma_60, sma_120 = (
+        _factor(card, "close_to_sma_20"),
+        _factor(card, "close_to_sma_60"),
+        _factor(card, "close_to_sma_120"),
+    )
+    rsi, vol, drawdown = (
+        _factor(card, "rsi_14"),
+        _factor(card, "realized_vol_63"),
+        _factor(card, "max_drawdown"),
+    )
     grounds, counter = [], []
     if ret_120 is not None:
         (grounds if ret_120 > 0 else counter).append(f"120일 수익률 {_pct(ret_120)}")
@@ -622,15 +755,23 @@ def _judgment(card: DecisionCardV1, context: CardContextV1, standings: dict, *, 
         (grounds if ret_20 > 0 else counter).append(f"20일 수익률 {_pct(ret_20)}")
     if rsi is not None:
         label = _rsi_label(rsi)
-        (counter if label == "단기 과열권" else grounds).append(f"RSI14 {rsi.quantize(Decimal('0.1'))} ({label})")
+        (counter if label == "단기 과열권" else grounds).append(
+            f"RSI14 {rsi.quantize(Decimal('0.1'))} ({label})"
+        )
     if vol is not None:
         label = _vol_label(vol)
-        (counter if label in ("높음", "매우 높음") else grounds).append(f"63일 변동성 {_pct(vol, signed=False)} ({label})")
+        (counter if label in ("높음", "매우 높음") else grounds).append(
+            f"63일 변동성 {_pct(vol, signed=False)} ({label})"
+        )
     if drawdown is not None:
-        (counter if drawdown <= Decimal("-0.3") else grounds).append(f"최대낙폭 {_pct(drawdown)}")
+        (counter if drawdown <= Decimal("-0.3") else grounds).append(
+            f"최대낙폭 {_pct(drawdown)}"
+        )
 
     trend_kind = _trend(card)
-    short_down = (ret_20 is not None and ret_20 < 0) or (sma_20 is not None and sma_20 < 0)
+    short_down = (ret_20 is not None and ret_20 < 0) or (
+        sma_20 is not None and sma_20 < 0
+    )
     overheated = rsi is not None and rsi >= 70
     heavy_vol = vol is not None and vol >= Decimal("0.5")
     deep_drawdown = drawdown is not None and drawdown <= Decimal("-0.3")
@@ -645,9 +786,20 @@ def _judgment(card: DecisionCardV1, context: CardContextV1, standings: dict, *, 
         trend = "추세 판단에 필요한 120일 수익률이 없습니다."
     else:
         trend = "추세 방향이 혼재되어 방향성 근거가 약합니다."
-    burdens = [name for flag, name in ((overheated, "과열"), (heavy_vol, "변동성"),
-                                       (deep_drawdown, "낙폭")) if flag]
-    burden = ("·".join(burdens) + " 부담이 큽니다.") if burdens else "가격 부담 지표는 뚜렷하지 않습니다."
+    burdens = [
+        name
+        for flag, name in (
+            (overheated, "과열"),
+            (heavy_vol, "변동성"),
+            (deep_drawdown, "낙폭"),
+        )
+        if flag
+    ]
+    burden = (
+        ("·".join(burdens) + " 부담이 큽니다.")
+        if burdens
+        else "가격 부담 지표는 뚜렷하지 않습니다."
+    )
 
     zone = card.entry_zone
     if zone is None:
@@ -670,18 +822,32 @@ def _judgment(card: DecisionCardV1, context: CardContextV1, standings: dict, *, 
         new_entry = "진입구간 없음 (무효화 기준 하회)"
     else:
         new_entry = "관찰구간 내 · 확인 신호 대기"
-    existing = ("플레이북의 익절·비중상한 점검" if held and context.playbook is not None
-                else "보유 리스크 점검 (플레이북 없음)" if held
-                else "해당 없음 (미보유)")
+    existing = (
+        "플레이북의 익절·비중상한 점검"
+        if held and context.playbook is not None
+        else "보유 리스크 점검 (플레이북 없음)"
+        if held
+        else "해당 없음 (미보유)"
+    )
     sample = standings["headline"].get(card.symbol, (None, 0))[1]
     ai_note = "AI 맥락 분석 아래" if analysed else "AI 분석 미연결"
     return {
         "summary": (trend, burden, stance),
-        "grounds": tuple(grounds), "counter": tuple(counter),
+        "grounds": tuple(grounds),
+        "counter": tuple(counter),
         "confidence": f"낮음 — 비교군 {sample}종목 · 규칙 기반 · {ai_note}",
-        "change": "관찰구간 성립/무효화 확정, 비교군 확장" + ("" if analysed else ", AI 분석 연결") + " 시 재판단",
-        "actions": (("신규 매수", new_entry), ("기존 보유", existing),
-                    ("재검토", "다음 완료 세션 리포트" + (" · 플레이북 조건 재확인" if context.playbook else ""))),
+        "change": "관찰구간 성립/무효화 확정, 비교군 확장"
+        + ("" if analysed else ", AI 분석 연결")
+        + " 시 재판단",
+        "actions": (
+            ("신규 매수", new_entry),
+            ("기존 보유", existing),
+            (
+                "재검토",
+                "다음 완료 세션 리포트"
+                + (" · 플레이북 조건 재확인" if context.playbook else ""),
+            ),
+        ),
     }
 
 
@@ -697,9 +863,11 @@ _AGREEMENT = {
     ("HOLD", "down"): ("주의", "보유 유지 기조이나 Quant는 하락 근거 — 재점검 필요"),
     ("REDUCE", "up"): ("상충", "축소·정리 기조이나 Quant는 상승 근거"),
 }
-_IMPACT = {"일치": "현재 판단을 지지 — 플레이북 조건(익절·비중상한) 재확인 후 유지",
-           "상충": "플레이북과 Quant 근거가 갈림 — 플레이북 재검토 또는 해석 정정 필요",
-           "주의": "보유 유지 근거 약화 — 무효화 조건과 플레이북 손절 규칙 재확인"}
+_IMPACT = {
+    "일치": "현재 판단을 지지 — 플레이북 조건(익절·비중상한) 재확인 후 유지",
+    "상충": "플레이북과 Quant 근거가 갈림 — 플레이북 재검토 또는 해석 정정 필요",
+    "주의": "보유 유지 근거 약화 — 무효화 조건과 플레이북 손절 규칙 재확인",
+}
 
 
 def playbook_agreement(synthesis: PlaybookSynthesisV1 | None, trend_kind: str) -> tuple:
@@ -707,9 +875,17 @@ def playbook_agreement(synthesis: PlaybookSynthesisV1 | None, trend_kind: str) -
     if synthesis is None:
         return ("해당 없음", "플레이북 없음", "플레이북 없이 Quant 근거만으로 판단")
     if synthesis.stance is None:
-        return ("대조 불가", "기조 미분류 · 매수/보유/축소 키워드 불명확", "영향 판단 보류 — 플레이북 기조 명시 필요")
+        return (
+            "대조 불가",
+            "기조 미분류 · 매수/보유/축소 키워드 불명확",
+            "영향 판단 보류 — 플레이북 기조 명시 필요",
+        )
     if trend_kind in ("mixed", "unknown"):
-        return ("대조 보류", "Quant 추세 근거 혼재/부재", "영향 판단 보류 — 다음 완료 세션 리포트 대기")
+        return (
+            "대조 보류",
+            "Quant 추세 근거 혼재/부재",
+            "영향 판단 보류 — 다음 완료 세션 리포트 대기",
+        )
     verdict, reason = _AGREEMENT[(synthesis.stance, trend_kind)]
     return verdict, reason, _IMPACT[verdict]
 
@@ -720,11 +896,19 @@ def _playbook_lines(context: CardContextV1, trend_kind: str) -> list:
     synthesis = context.playbook
     if synthesis is None:
         reason = context.playbook_unavailable_reason or "플레이북 문서 없음"
-        return [_SECTION_PLAYBOOK, "없음" if reason == "플레이북 문서 없음" else f"확인 불가 · {reason}"]
+        return [
+            _SECTION_PLAYBOOK,
+            "없음" if reason == "플레이북 문서 없음" else f"확인 불가 · {reason}",
+        ]
     stance = STANCE_LABELS.get(synthesis.stance)
-    lines = [_SECTION_PLAYBOOK]  # plain heading: the account is already named by the holdings heading
+    lines = [
+        _SECTION_PLAYBOOK
+    ]  # plain heading: the account is already named by the holdings heading
     if synthesis.has_hermes_current:
-        lines.append(f"{HERMES_SYNTHESIS_LABEL}: " + (f"{stance} 기조" if stance else "기조 미분류"))
+        lines.append(
+            f"{HERMES_SYNTHESIS_LABEL}: "
+            + (f"{stance} 기조" if stance else "기조 미분류")
+        )
     else:
         lines.append(f"{HERMES_SYNTHESIS_LABEL}: 없음")
         if stance:
@@ -733,22 +917,37 @@ def _playbook_lines(context: CardContextV1, trend_kind: str) -> list:
         lines.append("사용자 원문(2층): 없음")
     if synthesis.layer3_entries:
         latest = _SIDE_KR.get(synthesis.latest_trade_side)
-        lines.append(f"매매사유 : {synthesis.layer3_entries}건" + (f" · 최근 {latest}" if latest else ""))
+        lines.append(
+            f"매매사유 : {synthesis.layer3_entries}건"
+            + (f" · 최근 {latest}" if latest else "")
+        )
     else:
         lines.append("매매사유 : 없음")
     verdict, reason, impact = playbook_agreement(synthesis, trend_kind)
     # the fixed agreement/impact sentences break at their dash into phone-width lines
-    tail = [f"Quant 대조 : {verdict}", *reason.split(" — "), *f"판단 영향 : {impact}".split(" — ")]
+    tail = [
+        f"Quant 대조 : {verdict}",
+        *reason.split(" — "),
+        *f"판단 영향 : {impact}".split(" — "),
+    ]
     return lines + [line for item in tail for line in wrap_mobile(item)]
 
 
 # --- conditional-order rendering -----------------------------------------------
 
+
 def grouped_conditional_orders(orders: tuple) -> tuple:
     """(shown, hidden_count): BUY ≤ cap, then SELL ≤ cap, then side-unknown
     ≤ cap, each group in the read's own order; deterministic."""
-    groups = {side: [order for order in orders if order.side == side] for side in (*ORDER_SIDES, None)}
-    shown = [order for side in (*ORDER_SIDES, None) for order in groups[side][:CONDITIONAL_SIDE_CAP]]
+    groups = {
+        side: [order for order in orders if order.side == side]
+        for side in (*ORDER_SIDES, None)
+    }
+    shown = [
+        order
+        for side in (*ORDER_SIDES, None)
+        for order in groups[side][:CONDITIONAL_SIDE_CAP]
+    ]
     return tuple(shown), len(orders) - len(shown)
 
 
@@ -760,22 +959,42 @@ def _order_lines(index: int, order: ConditionalOrderContextV1, currency: str) ->
     if trigger is not None and price is not None and trigger == price:
         lines.append(f"발동/주문가 : {_price(trigger, currency)}")
     else:
-        lines.append("발동가 : 미상" if trigger is None else f"발동가 : {_price(trigger, currency)}")
+        lines.append(
+            "발동가 : 미상"
+            if trigger is None
+            else f"발동가 : {_price(trigger, currency)}"
+        )
         if price is not None:
             lines.append(f"주문가 : {_price(price, currency)}")
         else:
-            lines.append("주문가 : 시장가" if order.order_type == "MARKET" else "주문가 : 미상")
+            lines.append(
+                "주문가 : 시장가" if order.order_type == "MARKET" else "주문가 : 미상"
+            )
     side = _SIDE_KR.get(order.side)
-    lines.append(f"거래구분 : {side} {order.quantity}주" if side else f"거래구분 : 확인 불가 · {order.quantity}주")
-    lines.append("만료일 : 미상" if order.expire_date is None else f"만료일 : {order.expire_date}")
+    lines.append(
+        f"거래구분 : {side} {order.quantity}주"
+        if side
+        else f"거래구분 : 확인 불가 · {order.quantity}주"
+    )
+    lines.append(
+        "만료일 : 미상"
+        if order.expire_date is None
+        else f"만료일 : {order.expire_date}"
+    )
     return lines
 
 
-def _conditional_lines(card: DecisionCardV1, context: CardContextV1, currency: str, unavailable: list) -> list:
+def _conditional_lines(
+    card: DecisionCardV1, context: CardContextV1, currency: str, unavailable: list
+) -> list:
     lines = [CONDITIONAL_HEADING]
     conditional = context.conditional
     if conditional is None or conditional.status == "UNAVAILABLE":
-        reason = "조회 미실행" if conditional is None else (conditional.reason or "확인 불가")
+        reason = (
+            "조회 미실행"
+            if conditional is None
+            else (conditional.reason or "확인 불가")
+        )
         lines.append(f"확인 불가 · {reason}")
         unavailable.append((f"{card.symbol}:{_SECTION_CONDITIONAL}", reason))
         return lines
@@ -794,7 +1013,14 @@ def _conditional_lines(card: DecisionCardV1, context: CardContextV1, currency: s
 
 # --- holdings rendering ---------------------------------------------------------
 
-def _holdings_lines(card: DecisionCardV1, context: CardContextV1, market: str, grounded: set, unavailable: list) -> list:
+
+def _holdings_lines(
+    card: DecisionCardV1,
+    context: CardContextV1,
+    market: str,
+    grounded: set,
+    unavailable: list,
+) -> list:
     """Personal-account positions only (the controller never passes retirement
     positions). Market weight over personal stock of the same market. There is
     no account-total line: the KR+US stock ratio is not an account total, so
@@ -802,7 +1028,9 @@ def _holdings_lines(card: DecisionCardV1, context: CardContextV1, market: str, g
     lines = [HOLDINGS_HEADING]
     if not context.holdings_available:
         lines.append("산출 불가 · 보유 스토어 미확인")
-        unavailable.append((f"{card.symbol}:{_SECTION_HOLDINGS}", "holdings store unavailable"))
+        unavailable.append(
+            (f"{card.symbol}:{_SECTION_HOLDINGS}", "holdings store unavailable")
+        )
         return lines
     if not context.holdings:
         lines.append("미보유")
@@ -818,52 +1046,76 @@ def _holdings_lines(card: DecisionCardV1, context: CardContextV1, market: str, g
             continue
         if weight.market_weight is None:
             # the exact evidence reason on its own line(s), split only at its own seams
-            lines += [f"비중 : {label} 산출 불가", *wrap_mobile(weight.market_reason or "사유 미상")]
-            unavailable.append((f"{card.symbol}:비중", weight.market_reason or "unavailable"))
+            lines += [
+                f"비중 : {label} 산출 불가",
+                *wrap_mobile(weight.market_reason or "사유 미상"),
+            ]
+            unavailable.append(
+                (f"{card.symbol}:비중", weight.market_reason or "unavailable")
+            )
         else:
             lines.append(f"비중 : {label} {_pct(weight.market_weight, signed=False)}")
             grounded.add("비중")
         if weight.total_weight is None:
-            unavailable.append((f"{card.symbol}:계좌 전체 비중", weight.total_reason or "unavailable"))
+            unavailable.append(
+                (f"{card.symbol}:계좌 전체 비중", weight.total_reason or "unavailable")
+            )
     grounded.add(_SECTION_HOLDINGS)
     return lines
 
 
 # --- validated contextual analysis rendering -------------------------------------
 
+
 def _analysis_lines(analysis) -> list:
     """Concise ``맥락 분석`` from an already-validated ContextualAnalysisV1 only;
     every statement carries the labels of the evidence it connects."""
+
     def cite(entry) -> str:
-        return " (" + ", ".join(analysis.labels[item] for item in entry["evidence_ids"]) + ")"
+        return (
+            " ("
+            + ", ".join(analysis.labels[item] for item in entry["evidence_ids"])
+            + ")"
+        )
 
     def bullets(title, entries) -> list:
         return [title] + [f"• {entry['statement']}{cite(entry)}" for entry in entries]
+
     assessment, confidence = analysis.conditional_order_assessment, analysis.confidence
     lines = [ANALYSIS_LABEL, analysis.summary, ""]
     lines += bullets("근거 관계", analysis.evidence_relations)
-    lines += [f"조건주문 평가: {assessment['verdict']} — {assessment['statement']}{cite(assessment)}"]
+    lines += [
+        f"조건주문 평가: {assessment['verdict']} — {assessment['statement']}{cite(assessment)}"
+    ]
     lines += bullets("선택지", analysis.alternatives)
     lines += bullets("반대 근거", analysis.counterevidence)
     if analysis.assumptions:
         lines += bullets("가정", analysis.assumptions)
     lines += bullets("반증 조건", analysis.falsifiers)
-    lines += [f"확신도: {confidence['level']} — {confidence['statement']}{cite(confidence)}"]
+    lines += [
+        f"확신도: {confidence['level']} — {confidence['statement']}{cite(confidence)}"
+    ]
     lines += bullets("판단 변경 조건", analysis.change_conditions)
     return lines
 
 
 def _actionable_analysis_lines(analysis, action_lines=()) -> list:
     """Grounded values adjacent to each judgment; no generated text is trimmed."""
+
     def grounds(entry):
         lines = []
         for key in entry["evidence_ids"]:
             item = analysis.labels[key]
-            asof = re.sub(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})",
-                          lambda match: _kst(datetime.fromisoformat(match[0])) + " KST", item["asof"])
+            asof = re.sub(
+                r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})",
+                lambda match: _kst(datetime.fromisoformat(match[0])) + " KST",
+                item["asof"],
+            )
             # Keep the value and its date together, even for long factor labels.
             lines += wrap_mobile("근거: " + item["label"])
-            lines += wrap_mobile(" · ".join(value for value in (item["display"], asof) if value))
+            lines += wrap_mobile(
+                " · ".join(value for value in (item["display"], asof) if value)
+            )
         return lines
 
     conclusion_grounds = grounds(analysis.evidence_relations[0])
@@ -872,15 +1124,24 @@ def _actionable_analysis_lines(analysis, action_lines=()) -> list:
         lines = []
         for entry in entries:
             evidence = grounds(entry)
-            lines += wrap_mobile(entry['statement'])
+            lines += wrap_mobile(entry["statement"])
             if not dedupe_conclusion or evidence != conclusion_grounds:
                 lines += evidence
         return lines
 
-    lines = ["투자판단", *wrap_mobile(analysis.summary), *conclusion_grounds, "",
-             "왜 이렇게 보나", *statements(analysis.evidence_relations, dedupe_conclusion=True),
-             *statements(analysis.counterevidence, dedupe_conclusion=True), "",
-             "어떻게 대응하나", *statements(analysis.alternatives), *action_lines]
+    lines = [
+        "투자판단",
+        *wrap_mobile(analysis.summary),
+        *conclusion_grounds,
+        "",
+        "왜 이렇게 보나",
+        *statements(analysis.evidence_relations, dedupe_conclusion=True),
+        *statements(analysis.counterevidence, dedupe_conclusion=True),
+        "",
+        "어떻게 대응하나",
+        *statements(analysis.alternatives),
+        *action_lines,
+    ]
     if analysis.conditional_order_assessment is not None:
         lines += statements((analysis.conditional_order_assessment,))
     reversals = list(analysis.change_conditions)
@@ -898,6 +1159,7 @@ def _zone_action_lines(card, context, asof):
     establishes a current tick or counts elapsed sessions to renew a zone.
     """
     from tokmo.programs.quant_contextual_analysis import _zone_position
+
     zone = card.entry_zone
     if zone is None:
         checks = entry_zone_condition_checks(card)
@@ -909,53 +1171,86 @@ def _zone_action_lines(card, context, asof):
         if unknown:
             lines += ["추세눌림 판단 자료가 부족합니다.", *unknown]
         if not failed and not unknown:
-            lines += ["기본 지표 조건은 충족하지만 구간이 없는 이유는 이 리포트만으로 확인되지 않습니다."]
-        return [*lines, f"지표 기준 세션 {asof}", "매수 확인 신호는 아직 계산하지 않습니다."]
+            lines += [
+                "기본 지표 조건은 충족하지만 구간이 없는 이유는 이 리포트만으로 확인되지 않습니다."
+            ]
+        return [
+            *lines,
+            f"지표 기준 세션 {asof}",
+            "매수 확인 신호는 아직 계산하지 않습니다.",
+        ]
     currency = _currency(card.market.value)
     bounds = f"{_price(zone.lower, currency)}~{_price(zone.upper, currency)}"
     invalidation = _price(zone.invalidation, currency)
     use_quote = context.quote is not None and context.quote_age_valid
-    basis = '기록 가격은' if use_quote else '기준 세션 종가는'
+    basis = "기록 가격은" if use_quote else "기준 세션 종가는"
     price = context.quote.price if use_quote else zone.latest_close
-    position = _zone_position(price, zone)['position']
-    if position == 'above_upper':
+    position = _zone_position(price, zone)["position"]
+    if position == "above_upper":
         action = f"{basis} 관찰구간 {bounds} 위입니다. 추격을 보류하고 구간 재진입 여부를 확인합니다."
-    elif position == 'below_invalidation':
+    elif position == "below_invalidation":
         action = f"{basis} 무효화 {invalidation} 아래입니다. 관찰구간 {bounds}의 매수 판단을 재검토합니다."
-    elif position == 'inside':
+    elif position == "inside":
         action = f"{basis} 관찰구간 {bounds} 안입니다. 기준 세션의 구간 안에서 매수를 검토할 수 있습니다."
-    elif position == 'below_lower':
+    elif position == "below_lower":
         action = f"{basis} 관찰구간 {bounds} 하단 아래입니다. 구간 회복 여부를 확인한 뒤 매수를 재검토합니다."
     else:
         action = f"관찰구간 {bounds}은 기준 세션의 참고값입니다. 가격과 구간의 위치 확인 후 매수를 검토합니다."
-    validity = ("최신 저장 리포트 확인 · 가격 관측 7일 이내" if context.report_verified and context.quote_age_valid
-                else "과거/참고 조건 · " + (context.quote_validity_reason or "자료 최신성 미확인"))
-    return [action, f"무효화 {invalidation} 아래에서는 이 구간의 매수 근거가 유지되지 않습니다.",
-            f"구간 기준 {asof} · 유효 {zone.expiry_completed_sessions}완료 세션",
-            validity + " · 실시간 가격·구간 잔여 유효기간 미확인 · 매수 확인 신호 미계산."]
+    validity = (
+        "최신 저장 리포트 확인 · 가격 관측 7일 이내"
+        if context.report_verified and context.quote_age_valid
+        else "과거/참고 조건 · "
+        + (context.quote_validity_reason or "자료 최신성 미확인")
+    )
+    return [
+        action,
+        f"무효화 {invalidation} 아래에서는 이 구간의 매수 근거가 유지되지 않습니다.",
+        f"구간 기준 {asof} · 유효 {zone.expiry_completed_sessions}완료 세션",
+        validity + " · 실시간 가격·구간 잔여 유효기간 미확인 · 매수 확인 신호 미계산.",
+    ]
 
 
-def _actionable_card_block(card, context, standings, grounded, unavailable, analysis, *, asof=None):
+def _actionable_card_block(
+    card, context, standings, grounded, unavailable, analysis, *, asof=None
+):
     if analysis is None:
-        from tokmo.programs.quant_contextual_analysis import build_evidence_pack, _display_labels
-        labels = _display_labels(build_evidence_pack(card, context, completed_session_date=asof or '세션 미기록'))
+        from tokmo.programs.quant_contextual_analysis import (
+            _display_labels,
+            build_evidence_pack,
+        )
+
+        labels = _display_labels(
+            build_evidence_pack(
+                card, context, completed_session_date=asof or "세션 미기록"
+            )
+        )
     else:
         labels = analysis.labels
-    session = asof or next((value['asof'] for key, value in labels.items() if key.startswith('f:')), '세션 미기록')
+    session = asof or next(
+        (value["asof"] for key, value in labels.items() if key.startswith("f:")),
+        "세션 미기록",
+    )
     lines = ["• " + display_or_symbol(card.market.value, card.symbol, card.name)]
-    tags = (["보유 종목"] if context.holdings_available and context.holdings else [])
+    tags = ["보유 종목"] if context.holdings_available and context.holdings else []
     if context.watchlisted is True:
         tags.append("관심종목")
     if tags:
         lines.append(" · ".join(tags))
-    action = [line for item in _zone_action_lines(card, context, session) for line in wrap_mobile(item)]
+    action = [
+        line
+        for item in _zone_action_lines(card, context, session)
+        for line in wrap_mobile(item)
+    ]
     if analysis is None:
         judgment = _judgment(card, context, standings)
-        lines += ["", "투자판단", "규칙 기반 · AI 분석 미연결", judgment['summary'][0]]
-        if judgment['grounds']:
-            lines += ["근거: " + " · ".join(judgment['grounds']), f"지표 기준 세션 {session}"]
-        if judgment['counter']:
-            lines += ["반대 근거: " + " · ".join(judgment['counter'])]
+        lines += ["", "투자판단", "규칙 기반 · AI 분석 미연결", judgment["summary"][0]]
+        if judgment["grounds"]:
+            lines += [
+                "근거: " + " · ".join(judgment["grounds"]),
+                f"지표 기준 세션 {session}",
+            ]
+        if judgment["counter"]:
+            lines += ["반대 근거: " + " · ".join(judgment["counter"])]
         lines += ["", "어떻게 대응하나", *action]
         grounded.add(_SECTION_JUDGMENT)
     else:
@@ -964,50 +1259,88 @@ def _actionable_card_block(card, context, standings, grounded, unavailable, anal
     lines += ["", "지표 요약"]
     quote = context.quote
     if quote is not None:
-        lines += [f"기록 가격 {_price(quote.price, quote.currency)}",
-                  "가격 관측 " + _kst(quote.observed_at) + " KST" if quote.observed_at else "가격 관측시각 미기록"]
+        lines += [
+            f"기록 가격 {_price(quote.price, quote.currency)}",
+            "가격 관측 " + _kst(quote.observed_at) + " KST"
+            if quote.observed_at
+            else "가격 관측시각 미기록",
+        ]
     else:
         lines.append("기록 가격 없음")
     if card.entry_zone is not None:
-        lines.append(f"기준 세션 종가 {_price(card.entry_zone.latest_close, _currency(card.market.value))}")
+        lines.append(
+            f"기준 세션 종가 {_price(card.entry_zone.latest_close, _currency(card.market.value))}"
+        )
     lines += ["수익률", PRE_FENCE, *_returns_table(card), PRE_FENCE]
-    if _factor(card, 'ret_60') is not None:
+    if _factor(card, "ret_60") is not None:
         lines.append(f"60일 수익률 {_pct(_factor(card, 'ret_60'))}")
-    for key in ('f:rsi_14', 'f:realized_vol_63', 'f:max_drawdown'):
+    for key in ("f:rsi_14", "f:realized_vol_63", "f:max_drawdown"):
         item = labels.get(key)
         if item:
             lines.append(f"{item['label']} {item['display']}")
     lines.append(f"지표 기준 세션 {session}")
     if context.holdings_available and context.holdings:
-        holdings = _holdings_lines(card, context, card.market.value, grounded, unavailable)
+        holdings = _holdings_lines(
+            card, context, card.market.value, grounded, unavailable
+        )
         holdings[0] = "보유 현황"
-        lines += ["", *holdings,
-                  f"비중 기준: 각 보유계좌의 {MARKET_WEIGHT_LABELS.get(card.market.value, card.market.value)} 주식 평가액"]
-    sample = standings.get('headline', {}).get(card.symbol)
+        lines += [
+            "",
+            *holdings,
+            f"비중 기준: 각 보유계좌의 {MARKET_WEIGHT_LABELS.get(card.market.value, card.market.value)} 주식 평가액",
+        ]
+    sample = standings.get("headline", {}).get(card.symbol)
     if sample:
         lines += ["", f"이번 리포트의 비교 대상 {sample[1]}종목"]
-    grounded.add('지표')
+    grounded.add("지표")
     if quote is not None:
         grounded.add(_SECTION_QUOTE)
     else:
-        unavailable.append((f'{card.symbol}:{_SECTION_QUOTE}', context.quote_unavailable_reason or '시세 근거 없음'))
+        unavailable.append(
+            (
+                f"{card.symbol}:{_SECTION_QUOTE}",
+                context.quote_unavailable_reason or "시세 근거 없음",
+            )
+        )
     if card.entry_zone is not None:
         grounded.add(_SECTION_ZONE)
-        unavailable.append((f'{card.symbol}:확인 후 진입구간', 'confirmation rule not defined'))
+        unavailable.append(
+            (f"{card.symbol}:확인 후 진입구간", "confirmation rule not defined")
+        )
     else:
-        unavailable.append((f'{card.symbol}:{_SECTION_ZONE}', 'report entry_zone is null'))
+        unavailable.append(
+            (f"{card.symbol}:{_SECTION_ZONE}", "report entry_zone is null")
+        )
     if context.playbook is None:
-        unavailable.append((f'{card.symbol}:{_SECTION_PLAYBOOK}', context.playbook_unavailable_reason or '플레이북 문서 없음'))
+        unavailable.append(
+            (
+                f"{card.symbol}:{_SECTION_PLAYBOOK}",
+                context.playbook_unavailable_reason or "플레이북 문서 없음",
+            )
+        )
     # Keep the existing monospace table intact; wrap prose by display cells.
-    return "\n".join(line for item in lines for line in (wrap_mobile(item) if item else [""]))
+    return "\n".join(
+        line for item in lines for line in (wrap_mobile(item) if item else [""])
+    )
 
 
 # --- card rendering ---------------------------------------------------------
 
-def _card_block(card: DecisionCardV1, context: CardContextV1, standings: dict,
-                grounded: set, unavailable: list, analysis=None, *, asof=None) -> str:
+
+def _card_block(
+    card: DecisionCardV1,
+    context: CardContextV1,
+    standings: dict,
+    grounded: set,
+    unavailable: list,
+    analysis=None,
+    *,
+    asof=None,
+) -> str:
     if analysis is None or analysis.display_version == 2:
-        return _actionable_card_block(card, context, standings, grounded, unavailable, analysis, asof=asof)
+        return _actionable_card_block(
+            card, context, standings, grounded, unavailable, analysis, asof=asof
+        )
     market = card.market.value
     currency = _currency(market)
     lines = ["• " + display_or_symbol(market, card.symbol, card.name), ""]
@@ -1022,8 +1355,12 @@ def _card_block(card: DecisionCardV1, context: CardContextV1, standings: dict,
         membership.append("관심종목 미확인")
     else:
         membership.append("관심종목" if context.watchlisted else "관심종목 아님")
-    lines += ["선정 근거", "완료 세션 거래대금 상위 후보 (MARKET_DISCOVERY 리포트)",
-              " · ".join(membership), ""]
+    lines += [
+        "선정 근거",
+        "완료 세션 거래대금 상위 후보 (MARKET_DISCOVERY 리포트)",
+        " · ".join(membership),
+        "",
+    ]
     grounded.add("선정 근거")
 
     # current price: the price only (no separate observation time/source
@@ -1045,9 +1382,21 @@ def _card_block(card: DecisionCardV1, context: CardContextV1, standings: dict,
     return_labels, return_values = _returns_table(card)
     lines += ["수익률", PRE_FENCE, return_labels, return_values, PRE_FENCE, ""]
     rsi = _factor(card, "rsi_14")
-    lines += ["RSI14", "산출 불가" if rsi is None else f"{rsi.quantize(Decimal('0.1'))} — {_rsi_label(rsi)}", ""]
+    lines += [
+        "RSI14",
+        "산출 불가"
+        if rsi is None
+        else f"{rsi.quantize(Decimal('0.1'))} — {_rsi_label(rsi)}",
+        "",
+    ]
     vol = _factor(card, "realized_vol_63")
-    lines += ["63일 변동성", "산출 불가" if vol is None else f"{_pct(vol, signed=False)} — {_vol_label(vol)}", ""]
+    lines += [
+        "63일 변동성",
+        "산출 불가"
+        if vol is None
+        else f"{_pct(vol, signed=False)} — {_vol_label(vol)}",
+        "",
+    ]
     lines += ["최대낙폭", _pct(_factor(card, "max_drawdown")), ""]
     grounded.add("지표")
 
@@ -1056,7 +1405,9 @@ def _card_block(card: DecisionCardV1, context: CardContextV1, standings: dict,
     lines.append(_SECTION_STANDINGS)
     if headline is None:
         lines.append("산출 불가 — 비교 가능한 지표 없음")
-        unavailable.append((f"{card.symbol}:{_SECTION_STANDINGS}", "no comparable factor"))
+        unavailable.append(
+            (f"{card.symbol}:{_SECTION_STANDINGS}", "no comparable factor")
+        )
     else:
         lines.append(f"비교 대상 {headline[1]}종목 중 {headline[0]}위")
         lines.append("※ 리포트 카드 한정 비교 (보유∪관심 전체 아님)")
@@ -1065,7 +1416,10 @@ def _card_block(card: DecisionCardV1, context: CardContextV1, standings: dict,
         lines.append("")
         for name, label in STANDING_FACTORS:
             standing = standings["factors"][name].get(card.symbol)
-            lines.append(f"• {label}: " + ("산출 불가" if standing is None else f"{standing[0]}위"))
+            lines.append(
+                f"• {label}: "
+                + ("산출 불가" if standing is None else f"{standing[0]}위")
+            )
         grounded.add(_SECTION_STANDINGS)
     lines.append("")
 
@@ -1077,13 +1431,21 @@ def _card_block(card: DecisionCardV1, context: CardContextV1, standings: dict,
         momentum = standings["factors"]["ret_120"].get(card.symbol)
         stability = standings["factors"]["realized_vol_63"].get(card.symbol)
         defense = standings["factors"]["max_drawdown"].get(card.symbol)
+
         def tier(standing):
             if standing is None:
                 return "산출 불가"
             ordinal, sample = standing
-            return "최상위" if ordinal == 1 else ("하위권" if ordinal == sample else "중위권")
+            return (
+                "최상위"
+                if ordinal == 1
+                else ("하위권" if ordinal == sample else "중위권")
+            )
+
         lines.append(f"상승 강도는 비교군 {tier(momentum)},")
-        lines.append(f"가격 안정성은 {tier(stability)}, 낙폭 방어력은 {tier(defense)}입니다.")
+        lines.append(
+            f"가격 안정성은 {tier(stability)}, 낙폭 방어력은 {tier(defense)}입니다."
+        )
     lines.append("")
 
     # holdings context (personal account) + weights over exact denominators
@@ -1101,7 +1463,12 @@ def _card_block(card: DecisionCardV1, context: CardContextV1, standings: dict,
     trend_kind = _trend(card)
     lines += _playbook_lines(context, trend_kind)
     if context.playbook is None:
-        unavailable.append((f"{card.symbol}:{_SECTION_PLAYBOOK}", context.playbook_unavailable_reason or "플레이북 문서 없음"))
+        unavailable.append(
+            (
+                f"{card.symbol}:{_SECTION_PLAYBOOK}",
+                context.playbook_unavailable_reason or "플레이북 문서 없음",
+            )
+        )
     else:
         grounded.add(_SECTION_PLAYBOOK)
     lines.append("")
@@ -1113,31 +1480,49 @@ def _card_block(card: DecisionCardV1, context: CardContextV1, standings: dict,
         zone_lines, verdict = _zone_unavailable_lines(card)
         lines += zone_lines
         lines += ["", "무효화 조건", f"산출 불가 · 관찰구간 {verdict}"]
-        unavailable.append((f"{card.symbol}:{_SECTION_ZONE}", "report entry_zone is null"))
+        unavailable.append(
+            (f"{card.symbol}:{_SECTION_ZONE}", "report entry_zone is null")
+        )
     else:
-        lines.append(f"신규 진입 관찰구간: {_price(zone.lower, currency)}~{_price(zone.upper, currency)}")
-        lines.append(f"근거: {zone.setup_kind} · " + ", ".join(zone.evidence)
-                     + f" · 유효 {zone.expiry_completed_sessions}세션")
+        lines.append(
+            f"신규 진입 관찰구간: {_price(zone.lower, currency)}~{_price(zone.upper, currency)}"
+        )
+        lines.append(
+            f"근거: {zone.setup_kind} · "
+            + ", ".join(zone.evidence)
+            + f" · 유효 {zone.expiry_completed_sessions}세션"
+        )
         if context.quote is not None:
             gap = context.quote.price / zone.upper - 1
             if gap > 0:
-                lines.append(f"현재가는 관찰구간 상단보다 {_pct(gap, signed=False)} 높습니다.")
+                lines.append(
+                    f"현재가는 관찰구간 상단보다 {_pct(gap, signed=False)} 높습니다."
+                )
             elif context.quote.price < zone.lower:
-                lines.append(f"현재가는 관찰구간 하단보다 {_pct(-(context.quote.price / zone.lower - 1), signed=False)} 낮습니다.")
+                lines.append(
+                    f"현재가는 관찰구간 하단보다 {_pct(-(context.quote.price / zone.lower - 1), signed=False)} 낮습니다."
+                )
             else:
                 lines.append("현재가는 관찰구간 안에 있습니다.")
         lines.append("확인 후 진입구간: 산출 불가 — 확인 규칙 미정의")
-        lines += ["", "무효화 조건",
-                  f"{_price(zone.invalidation, currency)} 하향 이탈 또는",
-                  "핵심 실적 가설 훼손"]
+        lines += [
+            "",
+            "무효화 조건",
+            f"{_price(zone.invalidation, currency)} 하향 이탈 또는",
+            "핵심 실적 가설 훼손",
+        ]
         grounded.add(_SECTION_ZONE)
-        unavailable.append((f"{card.symbol}:확인 후 진입구간", "confirmation rule not defined"))
+        unavailable.append(
+            (f"{card.symbol}:확인 후 진입구간", "confirmation rule not defined")
+        )
     lines.append("")
 
     # judgment (deterministic); the validated AI analysis, when present, follows it
     analysed = analysis is not None and analysis.symbol == card.symbol
     judgment = _judgment(card, context, standings, analysed=analysed)
-    lines.append(f"{_SECTION_JUDGMENT} ({PROVISIONAL_LABEL_ANALYSED if analysed else PROVISIONAL_LABEL})")
+    lines.append(
+        f"{_SECTION_JUDGMENT} ({PROVISIONAL_LABEL_ANALYSED if analysed else PROVISIONAL_LABEL})"
+    )
     lines += list(judgment["summary"])
     lines.append("근거: " + (", ".join(judgment["grounds"]) or "없음"))
     lines.append("반대 근거: " + (", ".join(judgment["counter"]) or "없음"))
@@ -1162,12 +1547,23 @@ def _header(report: QuantRunReportV1) -> str:
     report digest, delivery label and order-write disclaimer stay out of the
     visible text (the digest lives in the receipt / group marker)."""
     identity = report.identity
-    session = identity.completed_session_date.isoformat() if identity.completed_session_date else "세션 미상"
-    return "\n".join((f"📊 퀀트 {identity.market.value}", session, f"카드 {len(report.cards)}종목"))
+    session = (
+        identity.completed_session_date.isoformat()
+        if identity.completed_session_date
+        else "세션 미상"
+    )
+    return "\n".join(
+        (f"📊 퀀트 {identity.market.value}", session, f"카드 {len(report.cards)}종목")
+    )
 
 
-def render_market_message(report: QuantRunReportV1, contexts, *, report_sha256: str,
-                          analyses: dict | None = None) -> MarketMessageV1:
+def render_market_message(
+    report: QuantRunReportV1,
+    contexts,
+    *,
+    report_sha256: str,
+    analyses: dict | None = None,
+) -> MarketMessageV1:
     """One market → one or more ≤4096-char parts split only at card boundaries.
     ``analyses`` maps symbol → validated ContextualAnalysisV1; absent/None keeps
     the deterministic card byte-identical."""
@@ -1185,13 +1581,28 @@ def render_market_message(report: QuantRunReportV1, contexts, *, report_sha256: 
         card_grounded: set = set()
         card_unavailable: list = []
         analysis = (analyses or {}).get(card.symbol)
-        block = _card_block(card, context, standings, card_grounded,
-                            card_unavailable, analysis, asof=(report.identity.completed_session_date.isoformat()
-                                  if report.identity.completed_session_date else "세션 미기록"))
-        if analysis is not None and analysis.display_version == 1 and _chars(header + "\n\n" + block) > MESSAGE_CHAR_CAP:
+        block = _card_block(
+            card,
+            context,
+            standings,
+            card_grounded,
+            card_unavailable,
+            analysis,
+            asof=(
+                report.identity.completed_session_date.isoformat()
+                if report.identity.completed_session_date
+                else "세션 미기록"
+            ),
+        )
+        if (
+            analysis is not None
+            and analysis.display_version == 1
+            and _chars(header + "\n\n" + block) > MESSAGE_CHAR_CAP
+        ):
             card_grounded, card_unavailable = set(), []
-            block = _card_block(card, context, standings, card_grounded,
-                                card_unavailable, None)
+            block = _card_block(
+                card, context, standings, card_grounded, card_unavailable, None
+            )
         blocks.append(block)
         grounded.update(card_grounded)
         unavailable.extend(card_unavailable)
@@ -1199,7 +1610,13 @@ def render_market_message(report: QuantRunReportV1, contexts, *, report_sha256: 
         codes = ", ".join(code.value for code in report.unavailable_codes) or "없음"
         blocks.append(f"카드 없음 — 리포트 unavailable: {codes}")
         unavailable.append(("market:cards", "report has no cards"))
-    if any(item is not None and item.display_version == 2 for item in (analyses or {}).values()) and _chars(header + "\n\n" + "\n\n".join(blocks)) > MESSAGE_CHAR_CAP:
+    if (
+        any(
+            item is not None and item.display_version == 2
+            for item in (analyses or {}).values()
+        )
+        and _chars(header + "\n\n" + "\n\n".join(blocks)) > MESSAGE_CHAR_CAP
+    ):
         raise ValueError("market payload exceeds message cap")
     parts: list = []
     current = header
@@ -1217,13 +1634,25 @@ def render_market_message(report: QuantRunReportV1, contexts, *, report_sha256: 
     for part in parts:
         if _private(part):
             raise ValueError("render_privacy")
-    session = (report.identity.completed_session_date.isoformat()
-               if report.identity.completed_session_date else "")
-    return MarketMessageV1(market, session, report.identity.identity_sha256, report_sha256,
-                           tuple(parts), tuple(sorted(grounded)), tuple(unavailable))
+    session = (
+        report.identity.completed_session_date.isoformat()
+        if report.identity.completed_session_date
+        else ""
+    )
+    return MarketMessageV1(
+        market,
+        session,
+        report.identity.identity_sha256,
+        report_sha256,
+        tuple(parts),
+        tuple(sorted(grounded)),
+        tuple(unavailable),
+    )
 
 
-def render_decision_cards(reports: dict, contexts: dict, analyses: dict | None = None) -> tuple:
+def render_decision_cards(
+    reports: dict, contexts: dict, analyses: dict | None = None
+) -> tuple:
     """Exactly one MarketMessageV1 per market in MARKETS order; a missing
     report renders an explicit 'no report' message rather than nothing."""
     messages = []
@@ -1231,13 +1660,33 @@ def render_decision_cards(reports: dict, contexts: dict, analyses: dict | None =
     for market in MARKETS:
         located = reports.get(market)
         if located is None:
-            text = "\n".join((f"📊 퀀트 {market}", "리포트 없음 — 검증된 완료 세션 리포트가 없습니다"))
-            messages.append(MarketMessageV1(market, "", "", "", (text,), (),
-                                            (("market:report", "no verified report"),)))
+            text = "\n".join(
+                (
+                    f"📊 퀀트 {market}",
+                    "리포트 없음 — 검증된 완료 세션 리포트가 없습니다",
+                )
+            )
+            messages.append(
+                MarketMessageV1(
+                    market,
+                    "",
+                    "",
+                    "",
+                    (text,),
+                    (),
+                    (("market:report", "no verified report"),),
+                )
+            )
             continue
         report, digest = located
-        messages.append(render_market_message(report, contexts.get(market, ()), report_sha256=digest,
-                                              analyses=analyses.get(market)))
+        messages.append(
+            render_market_message(
+                report,
+                contexts.get(market, ()),
+                report_sha256=digest,
+                analyses=analyses.get(market),
+            )
+        )
     return tuple(messages)
 
 
@@ -1246,9 +1695,16 @@ def render_decision_cards(reports: dict, contexts: dict, analyses: dict | None =
 NO_RESEND_STATUSES = frozenset({"UNKNOWN", "RESERVED"})
 
 
-def run_quant_telegram_card_canary(*, activation: dict, receipts, activation_id: str,
-                                   messages: tuple, telegram_send, now: datetime,
-                                   override_report_dedupe: bool = False) -> dict:
+def run_quant_telegram_card_canary(
+    *,
+    activation: dict,
+    receipts,
+    activation_id: str,
+    messages: tuple,
+    telegram_send,
+    now: datetime,
+    override_report_dedupe: bool = False,
+) -> dict:
     """Exactly-one bounded send per market of the rendered market messages.
 
     Markets are independent (live defect 2026-09-03): each market/report
@@ -1261,8 +1717,16 @@ def run_quant_telegram_card_canary(*, activation: dict, receipts, activation_id:
     permanent: no override can resend them. A SKIPPED part never started
     transport, so its report stays eligible for a later bounded recovery.
     """
-    result = {"off": None, "reserved": 0, "sent": 0, "failed": 0, "unknown": 0,
-              "skipped": 0, "deduped": {}, "parts": []}
+    result = {
+        "off": None,
+        "reserved": 0,
+        "sent": 0,
+        "failed": 0,
+        "unknown": 0,
+        "skipped": 0,
+        "deduped": {},
+        "parts": [],
+    }
     if activation.get("mode") != "CANARY":
         result["off"] = activation.get("reason") or "mode"
         return result
@@ -1274,7 +1738,11 @@ def run_quant_telegram_card_canary(*, activation: dict, receipts, activation_id:
         return result
     eligible = []
     for message in messages:
-        prior = receipts.report_attempted(message.report_sha256) if message.report_sha256 else None
+        prior = (
+            receipts.report_attempted(message.report_sha256)
+            if message.report_sha256
+            else None
+        )
         if prior is not None:
             prior_id, prior_status = prior
             if not override_report_dedupe or prior_status in NO_RESEND_STATUSES:
@@ -1284,42 +1752,71 @@ def run_quant_telegram_card_canary(*, activation: dict, receipts, activation_id:
     if not eligible:
         result["off"] = "report_already_attempted"
         return result
-    plan = [(message.market, f"{message.market}:{index}", text)
-            for message in eligible for index, text in enumerate(message.parts, 1)]
+    plan = [
+        (message.market, f"{message.market}:{index}", text)
+        for message in eligible
+        for index, text in enumerate(message.parts, 1)
+    ]
     digests = {message.market: message.report_sha256 for message in eligible}
-    if not receipts.reserve(activation_id, report_digests=digests,
-                            part_keys=tuple(key for _, key, _ in plan), now=now,
-                            deduped=dict(result["deduped"])):
+    if not receipts.reserve(
+        activation_id,
+        report_digests=digests,
+        part_keys=tuple(key for _, key, _ in plan),
+        now=now,
+        deduped=dict(result["deduped"]),
+    ):
         result["off"] = "cap_consumed"
         return result
     result["reserved"] = 1
     stopped_markets: set = set()
     for market, key, text in plan:
         if market in stopped_markets:
-            receipts.settle(activation_id, key, "SKIPPED", now=now, reason="aborted_after_failure")
+            receipts.settle(
+                activation_id, key, "SKIPPED", now=now, reason="aborted_after_failure"
+            )
             result["skipped"] += 1
             result["parts"].append((key, "SKIPPED"))
             continue
         try:
             provider_message_id = telegram_send(text)
         except TimeoutError:
-            receipts.settle(activation_id, key, "UNKNOWN", now=now, reason="provider_timeout")
-            result["unknown"] += 1; result["parts"].append((key, "UNKNOWN")); stopped_markets.add(market)
+            receipts.settle(
+                activation_id, key, "UNKNOWN", now=now, reason="provider_timeout"
+            )
+            result["unknown"] += 1
+            result["parts"].append((key, "UNKNOWN"))
+            stopped_markets.add(market)
             continue
         except Exception:
-            receipts.settle(activation_id, key, "FAILED", now=now, reason="provider_failure")
-            result["failed"] += 1; result["parts"].append((key, "FAILED")); stopped_markets.add(market)
+            receipts.settle(
+                activation_id, key, "FAILED", now=now, reason="provider_failure"
+            )
+            result["failed"] += 1
+            result["parts"].append((key, "FAILED"))
+            stopped_markets.add(market)
             continue
         try:
-            receipts.settle(activation_id, key, "SENT", now=now,
-                            provider_message_id=str(provider_message_id))
+            receipts.settle(
+                activation_id,
+                key,
+                "SENT",
+                now=now,
+                provider_message_id=str(provider_message_id),
+            )
         except Exception:
             try:
-                receipts.settle(activation_id, key, "UNKNOWN", now=now,
-                                reason="settle_failed_after_delivery")
+                receipts.settle(
+                    activation_id,
+                    key,
+                    "UNKNOWN",
+                    now=now,
+                    reason="settle_failed_after_delivery",
+                )
             except Exception:
                 pass
-            result["unknown"] += 1; result["parts"].append((key, "UNKNOWN")); stopped_markets.add(market)
+            result["unknown"] += 1
+            result["parts"].append((key, "UNKNOWN"))
+            stopped_markets.add(market)
             continue
         result["sent"] += 1
         result["parts"].append((key, "SENT"))

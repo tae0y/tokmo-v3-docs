@@ -15,6 +15,7 @@ ordered history with keys ``row-000001..row-00000N``. Toss-only fields
 ``balance_quantity`` (a running balance derivable from the ledger) has no
 ledger column and is intentionally not stored.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -46,24 +47,26 @@ def build_pension_trade_events(
     """
     events: list[TradeLedgerEvent] = []
     for index, trade in enumerate(trades, start=1):
-        events.append(TradeLedgerEvent(
-            source=PENSION_TRADE_SOURCE,
-            account_scope=PENSION_TRADE_SCOPE,
-            source_record_key=f"row-{index:06d}",
-            event_kind=_event_kind(trade.transaction_type_raw),
-            supersedes_source_record_key=None,
-            trade_date=trade.trade_date.date(),
-            transaction_type_raw=trade.transaction_type_raw,
-            instrument_raw=trade.product_name,
-            quantity=canonical_decimal_string(str(trade.trade_quantity)),
-            unit_price=canonical_decimal_string(str(trade.unit_price)),
-            amount=canonical_decimal_string(str(trade.amount)),
-            medium_raw=trade.trade_medium,
-            currency_raw=PENSION_TRADE_CURRENCY,
-            settlement_date=None,
-            fee=None,
-            tax=None,
-        ))
+        events.append(
+            TradeLedgerEvent(
+                source=PENSION_TRADE_SOURCE,
+                account_scope=PENSION_TRADE_SCOPE,
+                source_record_key=f"row-{index:06d}",
+                event_kind=_event_kind(trade.transaction_type_raw),
+                supersedes_source_record_key=None,
+                trade_date=trade.trade_date.date(),
+                transaction_type_raw=trade.transaction_type_raw,
+                instrument_raw=trade.product_name,
+                quantity=canonical_decimal_string(str(trade.trade_quantity)),
+                unit_price=canonical_decimal_string(str(trade.unit_price)),
+                amount=canonical_decimal_string(str(trade.amount)),
+                medium_raw=trade.trade_medium,
+                currency_raw=PENSION_TRADE_CURRENCY,
+                settlement_date=None,
+                fee=None,
+                tax=None,
+            )
+        )
     return tuple(events)
 
 

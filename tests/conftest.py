@@ -1,4 +1,5 @@
 import socket
+
 # Imported eagerly so its module classes (e.g. SSLSocket, which subclasses
 # socket.socket at import time) are built before the sandbox patch below
 # replaces socket.socket; lazy first import inside a test would fail on the
@@ -12,6 +13,7 @@ import pytest
 def no_network(monkeypatch):
     """Sandbox broad enough for the whole fixture suite: any socket creation,
     connection, name resolution, or server bind fails loudly."""
+
     def blocked(*args, **kwargs):
         raise AssertionError("network forbidden in fixture tests")
 

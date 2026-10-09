@@ -8,10 +8,10 @@ is typed; the KRW aggregate exists only under fresh base-USD/quote-KRW FX
 evidence and no exchange rate is ever estimated.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
-from typing import Mapping
 
 from tokmo.values.account_scope_patterns import (
     ACCOUNT_SCOPE_RE,
@@ -102,16 +102,22 @@ def _validate_fx(fx, computed_at) -> str:
     return "available"
 
 
-def project_returns(*, holdings: CurrentHoldingsV1, quotes: Mapping,
-                    computed_at: datetime,
-                    fx_envelope: "FxEvidenceEnvelopeV1 | None" = None,
-                    holdings_reconciliation_pending: bool = False,
-                    freshness_max_age_seconds: int = RETURN_FRESHNESS_MAX_AGE_SECONDS,
-                    ) -> ReturnProjectionV1:
+def project_returns(
+    *,
+    holdings: CurrentHoldingsV1,
+    quotes: Mapping,
+    computed_at: datetime,
+    fx_envelope: "FxEvidenceEnvelopeV1 | None" = None,
+    holdings_reconciliation_pending: bool = False,
+    freshness_max_age_seconds: int = RETURN_FRESHNESS_MAX_AGE_SECONDS,
+) -> ReturnProjectionV1:
     if not isinstance(holdings, CurrentHoldingsV1):
         raise ValueError("projection requires the canonical holdings snapshot")
-    if (not isinstance(computed_at, datetime) or computed_at.tzinfo is None
-            or computed_at.utcoffset() is None):
+    if (
+        not isinstance(computed_at, datetime)
+        or computed_at.tzinfo is None
+        or computed_at.utcoffset() is None
+    ):
         raise ValueError("computed_at must be aware")
     krw_state = _validate_fx(fx_envelope, computed_at)
     positions = []
@@ -120,22 +126,40 @@ def project_returns(*, holdings: CurrentHoldingsV1, quotes: Mapping,
         scope_kind = _scope_kind(account.account_scope)
         if scope_kind is None:
             continue
-        bucket = totals.setdefault(scope_kind, {
-            "count": 0, "priced": 0, "cost": {}, "value": {}, "pnl": {},
-        })
+        bucket = totals.setdefault(
+            scope_kind,
+            {
+                "count": 0,
+                "priced": 0,
+                "cost": {},
+                "value": {},
+                "pnl": {},
+            },
+        )
         for item in account.holdings:
             quantity = _decimal(item.quantity)
             average_cost = _decimal(item.avg_price)
             market = classify_market(item.market_raw, item.market_field)
             if quantity is None or average_cost is None:
-                positions.append(PositionReturnV1(
-                    account.account_scope, scope_kind,
-                    None if market is None else market.value, item.symbol,
-                    item.currency, Decimal(0), Decimal(0), Decimal(0), None,
-                    None, None,
-                    RatioValueV1(RatioState.UNAVAILABLE_UNPRICED, None),
-                    PricingState.UNPRICED, "holding_decimal_invalid", None,
-                ))
+                positions.append(
+                    PositionReturnV1(
+                        account.account_scope,
+                        scope_kind,
+                        None if market is None else market.value,
+                        item.symbol,
+                        item.currency,
+                        Decimal(0),
+                        Decimal(0),
+                        Decimal(0),
+                        None,
+                        None,
+                        None,
+                        RatioValueV1(RatioState.UNAVAILABLE_UNPRICED, None),
+                        PricingState.UNPRICED,
+                        "holding_decimal_invalid",
+                        None,
+                    )
+                )
                 continue
             cost_basis = quantity * average_cost
             quote = quotes.get(item.symbol) if quotes is not None else None
@@ -150,16 +174,17 @@ def project_returns(*, holdings: CurrentHoldingsV1, quotes: Mapping,
                     barrier = "quote_decimal_invalid"
                     price = None
                     observed = None
-                elif (item.currency is not None
-                        and quote.currency_raw != item.currency):
+                elif item.currency is not None and quote.currency_raw != item.currency:
                     barrier = "currency_mismatch"
                     price = None
                     observed = None
                 else:
                     age = (computed_at - observed).total_seconds()
-                    pricing = (PricingState.STALE_QUOTE
-                               if age > freshness_max_age_seconds
-                               else PricingState.PRICED)
+                    pricing = (
+                        PricingState.STALE_QUOTE
+                        if age > freshness_max_age_seconds
+                        else PricingState.PRICED
+                    )
             if price is None:
                 market_value = None
                 pnl = None
@@ -171,30 +196,52 @@ def project_returns(*, holdings: CurrentHoldingsV1, quotes: Mapping,
                     ratio = RatioValueV1(RatioState.ZERO_COST_UNDEFINED, None)
                 else:
                     ratio = RatioValueV1(RatioState.DEFINED, pnl / cost_basis)
-            positions.append(PositionReturnV1(
-                account.account_scope, scope_kind,
-                None if market is None else market.value, item.symbol,
-                item.currency, quantity, average_cost, cost_basis, price,
-                market_value, pnl, ratio, pricing, barrier, observed,
-            ))
+            positions.append(
+                PositionReturnV1(
+                    account.account_scope,
+                    scope_kind,
+                    None if market is None else market.value,
+                    item.symbol,
+                    item.currency,
+                    quantity,
+                    average_cost,
+                    cost_basis,
+                    price,
+                    market_value,
+                    pnl,
+                    ratio,
+                    pricing,
+                    barrier,
+                    observed,
+                )
+            )
             currency = item.currency or "UNKNOWN"
             bucket["count"] += 1
-            bucket["cost"][currency] = bucket["cost"].get(
-                currency, Decimal(0)) + cost_basis
+            bucket["cost"][currency] = (
+                bucket["cost"].get(currency, Decimal(0)) + cost_basis
+            )
             if market_value is not None:
                 bucket["priced"] += 1
-                bucket["value"][currency] = bucket["value"].get(
-                    currency, Decimal(0)) + market_value
-                bucket["pnl"][currency] = bucket["pnl"].get(
-                    currency, Decimal(0)) + pnl
+                bucket["value"][currency] = (
+                    bucket["value"].get(currency, Decimal(0)) + market_value
+                )
+                bucket["pnl"][currency] = bucket["pnl"].get(currency, Decimal(0)) + pnl
     scope_totals = tuple(
         ScopeReturnTotalsV1(
-            scope_kind, bucket["count"], bucket["priced"],
-            dict(bucket["cost"]), dict(bucket["value"]), dict(bucket["pnl"]),
+            scope_kind,
+            bucket["count"],
+            bucket["priced"],
+            dict(bucket["cost"]),
+            dict(bucket["value"]),
+            dict(bucket["pnl"]),
         )
         for scope_kind, bucket in sorted(totals.items())
     )
     return ReturnProjectionV1(
-        holdings.captured_at, computed_at, tuple(positions), scope_totals,
-        krw_state, bool(holdings_reconciliation_pending),
+        holdings.captured_at,
+        computed_at,
+        tuple(positions),
+        scope_totals,
+        krw_state,
+        bool(holdings_reconciliation_pending),
     )

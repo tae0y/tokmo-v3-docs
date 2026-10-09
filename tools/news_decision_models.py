@@ -1,15 +1,16 @@
 """One-shot model adapter; NEWS confirmation uses the common no-tools launcher."""
-from datetime import datetime, timezone
-import json
+
 import hashlib
+import json
 import os
 import time
+from datetime import UTC, datetime
 from pathlib import Path
-from urllib.request import build_opener, ProxyHandler
+from urllib.request import ProxyHandler, build_opener
 
-from tokmo.facts.news_http import zai_chat_once, _NoRedirect
 from news_product_gate import glm_call, require_complete_receipts
 
+from tokmo.facts.news_http import _NoRedirect, zai_chat_once
 
 POLICY = """너는 개인 투자자의 중요 사건 감지 담당이다. 출력은 한국어 JSON만.
 입력은 과거·합성 재현에도 사용된다. 합성 표기 자체를 중요도 제외 이유로 삼지 말라.
@@ -188,15 +189,19 @@ class _Capture:
     def open(self, request, timeout):
         response = self.handler.open(request, timeout=timeout)
         original = response.read
+
         def read(size=-1):
             raw = original(size)
             try:
                 payload = json.loads(raw)
                 self.usage = payload.get("usage", {})
-                self.finish_reason = payload.get("choices", [{}])[0].get("finish_reason")
+                self.finish_reason = payload.get("choices", [{}])[0].get(
+                    "finish_reason"
+                )
             except (ValueError, AttributeError, IndexError, TypeError):
                 pass
             return raw
+
         response.read = read
         return response
 
@@ -225,16 +230,22 @@ def decode_response(text, *, finish_reason=None):
     except (ValueError, TypeError):
         return {"invalid_model_reason": "invalid_json", "invalid_model_response": text}
     if not isinstance(result, dict):
-        return {"invalid_model_reason": "expected_object", "invalid_model_response": text}
+        return {
+            "invalid_model_reason": "expected_object",
+            "invalid_model_response": text,
+        }
     if finish_reason == "length":
-        return {"invalid_model_reason": "output_truncated", "invalid_model_response": text}
+        return {
+            "invalid_model_reason": "output_truncated",
+            "invalid_model_response": text,
+        }
     # Some GLM replies encode the JSON object a second time inside answer.
     # Unwrap only complete, unambiguous objects; never repair broken JSON or
     # silently choose between contradictory inner/outer classifications.
     for _ in range(3):
-        if 'answer' not in result:
+        if "answer" not in result:
             break
-        inner = result['answer']
+        inner = result["answer"]
         if isinstance(inner, str):
             try:
                 inner = json.loads(inner)
@@ -242,8 +253,8 @@ def decode_response(text, *, finish_reason=None):
                 break
         if not isinstance(inner, dict):
             break
-        outer = {k:v for k,v in result.items() if k != 'answer'}
-        if any(k in inner and inner[k] != v for k,v in outer.items()):
+        outer = {k: v for k, v in result.items() if k != "answer"}
+        if any(k in inner and inner[k] != v for k, v in outer.items()):
             break
         result = dict(inner, **outer)
     return result
@@ -251,13 +262,23 @@ def decode_response(text, *, finish_reason=None):
 
 def screen_references(request):
     """Short transport references; stored evidence ids and strict checks stay intact."""
-    ids=[e['id'] for e in request.get('evidence',[]) if isinstance(e,dict) and isinstance(e.get('id'),str)]
-    mapping={key:f'INPUT_{n+1}' for n,key in enumerate(dict.fromkeys(ids))}
+    ids = [
+        e["id"]
+        for e in request.get("evidence", [])
+        if isinstance(e, dict) and isinstance(e.get("id"), str)
+    ]
+    mapping = {key: f"INPUT_{n + 1}" for n, key in enumerate(dict.fromkeys(ids))}
+
     def translate(value, lookup):
-        if isinstance(value,dict):return {k:translate(v,lookup) for k,v in value.items()}
-        if isinstance(value,list):return [translate(v,lookup) for v in value]
-        return lookup.get(value,value) if isinstance(value,str) else value
-    return translate(request,mapping),lambda result:translate(result,{v:k for k,v in mapping.items()})
+        if isinstance(value, dict):
+            return {k: translate(v, lookup) for k, v in value.items()}
+        if isinstance(value, list):
+            return [translate(v, lookup) for v in value]
+        return lookup.get(value, value) if isinstance(value, str) else value
+
+    return translate(request, mapping), lambda result: translate(
+        result, {v: k for k, v in mapping.items()}
+    )
 
 
 FOLLOWUP_CONTEXT_POLICY = """\ncontext.investment_followup은 실제 사용자가 남긴 선택과 전달 확인된 후속 검토다.
@@ -301,21 +322,35 @@ ONLY이면 facts에 잘못된 설명과 바로잡은 내용, interpretation에 �
 """
 
 
-HERMES_LAUNCHER = Path(os.environ.get('HERMES_HOME', str(Path.home() / '.hermes'))) / 'scripts/minimal-continuity-cli'
+HERMES_LAUNCHER = (
+    Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
+    / "scripts/minimal-continuity-cli"
+)
 
 
 def default_confirm_transport():
     """Confirmation-stage codex calls go through the shared Hermes launcher when it is installed
     (the owner's setup); an install without Hermes runs the Codex CLI directly."""
-    return 'hermes' if HERMES_LAUNCHER.exists() else 'direct'
+    return "hermes" if HERMES_LAUNCHER.exists() else "direct"
 
 
 class DecisionModel:
-    def __init__(self, model, stage, *, timeout=90, env_file=None, reasoning_effort='medium', diagnostic_path=None, transport='direct', admission_stage=None):
+    def __init__(
+        self,
+        model,
+        stage,
+        *,
+        timeout=90,
+        env_file=None,
+        reasoning_effort="medium",
+        diagnostic_path=None,
+        transport="direct",
+        admission_stage=None,
+    ):
         self.model, self.stage, self.timeout = model, stage, timeout
         self.admission_stage = admission_stage or stage
-        self.provider = model.split(':', 1)[0] if ':' in model else 'zai'
-        self.reasoning_effort = reasoning_effort if self.provider != 'zai' else 'low'
+        self.provider = model.split(":", 1)[0] if ":" in model else "zai"
+        self.reasoning_effort = reasoning_effort if self.provider != "zai" else "low"
         self.env_file = env_file or Path.home() / ".hermes" / ".env"
         self.max_output_tokens = 4096
         self.diagnostic_path = diagnostic_path
@@ -324,78 +359,192 @@ class DecisionModel:
 
     @property
     def policy_fingerprint(self):
-        return hashlib.sha256((POLICY + SCREEN + ANALYZE + FINAL_CHECK + VALUE_FEEDBACK + MEMORY_POLICY
-            + ATTENTION_POLICY + OUTCOME_LESSONS + FOLLOWUP_CONTEXT_POLICY + RECHECK_POLICY
-            # Display hints do not invalidate unchanged investment judgments.
-            # Old cached responses without the hint still render in full.
-            + json.dumps(response_schema(self.stage, presentation=False), sort_keys=True)).encode()).hexdigest()
+        return hashlib.sha256(
+            (
+                POLICY
+                + SCREEN
+                + ANALYZE
+                + FINAL_CHECK
+                + VALUE_FEEDBACK
+                + MEMORY_POLICY
+                + ATTENTION_POLICY
+                + OUTCOME_LESSONS
+                + FOLLOWUP_CONTEXT_POLICY
+                + RECHECK_POLICY
+                # Display hints do not invalidate unchanged investment judgments.
+                # Old cached responses without the hint still render in full.
+                + json.dumps(
+                    response_schema(self.stage, presentation=False), sort_keys=True
+                )
+            ).encode()
+        ).hexdigest()
 
     @property
     def incremental_policy_fingerprint(self):
-        return hashlib.sha256((INCREMENTAL_POLICY + json.dumps(
-            response_schema(self.stage, incremental=True, presentation=False), sort_keys=True)).encode()).hexdigest()
+        return hashlib.sha256(
+            (
+                INCREMENTAL_POLICY
+                + json.dumps(
+                    response_schema(self.stage, incremental=True, presentation=False),
+                    sort_keys=True,
+                )
+            ).encode()
+        ).hexdigest()
 
     @property
     def review_efficiency_fingerprint(self):
-        return hashlib.sha256((TYPED_RECHECK_POLICY + EVENT_DETAIL_POLICY + json.dumps(
-            response_schema(self.stage, incremental=True, typed=True, presentation=False), sort_keys=True)).encode()).hexdigest()
+        return hashlib.sha256(
+            (
+                TYPED_RECHECK_POLICY
+                + EVENT_DETAIL_POLICY
+                + json.dumps(
+                    response_schema(
+                        self.stage, incremental=True, typed=True, presentation=False
+                    ),
+                    sort_keys=True,
+                )
+            ).encode()
+        ).hexdigest()
 
     def __call__(self, request):
         require_complete_receipts(self.diagnostic_path)
         started = time.monotonic()
-        restore = lambda value:value
-        if self.stage == 'screen':
-            request,restore=screen_references(request)
-        followup = FOLLOWUP_CONTEXT_POLICY if (request.get('context') or {}).get('investment_followup') else ''
-        if request.get('review_reason')=='DELIVERY_RECOVERY':
-            followup+='\n이번은 전달 장애 후 재검토다. 과거 미전달 초안은 발송 대상에서 보존·제외했다. 현재도 전달할 가치가 있으면 새 알림을 제안하라. 이미 실제 전달한 last_sent와는 비교하되, 새 기사가 없다는 이유만으로 가치 있는 미전달 정보를 누락하지 않는다. 오래된 발생 사실을 지금 발생했다고 바꾸지 않는다.\n'
-        reuse = RECHECK_POLICY if request.get('review_reuse_enabled') else ''
-        incremental = INCREMENTAL_POLICY if request.get('incremental_review') and self.stage == 'analyze' else ''
-        typed = bool(request.get('typed_review_enabled') and self.stage == 'analyze')
-        extra = TYPED_RECHECK_POLICY if typed else ''
-        if (request.get('context') or {}).get('detail_scope'):
+        restore = lambda value: value
+        if self.stage == "screen":
+            request, restore = screen_references(request)
+        followup = (
+            FOLLOWUP_CONTEXT_POLICY
+            if (request.get("context") or {}).get("investment_followup")
+            else ""
+        )
+        if request.get("review_reason") == "DELIVERY_RECOVERY":
+            followup += "\n이번은 전달 장애 후 재검토다. 과거 미전달 초안은 발송 대상에서 보존·제외했다. 현재도 전달할 가치가 있으면 새 알림을 제안하라. 이미 실제 전달한 last_sent와는 비교하되, 새 기사가 없다는 이유만으로 가치 있는 미전달 정보를 누락하지 않는다. 오래된 발생 사실을 지금 발생했다고 바꾸지 않는다.\n"
+        reuse = RECHECK_POLICY if request.get("review_reuse_enabled") else ""
+        incremental = (
+            INCREMENTAL_POLICY
+            if request.get("incremental_review") and self.stage == "analyze"
+            else ""
+        )
+        typed = bool(request.get("typed_review_enabled") and self.stage == "analyze")
+        extra = TYPED_RECHECK_POLICY if typed else ""
+        if (request.get("context") or {}).get("detail_scope"):
             extra += EVENT_DETAIL_POLICY
         # Stable policy/context prefix; evidence and the changing clock follow it.
-        ordered = {key:request[key] for key in ('task', 'decision_contract', 'context', 'events') if key in request}
-        ordered.update({key:request[key] for key in sorted(request) if key not in ordered and key != 'now'})
-        if 'now' in request:
-            ordered['now'] = request['now']
-        prompt = POLICY + (SCREEN if self.stage == "screen" else ANALYZE + FINAL_CHECK + VALUE_FEEDBACK + MEMORY_POLICY) + ATTENTION_POLICY + OUTCOME_LESSONS + followup + reuse + incremental + extra + "\nINPUT_JSON:\n" + json.dumps(ordered, ensure_ascii=False)
-        if self.stage == 'analyze':
+        ordered = {
+            key: request[key]
+            for key in ("task", "decision_contract", "context", "events")
+            if key in request
+        }
+        ordered.update(
+            {
+                key: request[key]
+                for key in sorted(request)
+                if key not in ordered and key != "now"
+            }
+        )
+        if "now" in request:
+            ordered["now"] = request["now"]
+        prompt = (
+            POLICY
+            + (
+                SCREEN
+                if self.stage == "screen"
+                else ANALYZE + FINAL_CHECK + VALUE_FEEDBACK + MEMORY_POLICY
+            )
+            + ATTENTION_POLICY
+            + OUTCOME_LESSONS
+            + followup
+            + reuse
+            + incremental
+            + extra
+            + "\nINPUT_JSON:\n"
+            + json.dumps(ordered, ensure_ascii=False)
+        )
+        if self.stage == "analyze":
             # Append presentation rules so the existing policy/input prefix is
             # preserved; this adds no extra inference or conversation search.
             prompt += CORRECTION_PRESENTATION + ALARM_WRITING_STYLE
-        from tokmo.programs.news_usage_diagnostics import prompt_observation, usage_observation
-        prompt_observation(prompt, ordered, response_schema(self.stage, incremental=bool(incremental), typed=typed)
-                           if self.provider == 'codex' else None)
-        if self.provider != 'zai':
+        from tokmo.programs.news_usage_diagnostics import (
+            prompt_observation,
+            usage_observation,
+        )
+
+        prompt_observation(
+            prompt,
+            ordered,
+            response_schema(self.stage, incremental=bool(incremental), typed=typed)
+            if self.provider == "codex"
+            else None,
+        )
+        if self.provider != "zai":
             from subscription_json_model import infer
+
             transport = {}
-            if self.stage == 'analyze' and self.transport == 'hermes':
+            if self.stage == "analyze" and self.transport == "hermes":
                 from news_subscription_model import run_news
-                transport['runner'] = run_news
-            provider, name = self.model.split(':', 1)
-            text, metadata = infer(prompt, provider=provider, model=name, timeout=self.timeout,
-                schema=response_schema(self.stage, incremental=bool(incremental), typed=typed), effort=self.reasoning_effort,
+
+                transport["runner"] = run_news
+            provider, name = self.model.split(":", 1)
+            text, metadata = infer(
+                prompt,
+                provider=provider,
+                model=name,
+                timeout=self.timeout,
+                schema=response_schema(
+                    self.stage, incremental=bool(incremental), typed=typed
+                ),
+                effort=self.reasoning_effort,
                 **transport,
-                **({'diagnostic_path':self.diagnostic_path} if self.diagnostic_path is not None else {}))
+                **(
+                    {"diagnostic_path": self.diagnostic_path}
+                    if self.diagnostic_path is not None
+                    else {}
+                ),
+            )
             usage_observation(metadata)
             result = decode_response(text)
             result.update(metadata)
             return restore(result)
         from tokmo.programs.news_classifier_executor import read_zai_credential_file
-        with glm_call(self.model, self.admission_stage, self.diagnostic_path,
-                      correction=bool(request.get('correction'))) as recheck:
-            key = os.environ.get("ZAI_API_KEY") or os.environ.get("GLM_API_KEY") or read_zai_credential_file(self.env_file)
+
+        with glm_call(
+            self.model,
+            self.admission_stage,
+            self.diagnostic_path,
+            correction=bool(request.get("correction")),
+        ) as recheck:
+            key = (
+                os.environ.get("ZAI_API_KEY")
+                or os.environ.get("GLM_API_KEY")
+                or read_zai_credential_file(self.env_file)
+            )
             capture = _Capture()
             recheck()
-            text = zai_chat_once(prompt, timeout_seconds=self.timeout, api_key=key,
-                                 opener=capture, model=self.model, max_tokens=self.max_output_tokens, json_mode=True)
-        usage_observation(dict(_usage=capture.usage, _model=self.model, _reasoning_effort=self.reasoning_effort,
-                               _elapsed_seconds=round(time.monotonic() - started, 3)))
+            text = zai_chat_once(
+                prompt,
+                timeout_seconds=self.timeout,
+                api_key=key,
+                opener=capture,
+                model=self.model,
+                max_tokens=self.max_output_tokens,
+                json_mode=True,
+            )
+        usage_observation(
+            dict(
+                _usage=capture.usage,
+                _model=self.model,
+                _reasoning_effort=self.reasoning_effort,
+                _elapsed_seconds=round(time.monotonic() - started, 3),
+            )
+        )
         result = decode_response(text, finish_reason=capture.finish_reason)
-        result.update(_usage=capture.usage, _model=self.model, _reasoning_effort=self.reasoning_effort, _finish_reason=capture.finish_reason,
-                      _elapsed_seconds=round(time.monotonic() - started, 3))
+        result.update(
+            _usage=capture.usage,
+            _model=self.model,
+            _reasoning_effort=self.reasoning_effort,
+            _finish_reason=capture.finish_reason,
+            _elapsed_seconds=round(time.monotonic() - started, 3),
+        )
         return restore(result)
 
 
@@ -559,46 +708,153 @@ NEW_FACTS는 시간 경과 자체가 판단을 바꾸지 않고 현재 원문을
 
 def response_schema(stage, *, incremental=False, presentation=True, typed=False):
     def obj(properties):
-        return dict(type='object', properties=properties, required=list(properties), additionalProperties=False)
-    string = {'type': 'string'}
-    strings = {'type': 'array', 'items': string}
-    nullable = lambda value: {'anyOf': [value, {'type': 'null'}]}
-    if stage == 'screen':
-        return obj({'candidates': {'type': 'array', 'items': obj({'evidence_ids': strings,
-            'event_id': nullable(string), 'title': string, 'comparison_event_ids': strings, 'event_reason': string})},
-            'ignored': {'type': 'array', 'items': obj({'evidence_id': string, 'reason': string, 'event_id': nullable(string)})}})
-    properties = {key: string for key in ('title', 'facts', 'interpretation', 'why_now', 'next_check', 'portfolio_note')}
-    for key, choices in {'importance': ['HIGH', 'MEDIUM', 'LOW'], 'urgency': ['IMMEDIATE', 'NORMAL'],
-        'confirmation': ['OFFICIAL', 'REPORTED', 'UNVERIFIED'], 'change': ['NEW', 'UPDATE', 'CORRECTION', 'NONE', 'RESOLVED']}.items():
-        properties[key] = dict(type='string', enum=choices)
-    properties.update(evidence_ids=strings, subject_keys=strings, open={'type': 'boolean'}, notify={'type': 'boolean'},
-        material_change=nullable(obj(dict(prior_claim=string, new_fact=string, support_ids=strings, why_not_covered=string))))
-    properties.update(digest_summary=nullable(string), context_update=nullable(obj(dict(topic=string, phase=string, summary=string, watch=string, source_ids=strings))),
-                      source_requests=strings, recheck=nullable(obj(dict(after=string, reason=string))),
-                      followup_scope=nullable(obj(dict(all_choices={'type':'boolean'}, choice_ids=strings))))
+        return dict(
+            type="object",
+            properties=properties,
+            required=list(properties),
+            additionalProperties=False,
+        )
+
+    string = {"type": "string"}
+    strings = {"type": "array", "items": string}
+    nullable = lambda value: {"anyOf": [value, {"type": "null"}]}
+    if stage == "screen":
+        return obj(
+            {
+                "candidates": {
+                    "type": "array",
+                    "items": obj(
+                        {
+                            "evidence_ids": strings,
+                            "event_id": nullable(string),
+                            "title": string,
+                            "comparison_event_ids": strings,
+                            "event_reason": string,
+                        }
+                    ),
+                },
+                "ignored": {
+                    "type": "array",
+                    "items": obj(
+                        {
+                            "evidence_id": string,
+                            "reason": string,
+                            "event_id": nullable(string),
+                        }
+                    ),
+                },
+            }
+        )
+    properties = {
+        key: string
+        for key in (
+            "title",
+            "facts",
+            "interpretation",
+            "why_now",
+            "next_check",
+            "portfolio_note",
+        )
+    }
+    for key, choices in {
+        "importance": ["HIGH", "MEDIUM", "LOW"],
+        "urgency": ["IMMEDIATE", "NORMAL"],
+        "confirmation": ["OFFICIAL", "REPORTED", "UNVERIFIED"],
+        "change": ["NEW", "UPDATE", "CORRECTION", "NONE", "RESOLVED"],
+    }.items():
+        properties[key] = dict(type="string", enum=choices)
+    properties.update(
+        evidence_ids=strings,
+        subject_keys=strings,
+        open={"type": "boolean"},
+        notify={"type": "boolean"},
+        material_change=nullable(
+            obj(
+                dict(
+                    prior_claim=string,
+                    new_fact=string,
+                    support_ids=strings,
+                    why_not_covered=string,
+                )
+            )
+        ),
+    )
+    properties.update(
+        digest_summary=nullable(string),
+        context_update=nullable(
+            obj(
+                dict(
+                    topic=string,
+                    phase=string,
+                    summary=string,
+                    watch=string,
+                    source_ids=strings,
+                )
+            )
+        ),
+        source_requests=strings,
+        recheck=nullable(obj(dict(after=string, reason=string))),
+        followup_scope=nullable(
+            obj(dict(all_choices={"type": "boolean"}, choice_ids=strings))
+        ),
+    )
     if incremental:
-        properties['review_dependencies'] = nullable(obj(dict(all_portfolio={'type':'boolean'}, keys=strings)))
+        properties["review_dependencies"] = nullable(
+            obj(dict(all_portfolio={"type": "boolean"}, keys=strings))
+        )
     if typed:
-        properties['recheck'] = nullable(obj(dict(after=string, reason=string,
-            kind=dict(type='string', enum=['NEW_FACTS', 'DEADLINE', 'PERSISTENCE', 'SAFETY']))))
+        properties["recheck"] = nullable(
+            obj(
+                dict(
+                    after=string,
+                    reason=string,
+                    kind=dict(
+                        type="string",
+                        enum=["NEW_FACTS", "DEADLINE", "PERSISTENCE", "SAFETY"],
+                    ),
+                )
+            )
+        )
     if presentation:
-        properties['correction_notice'] = nullable(dict(type='string', enum=[
-            'EXPLANATION_ONLY', 'SOURCE_ONLY', 'MATERIAL', 'UNCERTAIN']))
+        properties["correction_notice"] = nullable(
+            dict(
+                type="string",
+                enum=["EXPLANATION_ONLY", "SOURCE_ONLY", "MATERIAL", "UNCERTAIN"],
+            )
+        )
     return obj(properties)
 
 
-def build_chain(models, stage, *, label, timeout=90, env_file=None, reasoning_effort='medium', diagnostic_root=None,
-                chain_state=None, clock=None, confirm_transport=None, quota_reset=None):
+def build_chain(
+    models,
+    stage,
+    *,
+    label,
+    timeout=90,
+    env_file=None,
+    reasoning_effort="medium",
+    diagnostic_root=None,
+    chain_state=None,
+    clock=None,
+    confirm_transport=None,
+    quota_reset=None,
+):
     """One model (string) or an ordered chain (list of specs / ModelSpec) for ``stage``.
 
     A single model returns a plain DecisionModel as before. Two or more members return a
     ModelChain (programs/model_chain.py): the first member answers unless it is waiting on a
     QUOTA/AUTH/TRANSIENT failure; the wait is persisted in ``chain_state`` and probed again later.
     ``label`` names the stage in diagnostics/state (``screen``, ``analyze-first``, ``analyze``)."""
-    from tokmo.values.model_registry import ModelRegistryError, parse_chain
     from news_subscription_model import HERMES_ADMITTED
+
+    from tokmo.values.model_registry import ModelRegistryError, parse_chain
+
     specs = parse_chain(list(models) if isinstance(models, (list, tuple)) else models)
-    path = lambda name: Path(diagnostic_root)/(name+'-last-error.json') if diagnostic_root is not None else None
+    path = lambda name: (
+        Path(diagnostic_root) / (name + "-last-error.json")
+        if diagnostic_root is not None
+        else None
+    )
     members = []
     for index, spec in enumerate(specs):
         effort = spec.effort or reasoning_effort
@@ -606,38 +862,105 @@ def build_chain(models, stage, *, label, timeout=90, env_file=None, reasoning_ef
         # default to it (confirm stage, launcher installed); anything else runs the CLI directly,
         # and an explicit "transport: hermes" on another pair is a configuration error, not a
         # runtime ADMISSION failure that would stop the chain.
-        admitted = spec.provider == 'codex' and (spec.model, effort) in HERMES_ADMITTED
-        if spec.transport == 'hermes' and not admitted:
-            raise ModelRegistryError('transport hermes admits only ' + ', '.join(
-                'codex:%s@%s' % pair for pair in sorted(HERMES_ADMITTED)) + ': ' + str(spec))
-        transport = spec.transport or ('hermes' if admitted and label == 'analyze' and confirm_transport == 'hermes' else 'direct')
-        members.append(DecisionModel(spec.name, stage, timeout=timeout, env_file=env_file,
-            reasoning_effort=effort, transport=transport, admission_stage=label,
-            diagnostic_path=path(label if index == 0 else f'{label}-fallback{index}')))
+        admitted = spec.provider == "codex" and (spec.model, effort) in HERMES_ADMITTED
+        if spec.transport == "hermes" and not admitted:
+            raise ModelRegistryError(
+                "transport hermes admits only "
+                + ", ".join("codex:%s@%s" % pair for pair in sorted(HERMES_ADMITTED))
+                + ": "
+                + str(spec)
+            )
+        transport = spec.transport or (
+            "hermes"
+            if admitted and label == "analyze" and confirm_transport == "hermes"
+            else "direct"
+        )
+        members.append(
+            DecisionModel(
+                spec.name,
+                stage,
+                timeout=timeout,
+                env_file=env_file,
+                reasoning_effort=effort,
+                transport=transport,
+                admission_stage=label,
+                diagnostic_path=path(
+                    label if index == 0 else f"{label}-fallback{index}"
+                ),
+            )
+        )
     if len(members) == 1:
         return members[0]
     from tokmo.programs.model_chain import ModelChain
-    return ModelChain(members, stage=label, state_path=chain_state, clock=clock or (lambda: datetime.now(timezone.utc)),
-                      quota_reset=quota_reset)
+
+    return ModelChain(
+        members,
+        stage=label,
+        state_path=chain_state,
+        clock=clock or (lambda: datetime.now(UTC)),
+        quota_reset=quota_reset,
+    )
 
 
-def build_models(model=None, *, screen_model="glm-5.3", analysis_model="glm-5.3", timeout=90, env_file=None,
-                 analysis_reasoning_effort='medium', diagnostic_root=None, chain_state=None, clock=None,
-                 confirm_transport=None, quota_reset=None):
+def build_models(
+    model=None,
+    *,
+    screen_model="glm-5.3",
+    analysis_model="glm-5.3",
+    timeout=90,
+    env_file=None,
+    analysis_reasoning_effort="medium",
+    diagnostic_root=None,
+    chain_state=None,
+    clock=None,
+    confirm_transport=None,
+    quota_reset=None,
+):
     """``screen_model``/``analysis_model`` accept one model or a chain (see build_chain). The
     confirmation model's codex calls use the Hermes launcher when it is installed unless the
     registry entry says ``transport: direct``. ``quota_reset`` (optional) lets a chain wait for a
     provider's known quota reset instead of the flat probe interval."""
-    common = dict(timeout=timeout, env_file=env_file, diagnostic_root=diagnostic_root, chain_state=chain_state, clock=clock,
-                  quota_reset=quota_reset)
-    return (build_chain(model or screen_model, "screen", label='screen', **common),
-            build_chain(model or analysis_model, "analyze", label='analyze', reasoning_effort=analysis_reasoning_effort,
-                        confirm_transport=confirm_transport or default_confirm_transport(), **common))
+    common = dict(
+        timeout=timeout,
+        env_file=env_file,
+        diagnostic_root=diagnostic_root,
+        chain_state=chain_state,
+        clock=clock,
+        quota_reset=quota_reset,
+    )
+    return (
+        build_chain(model or screen_model, "screen", label="screen", **common),
+        build_chain(
+            model or analysis_model,
+            "analyze",
+            label="analyze",
+            reasoning_effort=analysis_reasoning_effort,
+            confirm_transport=confirm_transport or default_confirm_transport(),
+            **common,
+        ),
+    )
 
 
-def build_first_pass_model(model, *, timeout=90, env_file=None, diagnostic_root=None, chain_state=None, clock=None,
-                           quota_reset=None):
+def build_first_pass_model(
+    model,
+    *,
+    timeout=90,
+    env_file=None,
+    diagnostic_root=None,
+    chain_state=None,
+    clock=None,
+    quota_reset=None,
+):
     """The first-pass analysis model (or chain): same analyze prompt and contract, always direct
     transport, medium effort unless the spec says otherwise; diagnostics kept apart from the primary's."""
-    return build_chain(model, "analyze", label='analyze-first', timeout=timeout, env_file=env_file,
-                       diagnostic_root=diagnostic_root, chain_state=chain_state, clock=clock, quota_reset=quota_reset)
+    return build_chain(
+        model,
+        "analyze",
+        label="analyze-first",
+        timeout=timeout,
+        env_file=env_file,
+        diagnostic_root=diagnostic_root,
+        chain_state=chain_state,
+        clock=clock,
+        quota_reset=quota_reset,
+    )

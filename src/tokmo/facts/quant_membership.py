@@ -2,23 +2,23 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from hashlib import sha256
 import json
 import re
+from datetime import UTC, datetime
+from hashlib import sha256
 from importlib import resources
 from zoneinfo import ZoneInfo
 
-from tokmo.values.session_gate import MARKET_TIMEZONE, Market
 from tokmo.values.official_membership_observation import (
     ListingObservationV1,
     ListingVenueV1,
+    ObservationSourceKindV1,
     OfficialSicSnapshotV1,
     SecIssuerObservationV1,
     SecRegistryObservationV1,
     SecurityClassV1,
-    ObservationSourceKindV1,
 )
+from tokmo.values.session_gate import MARKET_TIMEZONE, Market
 
 SECURITY_NAME_POLICY_VERSION = "official-security-name-v1"
 NASDAQLISTED_HEADER = (
@@ -118,8 +118,9 @@ def _parse_footer(value: str, *, field_count: int) -> datetime:
     # form, and any field after the first must be empty so no data can hide in
     # the footer row.
     fields = value.split("|")
-    if (not field_count - 1 <= len(fields) <= field_count
-            or any(field != "" for field in fields[1:])):
+    if not field_count - 1 <= len(fields) <= field_count or any(
+        field != "" for field in fields[1:]
+    ):
         raise ValueError("footer")
     first_field = fields[0]
     if not first_field.startswith(_FOOTER_PREFIX):
@@ -129,7 +130,7 @@ def _parse_footer(value: str, *, field_count: int) -> datetime:
         parsed = datetime.strptime(digits, "%m%d%Y%H%M")
     except ValueError as error:
         raise ValueError("footer") from error
-    return parsed.replace(tzinfo=_DIRECTORY_TIMEZONE).astimezone(timezone.utc)
+    return parsed.replace(tzinfo=_DIRECTORY_TIMEZONE).astimezone(UTC)
 
 
 def _normalized_security_name(value: str) -> str:
@@ -146,7 +147,9 @@ def _normalized_security_name(value: str) -> str:
 
 
 def classify_security_name(
-    value: str, *, policy_version: str = SECURITY_NAME_POLICY_VERSION,
+    value: str,
+    *,
+    policy_version: str = SECURITY_NAME_POLICY_VERSION,
 ) -> SecurityClassV1:
     if policy_version != SECURITY_NAME_POLICY_VERSION:
         raise ValueError("policy")
@@ -167,7 +170,10 @@ def _required_symbols(expected_symbols: tuple[str, ...]) -> tuple[str, ...]:
 
 
 def parse_nasdaqlisted(
-    raw: bytes, *, observed_at: datetime, expected_symbols: tuple[str, ...],
+    raw: bytes,
+    *,
+    observed_at: datetime,
+    expected_symbols: tuple[str, ...],
 ) -> tuple[ListingObservationV1, ...]:
     text = _decode(raw)
     lines = text.splitlines()
@@ -185,7 +191,10 @@ def parse_nasdaqlisted(
         if len(fields) != 8:
             raise ValueError("row_fields")
         market_category, test_issue, financial_status, etf_token = (
-            fields[2], fields[3], fields[4], fields[6]
+            fields[2],
+            fields[3],
+            fields[4],
+            fields[6],
         )
         if market_category not in _KNOWN_NASDAQ_TOKENS:
             raise ValueError("venue_token")
@@ -220,7 +229,10 @@ def parse_nasdaqlisted(
 
 
 def parse_otherlisted(
-    raw: bytes, *, observed_at: datetime, expected_symbols: tuple[str, ...],
+    raw: bytes,
+    *,
+    observed_at: datetime,
+    expected_symbols: tuple[str, ...],
 ) -> tuple[ListingObservationV1, ...]:
     text = _decode(raw)
     lines = text.splitlines()
@@ -284,7 +296,10 @@ def sec_ticker_form(symbol: str) -> str:
 
 
 def parse_sec_registry(
-    raw: bytes, *, observed_at: datetime, expected_symbols: tuple[str, ...],
+    raw: bytes,
+    *,
+    observed_at: datetime,
+    expected_symbols: tuple[str, ...],
 ) -> tuple[SecRegistryObservationV1, ...]:
     try:
         data = json.loads(raw)
@@ -293,8 +308,7 @@ def parse_sec_registry(
     if data.get("fields") != ["cik", "name", "ticker", "exchange"]:
         raise ValueError("registry_fields")
     expected = set(_required_symbols(expected_symbols))
-    expected_sec = {sec_ticker_form(symbol): symbol
-                    for symbol in expected}
+    expected_sec = {sec_ticker_form(symbol): symbol for symbol in expected}
     if len(expected_sec) != len(expected):
         raise ValueError("expected_symbols_sec_conflict")
     body_sha256 = sha256(raw).hexdigest()
@@ -302,8 +316,9 @@ def parse_sec_registry(
     for row in data.get("data", []):
         if type(row) is not list or len(row) != 4:
             raise ValueError("registry_row")
-        symbol = expected_sec.get(sec_ticker_form(row[2])) if (
-            type(row[2]) is str) else None
+        symbol = (
+            expected_sec.get(sec_ticker_form(row[2])) if (type(row[2]) is str) else None
+        )
         if symbol is None:
             continue
         if symbol in rows:
@@ -313,7 +328,7 @@ def parse_sec_registry(
             raise ValueError("registry_exchange")
         try:
             cik = normalize_cik(row[0])
-        except ValueError as error:
+        except ValueError:
             raise ValueError("registry_cik")
         rows[symbol] = SecRegistryObservationV1(
             symbol=symbol,
@@ -323,7 +338,9 @@ def parse_sec_registry(
             observed_at=observed_at,
             body_sha256=body_sha256,
             row_sha256=sha256(
-                json.dumps(row, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+                json.dumps(row, separators=(",", ":"), ensure_ascii=True).encode(
+                    "utf-8"
+                )
             ).hexdigest(),
             source_schema_version="sec-registry-v1",
         )
@@ -356,13 +373,16 @@ def parse_sec_issuer(
         raise ValueError("issuer_sic")
     tickers = data.get("tickers")
     exchanges = data.get("exchanges")
-    if type(tickers) is not list or type(exchanges) is not list or len(tickers) != len(exchanges):
+    if (
+        type(tickers) is not list
+        or type(exchanges) is not list
+        or len(tickers) != len(exchanges)
+    ):
         raise ValueError("issuer_pairs")
     expected_sec_ticker = sec_ticker_form(expected_symbol)
     target_pairs = []
     for symbol, exchange in zip(tickers, exchanges, strict=True):
-        if type(symbol) is not str or sec_ticker_form(
-                symbol) != expected_sec_ticker:
+        if type(symbol) is not str or sec_ticker_form(symbol) != expected_sec_ticker:
             continue
         canonical_exchange = _EXCHANGE_MAP.get(exchange)
         if canonical_exchange is None:
@@ -406,16 +426,31 @@ def load_production_sic_snapshot() -> OfficialSicSnapshotV1:
         manifest = json.loads(manifest_ref.read_bytes())
     except (OSError, json.JSONDecodeError) as error:
         raise ValueError("production_sic_resource_invalid") from error
-    if (set(artifact) != {"schema_version", "codes"}
-            or artifact["schema_version"] != "sec-sic-html-v1"
-            or set(manifest) != {"artifact_sha256", "capture_instant", "classification", "extraction_contract_version", "official_source_sha256", "row_count", "source_row_count", "source"}
-            or manifest["classification"] != "OFFICIAL_CAPTURE"
-            or manifest["source"] != "SEC_SIC_DOCUMENTATION"
-            or manifest["extraction_contract_version"] != "sec-sic-html-v1"
-            or manifest["artifact_sha256"] != sha256(artifact_raw).hexdigest()
-            or manifest["row_count"] != len(artifact["codes"])
-            or manifest["source_row_count"] != manifest["row_count"]):
+    if (
+        set(artifact) != {"schema_version", "codes"}
+        or artifact["schema_version"] != "sec-sic-html-v1"
+        or set(manifest)
+        != {
+            "artifact_sha256",
+            "capture_instant",
+            "classification",
+            "extraction_contract_version",
+            "official_source_sha256",
+            "row_count",
+            "source_row_count",
+            "source",
+        }
+        or manifest["classification"] != "OFFICIAL_CAPTURE"
+        or manifest["source"] != "SEC_SIC_DOCUMENTATION"
+        or manifest["extraction_contract_version"] != "sec-sic-html-v1"
+        or manifest["artifact_sha256"] != sha256(artifact_raw).hexdigest()
+        or manifest["row_count"] != len(artifact["codes"])
+        or manifest["source_row_count"] != manifest["row_count"]
+    ):
         raise ValueError("production_sic_resource_invalid")
     return OfficialSicSnapshotV1(
-        snapshot_version="sec-sic-html-v1", classification="OFFICIAL_CAPTURE",
-        codes=tuple(artifact["codes"]), documentation_ref="sec-sic-official-capture-v1")
+        snapshot_version="sec-sic-html-v1",
+        classification="OFFICIAL_CAPTURE",
+        codes=tuple(artifact["codes"]),
+        documentation_ref="sec-sic-official-capture-v1",
+    )

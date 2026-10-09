@@ -1,7 +1,7 @@
 """W1 cadence declaration for the inactive Quant recurring lane."""
 
 from dataclasses import fields
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -20,11 +20,16 @@ def test_quant_policy_budget_is_exactly_saturated_and_registered_in_w3():
     )
     assert limits.total_wire_starts == 45
     assert limits.membership_starts == 7
-    assert (limits.daily_candle_starts, limits.market_daily_candle_starts,
-            limits.quant_daily_candle_starts) == (11, 3, 8)
+    assert (
+        limits.daily_candle_starts,
+        limits.market_daily_candle_starts,
+        limits.quant_daily_candle_starts,
+    ) == (11, 3, 8)
     assert sum(getattr(limits, name) for name in GROUP_LIMIT_FIELDS.values()) == 45
-    assert (CADENCE_POLICY_REGISTRY[CADENCE_QUANT_SHADOW_POLICY_V1.policy_version]
-            is CADENCE_QUANT_SHADOW_POLICY_V1)
+    assert (
+        CADENCE_POLICY_REGISTRY[CADENCE_QUANT_SHADOW_POLICY_V1.policy_version]
+        is CADENCE_QUANT_SHADOW_POLICY_V1
+    )
 
     with pytest.raises(ValueError, match="group limits exceed total wire starts"):
         TickRequestLimitsV1(
@@ -74,16 +79,21 @@ def test_membership_group_snapshot_operations_and_lane_ownership_are_closed():
         "membership:issuer:AAPL",
     ):
         operation = (
-            "MEMBERSHIP_SEC_ISSUER" if "issuer" in bad
-            else "MEMBERSHIP_NASDAQ_LISTED"
+            "MEMBERSHIP_SEC_ISSUER" if "issuer" in bad else "MEMBERSHIP_NASDAQ_LISTED"
         )
         with pytest.raises(ValueError, match="non-canonical native identity"):
             validate_cadence_operation(operation, bad)
     for policy in CADENCE_POLICY_REGISTRY.values():
         snapshot = policy_snapshot(policy, TRADES_CHILD_LIMITS_V1)
-        expected_membership = 7 if policy.policy_version in (
-            "cadence-300s-market-quant4-shadow-v1",
-            "cadence-300s-quant-profiles-shadow-v1") else 0
+        expected_membership = (
+            7
+            if policy.policy_version
+            in (
+                "cadence-300s-market-quant4-shadow-v1",
+                "cadence-300s-quant-profiles-shadow-v1",
+            )
+            else 0
+        )
         assert snapshot["request_limits"]["membership_starts"] == expected_membership
 
 
@@ -96,15 +106,21 @@ def test_quant_stages_are_exactly_positioned_and_constructible():
 
     assert len(CADENCE_STAGE_ORDER) == 19
     assert CADENCE_STAGE_ORDER[4:7] == (
-        "market_regime_shadow", "quant_membership", "mask",
+        "market_regime_shadow",
+        "quant_membership",
+        "mask",
     )
     assert CADENCE_STAGE_ORDER[-2:] == ("quant_shadow", "sink")
     assert StageStatusV1("quant_membership", "skipped").stage == "quant_membership"
     assert StageStatusV1("quant_shadow", "skipped").stage == "quant_shadow"
     event = CadenceLifecycleEventV1(
-        "stage_finished", "cadence-300s-market-portfolio-v1", 1,
-        datetime(2026, 8, 14, tzinfo=timezone.utc),
-        stage="quant_shadow", status="skipped", reason="policy_not_pinned",
+        "stage_finished",
+        "cadence-300s-market-portfolio-v1",
+        1,
+        datetime(2026, 8, 14, tzinfo=UTC),
+        stage="quant_shadow",
+        status="skipped",
+        reason="policy_not_pinned",
     )
     assert event.stage == "quant_shadow"
 
@@ -122,7 +138,7 @@ def _quant_executor(tmp_path):
     )
     from tokmo.values.ops_kernel import ProducerRole
 
-    slot = datetime(2026, 8, 14, 20, 0, tzinfo=timezone.utc)
+    slot = datetime(2026, 8, 14, 20, 0, tzinfo=UTC)
     store = OpsKernelStore(tmp_path / "ops_kernel.sqlite3")
     return store, CadenceWireExecutorV1(
         ops_kernel=store,

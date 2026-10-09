@@ -1,9 +1,9 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from tokmo.facts.treasury import parse_yield_curve_xml
 
-XML = '''<?xml version="1.0" encoding="utf-8"?>
+XML = """<?xml version="1.0" encoding="utf-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom"
       xmlns:d="http://schemas.microsoft.com/ado/2007/08/dataservices"
       xmlns:m="http://schemas.microsoft.com/ado/2007/08/dataservices/metadata">
@@ -12,11 +12,11 @@ XML = '''<?xml version="1.0" encoding="utf-8"?>
     <d:BC_2YEAR>3.85</d:BC_2YEAR>
     <d:BC_10YEAR>4.40</d:BC_10YEAR>
   </m:properties></content></entry>
-</feed>'''
+</feed>"""
 
 
 def test_parses_latest_two_and_ten_year_yields_as_typed_fact():
-    observed = datetime(2026, 7, 27, 1, 0, tzinfo=timezone.utc)
+    observed = datetime(2026, 7, 27, 1, 0, tzinfo=UTC)
     fact = parse_yield_curve_xml(XML, observed_at=observed)
 
     assert fact.source == "us_treasury_daily_par_yield_curve"

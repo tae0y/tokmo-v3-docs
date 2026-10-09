@@ -1,4 +1,5 @@
 """Reviewed NEWS/EVENT deterministic defaults; activation remains external and off."""
+
 DISCOVERY_WINDOW_HOURS = 72
 DISCOVERY_MAX_DOCUMENTS = 20000
 PRODUCER_INTERVAL_SECONDS = 1800

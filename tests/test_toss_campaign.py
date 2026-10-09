@@ -5,20 +5,29 @@ import json
 import os
 import stat
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 from tokmo.composition import (
-    TOSS_ENV_NAME, TOSS_MAX_ACCOUNTS, TOSS_MAX_STARTS,
-    TOSS_MIN_START_INTERVAL_SECONDS, TOSS_STATE_NAME, TOSS_STORE_NAME,
-    LiveRunError, run_toss, setup_toss,
+    TOSS_ENV_NAME,
+    TOSS_MAX_ACCOUNTS,
+    TOSS_MAX_STARTS,
+    TOSS_MIN_START_INTERVAL_SECONDS,
+    TOSS_STATE_NAME,
+    TOSS_STORE_NAME,
+    LiveRunError,
+    run_toss,
+    setup_toss,
 )
 from tokmo.facts.toss import _TossTransportFailure, _TossTransportSuccess
-from tokmo.records.fact_store import FactStore, TOSS_RECORD_FIELDS
+from tokmo.records.fact_store import TOSS_RECORD_FIELDS, FactStore
 from tokmo.values import (
-    SaveStatus, TOSS_SOURCE, TossAccountHoldingsFact, TossHoldingFact,
+    TOSS_SOURCE,
+    SaveStatus,
+    TossAccountHoldingsFact,
+    TossHoldingFact,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -26,7 +35,7 @@ TOKEN_BODY = (FIXTURES / "toss_token_success.json").read_bytes()
 ACCOUNTS_BODY = (FIXTURES / "toss_accounts_success.json").read_bytes()
 HOLDINGS_BODY = (FIXTURES / "toss_holdings_success.json").read_bytes()
 ONE_ACCOUNT_BODY = b'{"result":[{"accountSeq":"SYNTHETIC-01"}]}'
-NOW = datetime(2026, 7, 27, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 27, 12, 0, 0, tzinfo=UTC)
 CLIENT_ID = "SENTINEL-CLIENT-ID-0001"
 CLIENT_SECRET = "SENTINEL-CLIENT-SECRET-0001"
 
@@ -76,7 +85,9 @@ def prepare(home):
     project_root = project_root_of(home)
     setup_toss(home=home, project_root=project_root)
     config = project_root / TOSS_ENV_NAME
-    config.write_text(f"TOSS_CLIENT_ID={CLIENT_ID}\nTOSS_CLIENT_SECRET={CLIENT_SECRET}\n")
+    config.write_text(
+        f"TOSS_CLIENT_ID={CLIENT_ID}\nTOSS_CLIENT_SECRET={CLIENT_SECRET}\n"
+    )
     os.chmod(config, 0o600)
     return home / ".local" / "share" / "tokmo-v3" / "toss"
 
@@ -85,9 +96,14 @@ def invoke(home, auth, data, clock=None):
     clock = clock or Clock()
     ids = iter([f"record-{index}" for index in range(20)])
     return run_toss(
-        home=home, project_root=project_root_of(home), auth_transport=auth,
-        data_transport=data, clock=clock, sleeper=clock.sleep,
-        id_factory=ids.__next__, run_id="toss-run",
+        home=home,
+        project_root=project_root_of(home),
+        auth_transport=auth,
+        data_transport=data,
+        clock=clock,
+        sleeper=clock.sleep,
+        id_factory=ids.__next__,
+        run_id="toss-run",
     )
 
 
@@ -108,6 +124,7 @@ def records_of(leaf):
 
 # --- the three authorized operations, in order -------------------------------
 
+
 def test_a_campaign_runs_auth_then_accounts_then_one_holdings_per_account(tmp_path):
     leaf = prepare(tmp_path)
 
@@ -116,10 +133,17 @@ def test_a_campaign_runs_auth_then_accounts_then_one_holdings_per_account(tmp_pa
     assert result.code == "success"
     assert [request.endpoint_id for request in auth.requests] == ["toss_oauth_token"]
     assert [request.endpoint_id for request in data.requests] == [
-        "toss_accounts", "toss_holdings", "toss_holdings"]
+        "toss_accounts",
+        "toss_holdings",
+        "toss_holdings",
+    ]
     assert result.started == 4
     assert [entry["stage"] for entry in state_of(leaf)["starts"]] == [
-        "auth", "accounts", "holdings", "holdings"]
+        "auth",
+        "accounts",
+        "holdings",
+        "holdings",
+    ]
 
 
 def test_every_pair_of_request_starts_is_spaced_by_the_global_interval(tmp_path):
@@ -140,15 +164,24 @@ def test_the_ledger_records_each_start_before_that_request_is_sent(tmp_path):
     def watcher(request):
         seen.append((request.endpoint_id, len(state_of(leaf)["starts"])))
 
-    auth = Transport(ok(TOKEN_BODY), watcher=lambda _r: seen.append(
-        ("toss_oauth_token", len(state_of(leaf)["starts"]))))
-    data = Transport(ok(ACCOUNTS_BODY), ok(HOLDINGS_BODY), ok(HOLDINGS_BODY),
-                     watcher=watcher)
+    auth = Transport(
+        ok(TOKEN_BODY),
+        watcher=lambda _r: seen.append(
+            ("toss_oauth_token", len(state_of(leaf)["starts"]))
+        ),
+    )
+    data = Transport(
+        ok(ACCOUNTS_BODY), ok(HOLDINGS_BODY), ok(HOLDINGS_BODY), watcher=watcher
+    )
 
     invoke(tmp_path, auth, data)
 
-    assert seen == [("toss_oauth_token", 1), ("toss_accounts", 2),
-                    ("toss_holdings", 3), ("toss_holdings", 4)]
+    assert seen == [
+        ("toss_oauth_token", 1),
+        ("toss_accounts", 2),
+        ("toss_holdings", 3),
+        ("toss_holdings", 4),
+    ]
 
 
 def test_the_ledger_never_holds_a_credential_token_sequence_or_url(tmp_path):
@@ -157,23 +190,40 @@ def test_the_ledger_never_holds_a_credential_token_sequence_or_url(tmp_path):
 
     text = (leaf / TOSS_STATE_NAME).read_text()
 
-    for sentinel in (CLIENT_ID, CLIENT_SECRET, "SYNTHETIC-ACCESS-0001",
-                     "SYNTHETIC-01", "SYNTHETIC-02", "tossinvest", "Bearer",
-                     "accountSeq", "api/v1"):
+    for sentinel in (
+        CLIENT_ID,
+        CLIENT_SECRET,
+        "SYNTHETIC-ACCESS-0001",
+        "SYNTHETIC-01",
+        "SYNTHETIC-02",
+        "tossinvest",
+        "Bearer",
+        "accountSeq",
+        "api/v1",
+    ):
         assert sentinel not in text
     assert set(state_of(leaf)["starts"][0]) == {
-        "start_index", "stage", "account_ordinal", "planned_at", "outcome"}
+        "start_index",
+        "stage",
+        "account_ordinal",
+        "planned_at",
+        "outcome",
+    }
 
 
 # --- nothing is persisted until every account has been parsed ----------------
+
 
 def test_no_snapshot_exists_while_the_holdings_reads_are_still_in_flight(tmp_path):
     leaf = prepare(tmp_path)
     observed = []
     auth = Transport(ok(TOKEN_BODY))
-    data = Transport(ok(ACCOUNTS_BODY), ok(HOLDINGS_BODY), ok(HOLDINGS_BODY),
-                     watcher=lambda _r: observed.append(
-                         (leaf / TOSS_STORE_NAME).exists()))
+    data = Transport(
+        ok(ACCOUNTS_BODY),
+        ok(HOLDINGS_BODY),
+        ok(HOLDINGS_BODY),
+        watcher=lambda _r: observed.append((leaf / TOSS_STORE_NAME).exists()),
+    )
 
     invoke(tmp_path, auth, data)
 
@@ -181,15 +231,19 @@ def test_no_snapshot_exists_while_the_holdings_reads_are_still_in_flight(tmp_pat
     assert len(records_of(leaf)) == 2
 
 
-@pytest.mark.parametrize("failure,expected", [
-    (_TossTransportFailure(code="auth_rejection"), "auth_rejection"),
-    (_TossTransportFailure(code="forbidden"), "forbidden"),
-    (_TossTransportFailure(code="http_429", retry_after=30), "http_429"),
-    (_TossTransportFailure(code="http_5xx"), "http_5xx"),
-    (_TossTransportFailure(code="timeout"), "timeout"),
-])
-def test_a_failure_on_the_last_account_persists_no_snapshot_at_all(tmp_path, failure,
-                                                                   expected):
+@pytest.mark.parametrize(
+    "failure,expected",
+    [
+        (_TossTransportFailure(code="auth_rejection"), "auth_rejection"),
+        (_TossTransportFailure(code="forbidden"), "forbidden"),
+        (_TossTransportFailure(code="http_429", retry_after=30), "http_429"),
+        (_TossTransportFailure(code="http_5xx"), "http_5xx"),
+        (_TossTransportFailure(code="timeout"), "timeout"),
+    ],
+)
+def test_a_failure_on_the_last_account_persists_no_snapshot_at_all(
+    tmp_path, failure, expected
+):
     leaf = prepare(tmp_path)
     auth = Transport(ok(TOKEN_BODY))
     data = Transport(ok(ACCOUNTS_BODY), ok(HOLDINGS_BODY), failure)
@@ -205,8 +259,11 @@ def test_a_failure_on_the_last_account_persists_no_snapshot_at_all(tmp_path, fai
 def test_a_contract_mismatch_on_one_account_stops_the_whole_capture(tmp_path):
     leaf = prepare(tmp_path)
     auth = Transport(ok(TOKEN_BODY))
-    data = Transport(ok(ACCOUNTS_BODY), ok(HOLDINGS_BODY),
-                     ok(b'{"result":{"items":[{"symbol":"SYN"}]}}'))
+    data = Transport(
+        ok(ACCOUNTS_BODY),
+        ok(HOLDINGS_BODY),
+        ok(b'{"result":{"items":[{"symbol":"SYN"}]}}'),
+    )
 
     with pytest.raises(LiveRunError) as error:
         invoke(tmp_path, auth, data)
@@ -241,10 +298,12 @@ def test_a_mid_campaign_rejection_is_never_retried_or_re_authenticated(tmp_path)
 
 # --- bounded campaign --------------------------------------------------------
 
+
 def test_the_account_count_gate_bounds_the_capture(tmp_path):
     leaf = prepare(tmp_path)
-    seqs = ",".join(f'{{"accountSeq":"SYNTHETIC-{n:02d}"}}'
-                    for n in range(TOSS_MAX_ACCOUNTS + 1))
+    seqs = ",".join(
+        f'{{"accountSeq":"SYNTHETIC-{n:02d}"}}' for n in range(TOSS_MAX_ACCOUNTS + 1)
+    )
     auth = Transport(ok(TOKEN_BODY))
     data = Transport(ok(f'{{"result":[{seqs}]}}'.encode()))
 
@@ -270,11 +329,13 @@ def test_an_empty_account_list_stops_before_any_holdings_read(tmp_path):
 
 def test_the_maximum_account_count_still_fits_under_the_start_ceiling(tmp_path):
     prepare(tmp_path)
-    seqs = ",".join(f'{{"accountSeq":"SYNTHETIC-{n:02d}"}}'
-                    for n in range(TOSS_MAX_ACCOUNTS))
+    seqs = ",".join(
+        f'{{"accountSeq":"SYNTHETIC-{n:02d}"}}' for n in range(TOSS_MAX_ACCOUNTS)
+    )
     auth = Transport(ok(TOKEN_BODY))
-    data = Transport(ok(f'{{"result":[{seqs}]}}'.encode()),
-                     *[ok(HOLDINGS_BODY)] * TOSS_MAX_ACCOUNTS)
+    data = Transport(
+        ok(f'{{"result":[{seqs}]}}'.encode()), *[ok(HOLDINGS_BODY)] * TOSS_MAX_ACCOUNTS
+    )
 
     result = invoke(tmp_path, auth, data)
 
@@ -286,9 +347,15 @@ def test_an_exhausted_ledger_stops_the_campaign_with_zero_requests(tmp_path):
     leaf = prepare(tmp_path)
     state = state_of(leaf)
     state["starts"] = [
-        {"start_index": index + 1, "stage": "holdings", "account_ordinal": 1,
-         "planned_at": NOW.isoformat(), "outcome": "success"}
-        for index in range(TOSS_MAX_STARTS)]
+        {
+            "start_index": index + 1,
+            "stage": "holdings",
+            "account_ordinal": 1,
+            "planned_at": NOW.isoformat(),
+            "outcome": "success",
+        }
+        for index in range(TOSS_MAX_STARTS)
+    ]
     state["total_started"] = TOSS_MAX_STARTS
     write_state(leaf, state)
     auth, data = Transport(), Transport()
@@ -340,24 +407,36 @@ def write_state(leaf, state):
 
 # --- atomic multi-account persistence ----------------------------------------
 
+
 def holding(symbol="SYN001", quantity="10", avg_price="71000"):
     return TossHoldingFact(
-        symbol=symbol, quantity=quantity, avg_price=avg_price,
-        avg_price_field="averagePurchasePrice", currency="KRW",
-        market_raw="KR", market_field="market", name="SYNTHETIC-A",
-        asset_type="equity")
+        symbol=symbol,
+        quantity=quantity,
+        avg_price=avg_price,
+        avg_price_field="averagePurchasePrice",
+        currency="KRW",
+        market_raw="KR",
+        market_field="market",
+        name="SYNTHETIC-A",
+        asset_type="equity",
+    )
 
 
 def fact(ordinal, count=2, captured_at=NOW, holdings=None):
     return TossAccountHoldingsFact(
-        source=TOSS_SOURCE, captured_at=captured_at, account_ordinal=ordinal,
-        account_count=count, holdings=holdings if holdings is not None else (holding(),))
+        source=TOSS_SOURCE,
+        captured_at=captured_at,
+        account_ordinal=ordinal,
+        account_count=count,
+        holdings=holdings if holdings is not None else (holding(),),
+    )
 
 
 def store_at(tmp_path):
     ids = iter([f"record-{index}" for index in range(20)])
-    return FactStore(tmp_path / "holdings_store.json",
-                     clock=lambda: NOW, id_factory=ids.__next__)
+    return FactStore(
+        tmp_path / "holdings_store.json", clock=lambda: NOW, id_factory=ids.__next__
+    )
 
 
 def test_a_multi_account_capture_is_written_in_exactly_one_snapshot_replace(tmp_path):
@@ -365,10 +444,13 @@ def test_a_multi_account_capture_is_written_in_exactly_one_snapshot_replace(tmp_
     replaces = []
     original = store._replace_snapshot
     store._replace_snapshot = lambda payload: (
-        replaces.append(len(payload["records"])), original(payload))[1]
+        replaces.append(len(payload["records"])),
+        original(payload),
+    )[1]
 
-    results = store.save_batch([fact(1, 3), fact(2, 3), fact(3, 3)],
-                               policy_version="toss1-v1")
+    results = store.save_batch(
+        [fact(1, 3), fact(2, 3), fact(3, 3)], policy_version="toss1-v1"
+    )
 
     assert [result.status for result in results] == [SaveStatus.SAVED] * 3
     assert replaces == [3]
@@ -386,7 +468,9 @@ def test_a_conflicting_batch_member_leaves_the_prior_store_byte_identical(tmp_pa
 
     assert store.path.read_bytes() == before
     assert [result.status for result in results] == [
-        SaveStatus.DUPLICATE, SaveStatus.CONFLICT]
+        SaveStatus.DUPLICATE,
+        SaveStatus.CONFLICT,
+    ]
     assert len(store.records()) == 2
 
 
@@ -441,8 +525,10 @@ def test_batches_from_different_captures_accumulate(tmp_path):
     later = NOW + timedelta(days=1)
 
     store.save_batch([fact(1), fact(2)], policy_version="toss1-v1")
-    store.save_batch([fact(1, captured_at=later), fact(2, captured_at=later)],
-                     policy_version="toss1-v1")
+    store.save_batch(
+        [fact(1, captured_at=later), fact(2, captured_at=later)],
+        policy_version="toss1-v1",
+    )
 
     assert len(store.records()) == 4
     assert len({record["captured_at"] for record in store.records()}) == 2
@@ -462,8 +548,14 @@ def test_the_single_fact_save_path_still_serves_the_other_tracers(tmp_path):
     from tokmo.values import WTI_SERIES, WTI_SOURCE, WTI_UNITS, WtiFact
 
     store = store_at(tmp_path)
-    wti = WtiFact(source=WTI_SOURCE, series=WTI_SERIES, period=date(2026, 7, 24),
-                  value=Decimal("78.42"), units=WTI_UNITS, observed_at=NOW)
+    wti = WtiFact(
+        source=WTI_SOURCE,
+        series=WTI_SERIES,
+        period=date(2026, 7, 24),
+        value=Decimal("78.42"),
+        units=WTI_UNITS,
+        observed_at=NOW,
+    )
 
     first = store.save(wti, policy_version="tracer1-v1")
     second = store.save(wti, policy_version="tracer1-v1")
@@ -472,6 +564,7 @@ def test_the_single_fact_save_path_still_serves_the_other_tracers(tmp_path):
 
 
 # --- private artifacts and aggregate-only result -----------------------------
+
 
 def test_the_private_leaf_and_its_files_are_owner_only(tmp_path):
     leaf = prepare(tmp_path)
@@ -493,8 +586,15 @@ def test_the_result_reports_aggregates_and_field_names_only(tmp_path):
     assert (result.saved, result.duplicate, result.conflict) == (2, 0, 0)
     assert result.avg_price_fields == ("averagePurchasePrice",)
     assert result.market_fields == ("market",)
-    for value in ("SYN001", "SYNU", "71000", "120.75", "2.5",
-                  "SYNTHETIC-01", "SYNTHETIC-EQUITY-A"):
+    for value in (
+        "SYN001",
+        "SYNU",
+        "71000",
+        "120.75",
+        "2.5",
+        "SYNTHETIC-01",
+        "SYNTHETIC-EQUITY-A",
+    ):
         assert value not in repr(result)
 
 
@@ -511,13 +611,15 @@ def test_the_campaign_state_records_observed_field_names_never_values(tmp_path):
 
 # --- Slice 7: complete capture persistence via injected SQLite adapter ---
 
+
 def test_successful_complete_capture_persists_once(tmp_path):
     """When a snapshot_store seam is injected, a successful complete
     multi-account capture obtains a user-requested permit and calls
     store.append exactly once. No legacy FactStore write occurs
     (no dual-write)."""
     from tokmo.records.holdings_snapshots import (
-        HoldingsSnapshotStore, snapshot_content_hash,
+        HoldingsSnapshotStore,
+        snapshot_content_hash,
     )
 
     leaf = prepare(tmp_path)
@@ -528,8 +630,10 @@ def test_successful_complete_capture_persists_once(tmp_path):
 
     class SpyStore:
         """Wraps the real store; counts append calls and delegates."""
+
         def __init__(self, inner):
             self._inner = inner
+
         def append(self, snapshot, permit):
             append_calls.append((snapshot, permit))
             return self._inner.append(snapshot, permit)
@@ -540,10 +644,14 @@ def test_successful_complete_capture_persists_once(tmp_path):
     data = Transport(ok(ACCOUNTS_BODY), ok(HOLDINGS_BODY), ok(HOLDINGS_BODY))
     ids = iter([f"record-{index}" for index in range(20)])
     result = run_toss(
-        home=tmp_path, project_root=project_root_of(tmp_path),
-        auth_transport=auth, data_transport=data,
-        clock=Clock(), sleeper=Clock().sleep,
-        id_factory=ids.__next__, run_id="toss-run",
+        home=tmp_path,
+        project_root=project_root_of(tmp_path),
+        auth_transport=auth,
+        data_transport=data,
+        clock=Clock(),
+        sleeper=Clock().sleep,
+        id_factory=ids.__next__,
+        run_id="toss-run",
         snapshot_store=spy,
         content_hash_fn=snapshot_content_hash,
     )
@@ -562,10 +670,11 @@ def test_successful_complete_capture_persists_once(tmp_path):
 def test_account_failure_never_calls_storage(tmp_path):
     """When a capture fails before completion, the injected snapshot_store
     is never called — no partial bundle reaches storage."""
-    from tokmo.records.holdings_snapshots import (
-        HoldingsSnapshotStore, snapshot_content_hash,
-    )
     from tokmo.facts.toss import _TossTransportFailure
+    from tokmo.records.holdings_snapshots import (
+        HoldingsSnapshotStore,
+        snapshot_content_hash,
+    )
 
     leaf = prepare(tmp_path)
     sqlite_path = leaf / "holdings_snapshots.sqlite3"
@@ -576,6 +685,7 @@ def test_account_failure_never_calls_storage(tmp_path):
     class SpyStore:
         def __init__(self, inner):
             self._inner = inner
+
         def append(self, snapshot, permit):
             append_calls.append((snapshot, permit))
             return self._inner.append(snapshot, permit)
@@ -583,15 +693,20 @@ def test_account_failure_never_calls_storage(tmp_path):
     spy = SpyStore(real_store)
 
     auth = Transport(ok(TOKEN_BODY))
-    data = Transport(ok(ACCOUNTS_BODY), ok(HOLDINGS_BODY),
-                     _TossTransportFailure(code="timeout"))
+    data = Transport(
+        ok(ACCOUNTS_BODY), ok(HOLDINGS_BODY), _TossTransportFailure(code="timeout")
+    )
     ids = iter([f"record-{index}" for index in range(20)])
     with pytest.raises(LiveRunError) as error:
         run_toss(
-            home=tmp_path, project_root=project_root_of(tmp_path),
-            auth_transport=auth, data_transport=data,
-            clock=Clock(), sleeper=Clock().sleep,
-            id_factory=ids.__next__, run_id="toss-run",
+            home=tmp_path,
+            project_root=project_root_of(tmp_path),
+            auth_transport=auth,
+            data_transport=data,
+            clock=Clock(),
+            sleeper=Clock().sleep,
+            id_factory=ids.__next__,
+            run_id="toss-run",
             snapshot_store=spy,
             content_hash_fn=snapshot_content_hash,
         )
@@ -606,7 +721,8 @@ def test_denied_purpose_never_calls_storage(tmp_path):
     """When a named-program purpose is denied (v1 allowlist is empty),
     storage.append is never called and the capture does not persist."""
     from tokmo.records.holdings_snapshots import (
-        HoldingsSnapshotStore, snapshot_content_hash,
+        HoldingsSnapshotStore,
+        snapshot_content_hash,
     )
 
     leaf = prepare(tmp_path)
@@ -618,6 +734,7 @@ def test_denied_purpose_never_calls_storage(tmp_path):
     class SpyStore:
         def __init__(self, inner):
             self._inner = inner
+
         def append(self, snapshot, permit):
             append_calls.append((snapshot, permit))
             return self._inner.append(snapshot, permit)
@@ -629,10 +746,14 @@ def test_denied_purpose_never_calls_storage(tmp_path):
     ids = iter([f"record-{index}" for index in range(20)])
     with pytest.raises(LiveRunError) as error:
         run_toss(
-            home=tmp_path, project_root=project_root_of(tmp_path),
-            auth_transport=auth, data_transport=data,
-            clock=Clock(), sleeper=Clock().sleep,
-            id_factory=ids.__next__, run_id="toss-run",
+            home=tmp_path,
+            project_root=project_root_of(tmp_path),
+            auth_transport=auth,
+            data_transport=data,
+            clock=Clock(),
+            sleeper=Clock().sleep,
+            id_factory=ids.__next__,
+            run_id="toss-run",
             snapshot_store=spy,
             content_hash_fn=snapshot_content_hash,
             purpose="some-unapproved-named-program",
@@ -645,14 +766,16 @@ def test_denied_purpose_never_calls_storage(tmp_path):
 
 # --- Slice 7: toss_report typed seam (read_latest_pair DI) ---
 
+
 def test_report_uses_typed_latest_pair(tmp_path, capsys):
     """When a snapshot_store seam is injected into toss_report, it uses
     read_latest_pair() typed (previous, current) only — no JSON records
     in the typed branch. R0 default (no injection) keeps legacy JSON."""
-    from tokmo.records.holdings_snapshots import (
-        HoldingsSnapshotStore, snapshot_content_hash,
-    )
     from tokmo.composition import toss_report
+    from tokmo.records.holdings_snapshots import (
+        HoldingsSnapshotStore,
+        snapshot_content_hash,
+    )
 
     leaf = prepare(tmp_path)
     sqlite_path = leaf / "holdings_snapshots.sqlite3"
@@ -666,19 +789,29 @@ def test_report_uses_typed_latest_pair(tmp_path, capsys):
     for n in (1, 2):
         facts = (
             TossAccountHoldingsFact(
-                source=TOSS_SOURCE, captured_at=NOW,
-                account_ordinal=1, account_count=1,
-                holdings=(TossHoldingFact(
-                    symbol="AAPL", quantity=str(10 * n), avg_price="150.5",
-                    avg_price_field="averagePurchasePrice", currency="USD",
-                    market_raw="US", market_field="market",
-                    name="Apple Inc.", asset_type="STOCK",
-                ),),
+                source=TOSS_SOURCE,
+                captured_at=NOW,
+                account_ordinal=1,
+                account_count=1,
+                holdings=(
+                    TossHoldingFact(
+                        symbol="AAPL",
+                        quantity=str(10 * n),
+                        avg_price="150.5",
+                        avg_price_field="averagePurchasePrice",
+                        currency="USD",
+                        market_raw="US",
+                        market_field="market",
+                        name="Apple Inc.",
+                        asset_type="STOCK",
+                    ),
+                ),
             ),
         )
         sid = uuid.uuid4().hex
-        snap = assemble_complete_snapshot(facts, snapshot_id=sid,
-                                          content_hash_fn=snapshot_content_hash)
+        snap = assemble_complete_snapshot(
+            facts, snapshot_id=sid, content_hash_fn=snapshot_content_hash
+        )
         permit = authorize_user_request(snapshot_id=sid, clock=lambda: NOW)
         store.append(snap, permit)
 
@@ -688,9 +821,11 @@ def test_report_uses_typed_latest_pair(tmp_path, capsys):
     class SpyReadStore:
         def __init__(self, inner):
             self._inner = inner
+
         def read_latest_pair(self):
             read_calls.append("read_latest_pair")
             return self._inner.read_latest_pair()
+
         # Ensure no JSON-records path is reachable through the typed seam.
         def records(self):
             read_calls.append("records")
@@ -718,10 +853,14 @@ def test_report_no_snapshot_store_keeps_legacy(tmp_path, capsys):
     data = Transport(ok(ACCOUNTS_BODY), ok(HOLDINGS_BODY), ok(HOLDINGS_BODY))
     ids = iter([f"record-{index}" for index in range(20)])
     run_toss(
-        home=tmp_path, project_root=project_root_of(tmp_path),
-        auth_transport=auth, data_transport=data,
-        clock=Clock(), sleeper=Clock().sleep,
-        id_factory=ids.__next__, run_id="toss-run",
+        home=tmp_path,
+        project_root=project_root_of(tmp_path),
+        auth_transport=auth,
+        data_transport=data,
+        clock=Clock(),
+        sleeper=Clock().sleep,
+        id_factory=ids.__next__,
+        run_id="toss-run",
     )
 
     toss_report(home=tmp_path)
@@ -734,10 +873,11 @@ def test_report_typed_path_is_read_only(tmp_path):
     """The typed report/current/comparison path is strictly read-only:
     no append, import_legacy, or FactStore.save_batch calls occur.
     Verified via test doubles that raise if any write method is touched."""
-    from tokmo.records.holdings_snapshots import (
-        HoldingsSnapshotStore, snapshot_content_hash,
-    )
     from tokmo.composition import toss_report
+    from tokmo.records.holdings_snapshots import (
+        HoldingsSnapshotStore,
+        snapshot_content_hash,
+    )
 
     leaf = prepare(tmp_path)
     sqlite_path = leaf / "holdings_snapshots.sqlite3"
@@ -750,29 +890,42 @@ def test_report_typed_path_is_read_only(tmp_path):
 
     facts = (
         TossAccountHoldingsFact(
-            source=TOSS_SOURCE, captured_at=NOW,
-            account_ordinal=1, account_count=1,
-            holdings=(TossHoldingFact(
-                symbol="AAPL", quantity="10", avg_price="150.5",
-                avg_price_field="averagePurchasePrice", currency="USD",
-                market_raw="US", market_field="market",
-                name="Apple Inc.", asset_type="STOCK",
-            ),),
+            source=TOSS_SOURCE,
+            captured_at=NOW,
+            account_ordinal=1,
+            account_count=1,
+            holdings=(
+                TossHoldingFact(
+                    symbol="AAPL",
+                    quantity="10",
+                    avg_price="150.5",
+                    avg_price_field="averagePurchasePrice",
+                    currency="USD",
+                    market_raw="US",
+                    market_field="market",
+                    name="Apple Inc.",
+                    asset_type="STOCK",
+                ),
+            ),
         ),
     )
     sid = uuid.uuid4().hex
-    snap = assemble_complete_snapshot(facts, snapshot_id=sid,
-                                      content_hash_fn=snapshot_content_hash)
+    snap = assemble_complete_snapshot(
+        facts, snapshot_id=sid, content_hash_fn=snapshot_content_hash
+    )
     permit = authorize_user_request(snapshot_id=sid, clock=lambda: NOW)
     store.append(snap, permit)
 
     class ReadOnlySpy:
         def __init__(self, inner):
             self._inner = inner
+
         def read_latest_pair(self):
             return self._inner.read_latest_pair()
+
         def append(self, *args, **kwargs):
             raise AssertionError("append must not be called in report path")
+
         def import_legacy(self, *args, **kwargs):
             raise AssertionError("import_legacy must not be called in report path")
 
@@ -787,11 +940,12 @@ def test_no_current_comparison_persistence(tmp_path):
     save/current/comparison write surfaces fail if accessed, and verifies
     only read_latest_pair is called once. Legacy FactStore save is also
     proven absent."""
-    from tokmo.records.holdings_snapshots import (
-        HoldingsSnapshotStore, snapshot_content_hash,
-    )
-    from tokmo.composition import toss_report
     import tokmo.composition as composition_module
+    from tokmo.composition import toss_report
+    from tokmo.records.holdings_snapshots import (
+        HoldingsSnapshotStore,
+        snapshot_content_hash,
+    )
 
     leaf = prepare(tmp_path)
     sqlite_path = leaf / "holdings_snapshots.sqlite3"
@@ -804,19 +958,29 @@ def test_no_current_comparison_persistence(tmp_path):
 
     facts = (
         TossAccountHoldingsFact(
-            source=TOSS_SOURCE, captured_at=NOW,
-            account_ordinal=1, account_count=1,
-            holdings=(TossHoldingFact(
-                symbol="AAPL", quantity="10", avg_price="150.5",
-                avg_price_field="averagePurchasePrice", currency="USD",
-                market_raw="US", market_field="market",
-                name="Apple Inc.", asset_type="STOCK",
-            ),),
+            source=TOSS_SOURCE,
+            captured_at=NOW,
+            account_ordinal=1,
+            account_count=1,
+            holdings=(
+                TossHoldingFact(
+                    symbol="AAPL",
+                    quantity="10",
+                    avg_price="150.5",
+                    avg_price_field="averagePurchasePrice",
+                    currency="USD",
+                    market_raw="US",
+                    market_field="market",
+                    name="Apple Inc.",
+                    asset_type="STOCK",
+                ),
+            ),
         ),
     )
     sid = uuid.uuid4().hex
-    snap = assemble_complete_snapshot(facts, snapshot_id=sid,
-                                      content_hash_fn=snapshot_content_hash)
+    snap = assemble_complete_snapshot(
+        facts, snapshot_id=sid, content_hash_fn=snapshot_content_hash
+    )
     permit = authorize_user_request(snapshot_id=sid, clock=lambda: NOW)
     store.append(snap, permit)
 
@@ -825,17 +989,23 @@ def test_no_current_comparison_persistence(tmp_path):
     class FullSpy:
         def __init__(self, inner):
             self._inner = inner
+
         def read_latest_pair(self):
             read_calls.append("read_latest_pair")
             return self._inner.read_latest_pair()
+
         def append(self, *a, **kw):
             raise AssertionError("append must not be called in report path")
+
         def import_legacy(self, *a, **kw):
             raise AssertionError("import_legacy must not be called in report path")
+
         def save(self, *a, **kw):
             raise AssertionError("save must not be called in report path")
+
         def current(self, *a, **kw):
             raise AssertionError("current must not be called in report path")
+
         def comparison(self, *a, **kw):
             raise AssertionError("comparison must not be called in report path")
 
@@ -848,7 +1018,10 @@ def test_no_current_comparison_persistence(tmp_path):
     class SpyFactStore(original_factstore):
         def save_batch(self, *a, **kw):
             factstore_calls.append("save_batch")
-            raise AssertionError("FactStore.save_batch must not be called in typed report")
+            raise AssertionError(
+                "FactStore.save_batch must not be called in typed report"
+            )
+
         def save(self, *a, **kw):
             factstore_calls.append("save")
             raise AssertionError("FactStore.save must not be called in typed report")
@@ -865,13 +1038,15 @@ def test_no_current_comparison_persistence(tmp_path):
 
 # --- Slice 7 MINOR 2: dual-write behavior spy (production instrumentation) ---
 
+
 def test_dual_write_typed_success_calls_exactly_sqlite_append(tmp_path):
     """A successful typed capture calls sqlite.append exactly once and
     FactStore.save_batch zero times."""
-    from tokmo.records.holdings_snapshots import (
-        HoldingsSnapshotStore, snapshot_content_hash,
-    )
     import tokmo.composition as composition_module
+    from tokmo.records.holdings_snapshots import (
+        HoldingsSnapshotStore,
+        snapshot_content_hash,
+    )
 
     leaf = prepare(tmp_path)
     sqlite_path = leaf / "holdings_snapshots.sqlite3"
@@ -882,6 +1057,7 @@ def test_dual_write_typed_success_calls_exactly_sqlite_append(tmp_path):
     class SpyStore:
         def __init__(self, inner):
             self._inner = inner
+
         def append(self, snapshot, permit):
             append_calls.append((snapshot, permit))
             return self._inner.append(snapshot, permit)
@@ -902,9 +1078,12 @@ def test_dual_write_typed_success_calls_exactly_sqlite_append(tmp_path):
         auth = Transport(ok(TOKEN_BODY))
         data = Transport(ok(ACCOUNTS_BODY), ok(HOLDINGS_BODY), ok(HOLDINGS_BODY))
         result = run_toss(
-            home=tmp_path, project_root=project_root_of(tmp_path),
-            auth_transport=auth, data_transport=data,
-            clock=Clock(), sleeper=Clock().sleep,
+            home=tmp_path,
+            project_root=project_root_of(tmp_path),
+            auth_transport=auth,
+            data_transport=data,
+            clock=Clock(),
+            sleeper=Clock().sleep,
             id_factory=iter([f"r-{i}" for i in range(20)]).__next__,
             run_id="toss-run",
             snapshot_store=spy,
@@ -945,9 +1124,12 @@ def test_dual_write_legacy_success_calls_exactly_factstore_save_batch(tmp_path):
         auth = Transport(ok(TOKEN_BODY))
         data = Transport(ok(ACCOUNTS_BODY), ok(HOLDINGS_BODY), ok(HOLDINGS_BODY))
         result = run_toss(
-            home=tmp_path, project_root=project_root_of(tmp_path),
-            auth_transport=auth, data_transport=data,
-            clock=Clock(), sleeper=Clock().sleep,
+            home=tmp_path,
+            project_root=project_root_of(tmp_path),
+            auth_transport=auth,
+            data_transport=data,
+            clock=Clock(),
+            sleeper=Clock().sleep,
             id_factory=iter([f"r-{i}" for i in range(20)]).__next__,
             run_id="toss-run",
         )
@@ -961,8 +1143,8 @@ def test_dual_write_legacy_success_calls_exactly_factstore_save_batch(tmp_path):
 
 def test_dual_write_denied_purpose_calls_neither_store(tmp_path):
     """A denied purpose calls neither sqlite.append nor FactStore.save_batch."""
-    from tokmo.records.holdings_snapshots import snapshot_content_hash
     import tokmo.composition as composition_module
+    from tokmo.records.holdings_snapshots import snapshot_content_hash
 
     leaf = prepare(tmp_path)
 
@@ -987,9 +1169,12 @@ def test_dual_write_denied_purpose_calls_neither_store(tmp_path):
         data = Transport(ok(ACCOUNTS_BODY), ok(HOLDINGS_BODY), ok(HOLDINGS_BODY))
         with pytest.raises(LiveRunError):
             run_toss(
-                home=tmp_path, project_root=project_root_of(tmp_path),
-                auth_transport=auth, data_transport=data,
-                clock=Clock(), sleeper=Clock().sleep,
+                home=tmp_path,
+                project_root=project_root_of(tmp_path),
+                auth_transport=auth,
+                data_transport=data,
+                clock=Clock(),
+                sleeper=Clock().sleep,
                 id_factory=iter([f"r-{i}" for i in range(20)]).__next__,
                 run_id="toss-run",
                 snapshot_store=ExplodingStore(),
@@ -1007,10 +1192,11 @@ def test_no_ordinal_continuity_claim(tmp_path, capsys):
     """Typed report/diff output discloses account_count_changed (aggregate)
     and never claims ordinal continuity between captures. The output must
     not contain individual account A→B linkage, alias, or sequence claims."""
-    from tokmo.records.holdings_snapshots import (
-        HoldingsSnapshotStore, snapshot_content_hash,
-    )
     from tokmo.composition import toss_report
+    from tokmo.records.holdings_snapshots import (
+        HoldingsSnapshotStore,
+        snapshot_content_hash,
+    )
 
     leaf = prepare(tmp_path)
     sqlite_path = leaf / "holdings_snapshots.sqlite3"
@@ -1020,27 +1206,38 @@ def test_no_ordinal_continuity_claim(tmp_path, capsys):
     from tokmo.programs.toss_holdings import assemble_complete_snapshot
     from tokmo.records.holdings_persistence import authorize_user_request
     from tokmo.values import (
-        TOSS_SOURCE, TossAccountHoldingsFact, TossHoldingFact,
-        HoldingsSnapshotAccount, CompleteHoldingsSnapshot,
+        TOSS_SOURCE,
+        TossAccountHoldingsFact,
+        TossHoldingFact,
     )
 
     for n_accounts in (2, 1):
         facts = tuple(
             TossAccountHoldingsFact(
-                source=TOSS_SOURCE, captured_at=NOW,
-                account_ordinal=i + 1, account_count=n_accounts,
-                holdings=(TossHoldingFact(
-                    symbol="AAPL", quantity="10", avg_price="150.5",
-                    avg_price_field="averagePurchasePrice", currency="USD",
-                    market_raw="US", market_field="market",
-                    name="Apple Inc.", asset_type="STOCK",
-                ),),
+                source=TOSS_SOURCE,
+                captured_at=NOW,
+                account_ordinal=i + 1,
+                account_count=n_accounts,
+                holdings=(
+                    TossHoldingFact(
+                        symbol="AAPL",
+                        quantity="10",
+                        avg_price="150.5",
+                        avg_price_field="averagePurchasePrice",
+                        currency="USD",
+                        market_raw="US",
+                        market_field="market",
+                        name="Apple Inc.",
+                        asset_type="STOCK",
+                    ),
+                ),
             )
             for i in range(n_accounts)
         )
         sid = uuid.uuid4().hex
-        snap = assemble_complete_snapshot(facts, snapshot_id=sid,
-                                          content_hash_fn=snapshot_content_hash)
+        snap = assemble_complete_snapshot(
+            facts, snapshot_id=sid, content_hash_fn=snapshot_content_hash
+        )
         permit = authorize_user_request(snapshot_id=sid, clock=lambda: NOW)
         store.append(snap, permit)
 
@@ -1056,14 +1253,21 @@ def test_no_ordinal_continuity_claim(tmp_path, capsys):
 
 # --- Slice 7 MATERIAL 1: typed report closed error mapping ---
 
-@pytest.mark.parametrize("read_reason", [
-    "not_found", "schema_mismatch", "store_locked", "store_corrupt",
-])
+
+@pytest.mark.parametrize(
+    "read_reason",
+    [
+        "not_found",
+        "schema_mismatch",
+        "store_locked",
+        "store_corrupt",
+    ],
+)
 def test_report_typed_preserves_exact_read_error_reason(tmp_path, read_reason):
     """toss_report typed branch must map HoldingsSnapshotReadError.reason
     exactly to LiveRunError.code, not collapse everything to store_corrupt."""
-    from tokmo.records.holdings_snapshots import HoldingsSnapshotReadError
     from tokmo.composition import toss_report
+    from tokmo.records.holdings_snapshots import HoldingsSnapshotReadError
 
     class FailingStore:
         def read_latest_pair(self):
@@ -1105,6 +1309,7 @@ def test_report_typed_propagates_unexpected_assertion_error(tmp_path):
 
 # --- Slice 7 MATERIAL 2: pre-query context (UUID, purpose, seam) ---
 
+
 class _TransportCallTracker:
     """Wraps auth/data transports to count whether they were called."""
 
@@ -1118,10 +1323,12 @@ class _TransportCallTracker:
         class _Auth:
             def __init__(self):
                 self.outcomes = list(outcomes)
+
             def __call__(self, request):
                 tracker.auth_called = True
                 assert tracker.outcomes, "auth started unexpectedly"
                 return tracker.outcomes.pop(0)
+
         return _Auth()
 
     def make_data(self, *outcomes):
@@ -1130,10 +1337,12 @@ class _TransportCallTracker:
         class _Data:
             def __init__(self):
                 self.outcomes = list(outcomes)
+
             def __call__(self, request):
                 tracker.data_called = True
                 assert tracker.outcomes, "data started unexpectedly"
                 return tracker.outcomes.pop(0)
+
         return _Data()
 
 
@@ -1162,10 +1371,14 @@ def test_material2_denied_purpose_zero_transport_zero_state_zero_append(tmp_path
 
     with pytest.raises(LiveRunError) as error:
         run_toss(
-            home=tmp_path, project_root=project_root_of(tmp_path),
+            home=tmp_path,
+            project_root=project_root_of(tmp_path),
             auth_transport=tracker.make_auth(ok(TOKEN_BODY)),
-            data_transport=tracker.make_data(ok(ACCOUNTS_BODY), ok(HOLDINGS_BODY), ok(HOLDINGS_BODY)),
-            clock=Clock(), sleeper=Clock().sleep,
+            data_transport=tracker.make_data(
+                ok(ACCOUNTS_BODY), ok(HOLDINGS_BODY), ok(HOLDINGS_BODY)
+            ),
+            clock=Clock(),
+            sleeper=Clock().sleep,
             id_factory=iter([f"r-{i}" for i in range(20)]).__next__,
             run_id="toss-run",
             snapshot_store=spy,
@@ -1194,10 +1407,12 @@ def test_material2_missing_hasher_zero_transport(tmp_path):
 
     with pytest.raises(LiveRunError) as error:
         run_toss(
-            home=tmp_path, project_root=project_root_of(tmp_path),
+            home=tmp_path,
+            project_root=project_root_of(tmp_path),
             auth_transport=tracker.make_auth(ok(TOKEN_BODY)),
             data_transport=tracker.make_data(),
-            clock=Clock(), sleeper=Clock().sleep,
+            clock=Clock(),
+            sleeper=Clock().sleep,
             id_factory=iter([f"r-{i}" for i in range(20)]).__next__,
             run_id="toss-run",
             snapshot_store=SpyStore(),
@@ -1226,10 +1441,12 @@ def test_material2_invalid_factory_zero_transport(tmp_path):
 
     with pytest.raises(LiveRunError) as error:
         run_toss(
-            home=tmp_path, project_root=project_root_of(tmp_path),
+            home=tmp_path,
+            project_root=project_root_of(tmp_path),
             auth_transport=tracker.make_auth(ok(TOKEN_BODY)),
             data_transport=tracker.make_data(),
-            clock=Clock(), sleeper=Clock().sleep,
+            clock=Clock(),
+            sleeper=Clock().sleep,
             id_factory=iter([f"r-{i}" for i in range(20)]).__next__,
             run_id="toss-run",
             snapshot_store=SpyStore(),
@@ -1247,7 +1464,8 @@ def test_material2_factory_called_once_same_id_binds_all(tmp_path):
     """The snapshot_id_factory is called exactly once, and the same
     generated ID binds snapshot, permit, and append call."""
     from tokmo.records.holdings_snapshots import (
-        HoldingsSnapshotStore, snapshot_content_hash,
+        HoldingsSnapshotStore,
+        snapshot_content_hash,
     )
 
     leaf = prepare(tmp_path)
@@ -1266,6 +1484,7 @@ def test_material2_factory_called_once_same_id_binds_all(tmp_path):
     class SpyStore:
         def __init__(self, inner):
             self._inner = inner
+
         def append(self, snapshot, permit):
             append_calls.append((snapshot, permit))
             return self._inner.append(snapshot, permit)
@@ -1275,9 +1494,12 @@ def test_material2_factory_called_once_same_id_binds_all(tmp_path):
     auth = Transport(ok(TOKEN_BODY))
     data = Transport(ok(ACCOUNTS_BODY), ok(HOLDINGS_BODY), ok(HOLDINGS_BODY))
     result = run_toss(
-        home=tmp_path, project_root=project_root_of(tmp_path),
-        auth_transport=auth, data_transport=data,
-        clock=Clock(), sleeper=Clock().sleep,
+        home=tmp_path,
+        project_root=project_root_of(tmp_path),
+        auth_transport=auth,
+        data_transport=data,
+        clock=Clock(),
+        sleeper=Clock().sleep,
         id_factory=iter([f"r-{i}" for i in range(20)]).__next__,
         run_id="toss-run",
         snapshot_store=spy,

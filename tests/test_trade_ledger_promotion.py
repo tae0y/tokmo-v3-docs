@@ -11,11 +11,11 @@ back a completed promotion. Synthetic fixtures and temporary paths only.
 import itertools
 import os
 import sqlite3
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pytest
 
-import tokmo.records.trade_ledger_store as trade_ledger_store
+from tokmo.records import trade_ledger_store
 from tokmo.records.trade_ledger_store import (
     TradeLedgerStore,
     cleanup_candidate_alias,
@@ -24,8 +24,7 @@ from tokmo.records.trade_ledger_store import (
 )
 from tokmo.values.trade_ledger import ImportAuditMeta, TradeLedgerEvent
 
-
-NOW = datetime(2026, 7, 28, 1, 2, 3, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 28, 1, 2, 3, tzinfo=UTC)
 SOURCE = "retirement_excel_v1"
 SCOPE = "retirement_pension_1"
 _ID_COUNTER = itertools.count(1)
@@ -80,9 +79,7 @@ def test_promotion_links_canonical_as_same_inode_and_preserves_candidate(
     assert candidate.stat().st_ino == canonical.stat().st_ino
     assert not candidate.with_name(candidate.name + "-wal").exists()
     assert not candidate.with_name(candidate.name + "-shm").exists()
-    read_back = make_store(canonical).read_scope(
-        source=SOURCE, account_scope=SCOPE
-    )
+    read_back = make_store(canonical).read_scope(source=SOURCE, account_scope=SCOPE)
     assert len(read_back) == 2
 
 
@@ -100,9 +97,7 @@ def test_promotion_requires_an_existing_candidate(tmp_path):
     private = tmp_path / "private"
     private.mkdir(mode=0o700)
     with pytest.raises(FileNotFoundError) as captured:
-        finalize_candidate(
-            private / "candidate.sqlite3", private / "canonical.sqlite3"
-        )
+        finalize_candidate(private / "candidate.sqlite3", private / "canonical.sqlite3")
     assert str(captured.value) == "candidate_missing"
 
 
@@ -154,9 +149,7 @@ def test_sidecars_surviving_the_checkpoint_fail_promotion_before_linking(
     assert candidate.exists()
 
 
-def test_pre_link_candidate_fsync_failure_aborts_promotion(
-    tmp_path, monkeypatch
-):
+def test_pre_link_candidate_fsync_failure_aborts_promotion(tmp_path, monkeypatch):
     candidate = populated_candidate(tmp_path)
     canonical = candidate.with_name("canonical.sqlite3")
     candidate_before = candidate.read_bytes()
@@ -254,9 +247,9 @@ def test_cleanup_unlinks_only_the_same_inode_alias(tmp_path):
 
     assert not candidate.exists()
     assert canonical.exists()
-    assert len(
-        make_store(canonical).read_scope(source=SOURCE, account_scope=SCOPE)
-    ) == 2
+    assert (
+        len(make_store(canonical).read_scope(source=SOURCE, account_scope=SCOPE)) == 2
+    )
     # Idempotent: a second cleanup with the candidate gone is a no-op.
     cleanup_candidate_alias(candidate, canonical)
 
@@ -272,9 +265,7 @@ def test_cleanup_refuses_a_divergent_candidate(tmp_path):
     assert candidate.exists()
 
 
-def test_cleanup_failure_never_invalidates_a_completed_promotion(
-    tmp_path, monkeypatch
-):
+def test_cleanup_failure_never_invalidates_a_completed_promotion(tmp_path, monkeypatch):
     candidate = populated_candidate(tmp_path)
     canonical = candidate.with_name("canonical.sqlite3")
     finalize_candidate(candidate, canonical)
@@ -290,9 +281,9 @@ def test_cleanup_failure_never_invalidates_a_completed_promotion(
     assert str(captured.value) == "store_write_failed"
     assert canonical.exists()
     assert candidate.exists()
-    assert len(
-        make_store(canonical).read_scope(source=SOURCE, account_scope=SCOPE)
-    ) == 2
+    assert (
+        len(make_store(canonical).read_scope(source=SOURCE, account_scope=SCOPE)) == 2
+    )
 
 
 def test_promotion_errors_carry_closed_tokens_without_paths(tmp_path):
@@ -313,9 +304,7 @@ def test_wal_journal_candidate_is_checkpointed_before_linking(tmp_path):
     # writer would leave it, then verify promotion checkpoints and links.
     connection = sqlite3.connect(candidate, isolation_level=None)
     connection.execute("PRAGMA journal_mode=WAL")
-    connection.execute(
-        "UPDATE trade_ledger_import_batches SET stored_at=stored_at"
-    )
+    connection.execute("UPDATE trade_ledger_import_batches SET stored_at=stored_at")
     connection.close()
 
     finalize_candidate(candidate, canonical)

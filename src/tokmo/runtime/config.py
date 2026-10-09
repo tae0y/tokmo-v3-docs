@@ -80,8 +80,11 @@ def load_sec_config(path: Path) -> SecConfig:
     if SEC_USER_AGENT_KEY not in values:
         raise ConfigError("config_missing")
     user_agent = values[SEC_USER_AGENT_KEY]
-    if (not user_agent or user_agent.lower() in PLACEHOLDER_VALUES
-            or "@" not in user_agent):
+    if (
+        not user_agent
+        or user_agent.lower() in PLACEHOLDER_VALUES
+        or "@" not in user_agent
+    ):
         raise ConfigError("config_invalid")
     return SecConfig(user_agent=user_agent)
 

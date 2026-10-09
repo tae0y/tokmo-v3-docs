@@ -20,13 +20,17 @@ SRC_ROOT = Path(__file__).parents[1] / "src" / "tokmo"
 # G1A: sec_fundamentals_live.py and opendart_fundamentals_live.py are
 # registered for fundamental value transports. Only composition may import them.
 LIVE_TRANSPORT_MODULES = {
-    "facts/eia_live.py", "facts/sec_live.py", "facts/opendart_live.py",
+    "facts/eia_live.py",
+    "facts/sec_live.py",
+    "facts/opendart_live.py",
     "facts/opendart_bulk_live.py",
     "facts/opendart_document_live.py",  # NEWS selected-candidate document GET; worker composition only.
     "facts/sec_document_live.py",  # NEWS SEC primary document; existing declared User-Agent boundary.
     "facts/krx_live.py",
-    "facts/toss_auth_live.py", "facts/toss_live.py",
-    "facts/toss_prices_live.py", "facts/toss_reads_live.py",
+    "facts/toss_auth_live.py",
+    "facts/toss_live.py",
+    "facts/toss_prices_live.py",
+    "facts/toss_reads_live.py",
     "facts/toss_order_commands_live.py",
     "facts/kis_etf_live.py",
     "facts/news_http.py",
@@ -35,18 +39,21 @@ LIVE_TRANSPORT_MODULES = {
     "facts/sec_fundamentals_live.py",
     "facts/opendart_fundamentals_live.py",
     "facts/fred_live.py",
-    "facts/kis_etf_live.py",
     "facts/etf_issuer_live.py",
     "facts/official_membership_live.py",
 }
 LIVE_TRANSPORT_IMPORT_PREFIXES = tuple(
     "tokmo." + module.removesuffix(".py").replace("/", ".")
-    for module in sorted(LIVE_TRANSPORT_MODULES))
+    for module in sorted(LIVE_TRANSPORT_MODULES)
+)
 NEWS_HTTP_MODULE = "facts/news_http.py"
 NEWS_SOURCE_ADAPTER_MODULES = {
-    "facts/bbc_news_live.py", "facts/finnhub_news_live.py",
-    "facts/google_news_live.py", "facts/jtbc_news_live.py",
-    "facts/investing_news_live.py", "facts/naver_news_live.py",
+    "facts/bbc_news_live.py",
+    "facts/finnhub_news_live.py",
+    "facts/google_news_live.py",
+    "facts/jtbc_news_live.py",
+    "facts/investing_news_live.py",
+    "facts/naver_news_live.py",
     "facts/yonhap_news_live.py",
 }
 
@@ -60,8 +67,11 @@ TOSS_READS_MODULE = "facts/toss_reads.py"
 TOSS_READS_LIVE_MODULE = "facts/toss_reads_live.py"
 TOSS_COMMANDS_MODULE = "facts/toss_order_commands.py"
 TOSS_COMMAND_PATHS = {
-    "/api/v1/orders", "/api/v1/orders/{id}/modify", "/api/v1/orders/{id}/cancel",
-    "/api/v1/conditional-orders", "/api/v1/conditional-orders/{id}/modify",
+    "/api/v1/orders",
+    "/api/v1/orders/{id}/modify",
+    "/api/v1/orders/{id}/cancel",
+    "/api/v1/conditional-orders",
+    "/api/v1/conditional-orders/{id}/modify",
     "/api/v1/conditional-orders/{id}",
 }
 TOSS_ALLOWED_API_PATHS = {"/api/v1/accounts", "/api/v1/holdings"}
@@ -71,27 +81,41 @@ FINNHUB_NEWS_LIVE_MODULE = "facts/finnhub_news_live.py"
 NEWS_ALLOWED_API_PATHS = {"/api/v1/company-news", "/api/v1/news"}
 REQUEST_PARITY_OWNER = "values/request_parity.py"
 REQUEST_PARITY_ALLOWED_PATHS = {
-    "/oauth2/token", "/api/v1/accounts", "/api/v1/holdings", "/api/v1/prices",
-    "/api/v1/orders", "/api/v1/orders/{orderId}",
-    "/api/v1/market-calendar/KR", "/api/v1/market-calendar/US",
+    "/oauth2/token",
+    "/api/v1/accounts",
+    "/api/v1/holdings",
+    "/api/v1/prices",
+    "/api/v1/orders",
+    "/api/v1/orders/{orderId}",
+    "/api/v1/market-calendar/KR",
+    "/api/v1/market-calendar/US",
     "/api/v1/candles",
 }
 # The 17 remaining authorized read paths live only in toss_reads.py and
 # toss_reads_live.py. Path templates with {placeholder} are included.
 TOSS_ALLOWED_READ_PATHS = {
     "/api/v1/stocks/{symbol}/investor-trading",
-    "/api/v1/orderbook", "/api/v1/trades", "/api/v1/price-limits",
-    "/api/v1/candles", "/api/v1/stocks", "/api/v1/stocks/{symbol}/warnings",
-    "/api/v1/exchange-rate", "/api/v1/market-calendar/KR",
-    "/api/v1/market-calendar/US", "/api/v1/rankings",
+    "/api/v1/orderbook",
+    "/api/v1/trades",
+    "/api/v1/price-limits",
+    "/api/v1/candles",
+    "/api/v1/stocks",
+    "/api/v1/stocks/{symbol}/warnings",
+    "/api/v1/exchange-rate",
+    "/api/v1/market-calendar/KR",
+    "/api/v1/market-calendar/US",
+    "/api/v1/rankings",
     "/api/v1/market-indicators/prices",
     "/api/v1/market-indicators/{symbol}/candles",
     "/api/v1/market-indicators/{symbol}/investor-trading",
-    "/api/v1/orders", "/api/v1/orders/{orderId}",
+    "/api/v1/orders",
+    "/api/v1/orders/{orderId}",
     "/api/v1/conditional-orders",
     "/api/v1/conditional-orders/{conditionalOrderId}",
     # User-approved Quant inputs: existing-token GET reads, no orders.
-    "/api/v1/buying-power", "/api/v1/sellable-quantity", "/api/v1/commissions",
+    "/api/v1/buying-power",
+    "/api/v1/sellable-quantity",
+    "/api/v1/commissions",
 }
 # Buying power, sellable quantity and commissions were later authorized for
 # Quant. Check their read-only behavior below instead of preserving an old ban.
@@ -105,20 +129,45 @@ EIA_OFFICIAL_PATH = "/v2/petroleum/pri/spt/data/"
 
 # Messaging, AI providers, brokers/exchanges, and generic HTTP clients.
 FORBIDDEN_TOP_LEVEL = {
-    "telegram", "telebot", "aiogram",
-    "openai", "anthropic", "google",
-    "boto3", "requests", "httpx", "aiohttp", "urllib3",
-    "websocket", "websockets", "ccxt", "ib_insync", "alpaca_trade_api",
+    "telegram",
+    "telebot",
+    "aiogram",
+    "openai",
+    "anthropic",
+    "google",
+    "boto3",
+    "requests",
+    "httpx",
+    "aiohttp",
+    "urllib3",
+    "websocket",
+    "websockets",
+    "ccxt",
+    "ib_insync",
+    "alpaca_trade_api",
 }
 # Standard-library network/transport modules (urllib.parse stays allowed).
 FORBIDDEN_MODULE_PREFIXES = {
-    "urllib.request", "urllib.error", "http.client", "socket", "ssl",
-    "ftplib", "smtplib", "poplib", "imaplib", "telnetlib",
-    "socketserver", "xmlrpc",
+    "urllib.request",
+    "urllib.error",
+    "http.client",
+    "socket",
+    "ssl",
+    "ftplib",
+    "smtplib",
+    "poplib",
+    "imaplib",
+    "telnetlib",
+    "socketserver",
+    "xmlrpc",
 }
 # Process environment and ambient clocks must never appear in source.
 FORBIDDEN_SOURCE_PATTERNS = (
-    "os.environ", "getenv(", "datetime.now(", "utcnow(", "urlopen(",
+    "os.environ",
+    "getenv(",
+    "datetime.now(",
+    "utcnow(",
+    "urlopen(",
 )
 # Injected dependencies must have no defaults anywhere in the tree.
 INJECTED_PARAMETER_NAMES = {"transport", "clock", "id_factory"}
@@ -145,6 +194,7 @@ def tokmo_modules():
 
 def static_strings(source):
     """Fold fully-static literals, concatenations, and f-strings."""
+
     def fold(node):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             return node.value
@@ -156,7 +206,11 @@ def static_strings(source):
             for value in node.values:
                 if isinstance(value, ast.FormattedValue):
                     inner = value.value
-                    part = str(inner.value) if isinstance(inner, ast.Constant) else fold(inner)
+                    part = (
+                        str(inner.value)
+                        if isinstance(inner, ast.Constant)
+                        else fold(inner)
+                    )
                 else:
                     part = fold(value)
                 if part is None:
@@ -164,18 +218,33 @@ def static_strings(source):
                 parts.append(part)
             return "".join(parts)
         return None
-    return {value for node in ast.walk(ast.parse(source)) if (value := fold(node)) is not None}
+
+    return {
+        value
+        for node in ast.walk(ast.parse(source))
+        if (value := fold(node)) is not None
+    }
 
 
 def provider_paths(source):
     strings = static_strings(source)
-    api = {match for value in strings for match in re.findall(r"/api/v1[A-Za-z0-9/_{}.-]*", value)}
-    auth = {match for value in strings for match in re.findall(r"/oauth2[A-Za-z0-9/_{}.-]*", value)}
+    api = {
+        match
+        for value in strings
+        for match in re.findall(r"/api/v1[A-Za-z0-9/_{}.-]*", value)
+    }
+    auth = {
+        match
+        for value in strings
+        for match in re.findall(r"/oauth2[A-Za-z0-9/_{}.-]*", value)
+    }
     return api, auth
 
 
 def test_provider_path_scanner_folds_split_and_f_string_literals():
-    api, auth = provider_paths('A = "/api" + "/v1/orders"\nB = f"/{\'oauth\'}{2}/token"')
+    api, auth = provider_paths(
+        'A = "/api" + "/v1/orders"\nB = f"/{\'oauth\'}{2}/token"'
+    )
     assert api == {"/api/v1/orders"}
     assert auth == {"/oauth2/token"}
 
@@ -211,28 +280,34 @@ def test_no_v2_or_legacy_path_references_in_source():
         # that "v2" only appears inside exact allowed string literals
         # in the designated owner files. This blanket text scan covers the
         # remaining files where no v2 token should appear at all.
-        if relative in ("values/material_pack.py",
-                        "records/holdings_snapshot_migration.py",
-                        "programs/pulse_canary.py",
-                        "programs/quant_kr_source_contract.py"):
+        if relative in (
+            "values/material_pack.py",
+            "records/holdings_snapshot_migration.py",
+            "programs/pulse_canary.py",
+            "programs/quant_kr_source_contract.py",
+        ):
             continue
         assert "v2" not in text, relative
 
 
 # N2: exact string-literal allowlist entries.
-_N2_V2_ALLOWLIST = frozenset({
-    "composite-holdings-v2",
-    "pension-excel-v2",
-    "generation r2",
-    "kr_quant_source_contract_toss_v2",
-    "kr_quant_source_contract_dart_v2",
-})
+_N2_V2_ALLOWLIST = frozenset(
+    {
+        "composite-holdings-v2",
+        "pension-excel-v2",
+        "generation r2",
+        "kr_quant_source_contract_toss_v2",
+        "kr_quant_source_contract_dart_v2",
+    }
+)
 
-_N2_OWNER_FILES = frozenset({
-    "values/material_pack.py",
-    "records/holdings_snapshot_migration.py",
-    "programs/quant_kr_source_contract.py",
-})
+_N2_OWNER_FILES = frozenset(
+    {
+        "values/material_pack.py",
+        "records/holdings_snapshot_migration.py",
+        "programs/quant_kr_source_contract.py",
+    }
+)
 
 
 def test_n2_v2_allowlist_ast_seal():
@@ -249,7 +324,12 @@ def test_n2_v2_allowlist_ast_seal():
         for node in ast.walk(tree):
             if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef)):
                 body = getattr(node, "body", [])
-                if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) and isinstance(body[0].value.value, str):
+                if (
+                    body
+                    and isinstance(body[0], ast.Expr)
+                    and isinstance(body[0].value, ast.Constant)
+                    and isinstance(body[0].value.value, str)
+                ):
                     docstring_nodes.add(body[0].value)
         for node in ast.walk(tree):
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
@@ -266,7 +346,8 @@ def test_n2_v2_allowlist_ast_seal():
                     if isinstance(child, ast.Constant) and isinstance(child.value, str):
                         if "v2" in child.value.lower():
                             raise AssertionError(
-                                f"{relative}: v2 in f-string forbidden")
+                                f"{relative}: v2 in f-string forbidden"
+                            )
             elif isinstance(node, ast.Name):
                 if "v2" in node.id.lower():
                     # Identifier-level v2 (e.g. _validate_holdings_generation_r2)
@@ -275,7 +356,8 @@ def test_n2_v2_allowlist_ast_seal():
         # Every v2 string literal must be in the allowlist.
         for token in found_v2_tokens:
             assert token in _N2_V2_ALLOWLIST, (
-                f"{relative}: unallowed v2 token '{token}'")
+                f"{relative}: unallowed v2 token '{token}'"
+            )
 
 
 def test_no_forbidden_provider_network_or_order_imports_anywhere():
@@ -285,18 +367,41 @@ def test_no_forbidden_provider_network_or_order_imports_anywhere():
         if relative in LIVE_TRANSPORT_MODULES:
             continue  # checked separately below
         for name in imports:
-            if name in {'urllib.error', 'urllib.error.HTTPError', 'urllib.error.URLError'}:
+            if name in {
+                "urllib.error",
+                "urllib.error.HTTPError",
+                "urllib.error.URLError",
+            }:
                 # Passive exception types let injected callers classify failure;
                 # they expose no request/open/transport capability. Keep module
                 # imports and every other urllib symbol under the existing ban.
-                nodes = [node for node in ast.walk(ast.parse((SRC_ROOT / relative).read_text()))
-                         if isinstance(node, (ast.Import, ast.ImportFrom))]
-                assert not any(isinstance(node, ast.Import) and any(a.name == 'urllib.error' for a in node.names) for node in nodes), relative
-                selected = [node for node in nodes if isinstance(node, ast.ImportFrom) and node.module == 'urllib.error']
-                assert selected and all(a.name in {'HTTPError', 'URLError'} for node in selected for a in node.names), relative
+                nodes = [
+                    node
+                    for node in ast.walk(ast.parse((SRC_ROOT / relative).read_text()))
+                    if isinstance(node, (ast.Import, ast.ImportFrom))
+                ]
+                assert not any(
+                    isinstance(node, ast.Import)
+                    and any(a.name == "urllib.error" for a in node.names)
+                    for node in nodes
+                ), relative
+                selected = [
+                    node
+                    for node in nodes
+                    if isinstance(node, ast.ImportFrom)
+                    and node.module == "urllib.error"
+                ]
+                assert selected and all(
+                    a.name in {"HTTPError", "URLError"}
+                    for node in selected
+                    for a in node.names
+                ), relative
                 continue
             for banned in FORBIDDEN_MODULE_PREFIXES:
-                assert name != banned and not name.startswith(banned + "."), (relative, name)
+                assert name != banned and not name.startswith(banned + "."), (
+                    relative,
+                    name,
+                )
 
 
 def test_live_transport_modules_are_the_only_network_adapters():
@@ -306,7 +411,8 @@ def test_live_transport_modules_are_the_only_network_adapters():
     for transport_module in LIVE_TRANSPORT_MODULES:
         live_imports = set(modules[transport_module])
         network_used = {
-            name for name in live_imports
+            name
+            for name in live_imports
             for banned in FORBIDDEN_MODULE_PREFIXES
             if name == banned or name.startswith(banned + ".")
         }
@@ -315,20 +421,29 @@ def test_live_transport_modules_are_the_only_network_adapters():
             allowed_network = {"http.client"}
         if transport_module == NEWS_HTTP_MODULE:
             allowed_network |= {
-                "socket", "urllib.error.HTTPError", "urllib.error.URLError",
-                "urllib.request.HTTPRedirectHandler", "urllib.request.ProxyHandler",
-                "urllib.request.Request", "urllib.request.build_opener",
+                "socket",
+                "urllib.error.HTTPError",
+                "urllib.error.URLError",
+                "urllib.request.HTTPRedirectHandler",
+                "urllib.request.ProxyHandler",
+                "urllib.request.Request",
+                "urllib.request.build_opener",
             }
-        if transport_module in ("facts/telegram_reminder_live.py",
-                                "facts/telegram_dialogue_live.py"):
+        if transport_module in (
+            "facts/telegram_reminder_live.py",
+            "facts/telegram_dialogue_live.py",
+        ):
             allowed_network |= {"ssl"}
         assert network_used <= allowed_network, network_used
         # Live transport modules must use the stdlib HTTPS boundary, EXCEPT
         # for opendart_fundamentals_live which is PAUSED and imports no
         # network stack at all (no urllib.request/urllib.error).
         if transport_module != "facts/opendart_fundamentals_live.py":
-            assert ({"http.client"} if transport_module == "facts/krx_live.py"
-                    else {"urllib.request"}) <= live_imports
+            assert (
+                {"http.client"}
+                if transport_module == "facts/krx_live.py"
+                else {"urllib.request"}
+            ) <= live_imports
 
     for relative, imports in modules.items():
         if relative in LIVE_TRANSPORT_MODULES:
@@ -340,13 +455,20 @@ def test_live_transport_modules_are_the_only_network_adapters():
             or relative == "kis_composition.py"
             or relative in NEWS_SOURCE_ADAPTER_MODULES
         )
-        uses_live = any(name.startswith(LIVE_TRANSPORT_IMPORT_PREFIXES)
-                            for name in imports)
+        uses_live = any(
+            name.startswith(LIVE_TRANSPORT_IMPORT_PREFIXES) for name in imports
+        )
         if relative == "programs/quant_input_capture.py":
             # Optional existing collector composition reuses its acquired
             # bearer. This module must never acquire a second auth transport.
-            assert {name for name in imports if name.startswith(LIVE_TRANSPORT_IMPORT_PREFIXES)} <= {
-                "tokmo.facts.toss_reads_live", "tokmo.facts.toss_reads_live.TossReadsLiveTransport"}
+            assert {
+                name
+                for name in imports
+                if name.startswith(LIVE_TRANSPORT_IMPORT_PREFIXES)
+            } <= {
+                "tokmo.facts.toss_reads_live",
+                "tokmo.facts.toss_reads_live.TossReadsLiveTransport",
+            }
             importers_allowed = True
         assert not uses_live or importers_allowed, relative
 
@@ -362,18 +484,30 @@ def test_no_process_env_or_direct_clock_in_source():
         for pattern in FORBIDDEN_SOURCE_PATTERNS:
             if relative == WALLCLOCK_MODULE and pattern == "datetime.now(":
                 continue
-            if relative in ("facts/telegram_reminder_live.py",
-                            "facts/telegram_dialogue_live.py") \
-                    and pattern == "urlopen(":
+            if (
+                relative
+                in (
+                    "facts/telegram_reminder_live.py",
+                    "facts/telegram_dialogue_live.py",
+                )
+                and pattern == "urlopen("
+            ):
                 continue
             assert pattern not in text, (relative, pattern)
 
 
 def test_wallclock_leaf_is_imported_only_by_the_composition_root():
     for relative, imports in tokmo_modules():
-        if relative in {"composition.py", "opendart_bulk_composition.py", "kis_composition.py", WALLCLOCK_MODULE}:
+        if relative in {
+            "composition.py",
+            "opendart_bulk_composition.py",
+            "kis_composition.py",
+            WALLCLOCK_MODULE,
+        }:
             continue
-        assert not any(name.startswith("tokmo.runtime.wallclock") for name in imports), relative
+        assert not any(
+            name.startswith("tokmo.runtime.wallclock") for name in imports
+        ), relative
 
 
 # Composition-root operation seams wire ambient dependencies (clock,
@@ -391,7 +525,9 @@ def test_injected_dependencies_have_no_defaults():
     for relative, _imports in tokmo_modules():
         tree = ast.parse((SRC_ROOT / relative).read_text())
         for node in ast.walk(tree):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            if not isinstance(
+                node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+            ):
                 continue
             is_seam = (
                 relative == "composition.py"
@@ -418,8 +554,12 @@ def _is_presentation_internal(name: str) -> bool:
 
 # presentation 계층이 의존할 수 없는 tokmo 하위 패키지.
 PRESENTATION_FORBIDDEN = (
-    "tokmo.facts", "tokmo.records", "tokmo.programs",
-    "tokmo.runtime", "tokmo.observability", "tokmo.composition",
+    "tokmo.facts",
+    "tokmo.records",
+    "tokmo.programs",
+    "tokmo.runtime",
+    "tokmo.observability",
+    "tokmo.composition",
 )
 
 
@@ -434,26 +574,38 @@ def test_layer_import_directions_match_contract():
                 for name in imports
             ), relative
         if area == "facts":
-            assert not any(name.startswith("tokmo.records") for name in imports), relative
-            assert not any(_is_presentation_internal(name) for name in imports), relative
+            assert not any(name.startswith("tokmo.records") for name in imports), (
+                relative
+            )
+            assert not any(_is_presentation_internal(name) for name in imports), (
+                relative
+            )
         if area == "records":
             assert not any(name.startswith("tokmo.facts") for name in imports), relative
-            assert not any(_is_presentation_internal(name) for name in imports), relative
+            assert not any(_is_presentation_internal(name) for name in imports), (
+                relative
+            )
         if area == "presentation":
             # presentation → values / presentation 내부만 허용.
             for name in imports:
                 if name.startswith("tokmo"):
-                    assert _is_values_internal(name) or _is_presentation_internal(name), (
-                        relative, name,
+                    assert _is_values_internal(name) or _is_presentation_internal(
+                        name
+                    ), (
+                        relative,
+                        name,
                     )
         if area == "observability":
             domain_prefixes = ("tokmo.facts", "tokmo.records", "tokmo.programs")
-            assert not any(name.startswith(domain_prefixes) for name in imports), relative
+            assert not any(name.startswith(domain_prefixes) for name in imports), (
+                relative
+            )
 
 
 def _permit_constructor_calls(source):
     return [
-        node for node in ast.walk(ast.parse(source))
+        node
+        for node in ast.walk(ast.parse(source))
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
         and node.func.id == "HoldingsPersistencePermitV1"
@@ -462,7 +614,8 @@ def _permit_constructor_calls(source):
 
 def test_no_permit_construction_outside_approved_modules():
     assert _permit_constructor_calls(
-        "HoldingsPersistencePermitV1(criteria_version='fixture')")
+        "HoldingsPersistencePermitV1(criteria_version='fixture')"
+    )
     for path in sorted(SRC_ROOT.rglob("*.py")):
         relative = path.relative_to(SRC_ROOT).as_posix()
         if relative == "records/holdings_persistence.py":
@@ -479,14 +632,20 @@ def test_no_permit_construction_outside_approved_modules():
         for alias in node.names
     }
     assert imported & {"HoldingsPersistencePermitV1", "validate_permit"} == {
-        "HoldingsPersistencePermitV1", "validate_permit"}
+        "HoldingsPersistencePermitV1",
+        "validate_permit",
+    }
     assert not any(name.startswith("authorize_") for name in imported)
 
 
 def test_runtime_loader_is_reached_only_from_composition_root():
     for relative, imports in tokmo_modules():
-        if relative in {"composition.py", "opendart_bulk_composition.py", "kis_composition.py",
-                        "runtime/config.py"}:
+        if relative in {
+            "composition.py",
+            "opendart_bulk_composition.py",
+            "kis_composition.py",
+            "runtime/config.py",
+        }:
             continue
         assert not any(name.startswith("tokmo.runtime") for name in imports), relative
 
@@ -504,14 +663,21 @@ def test_provider_api_path_literals_are_closed_and_confined():
                 TOSS_READS_LIVE_MODULE: TOSS_ALLOWED_READ_PATHS,
                 TOSS_COMMANDS_MODULE: TOSS_COMMAND_PATHS,
                 FINNHUB_NEWS_LIVE_MODULE: NEWS_ALLOWED_API_PATHS,
-                    REQUEST_PARITY_OWNER: REQUEST_PARITY_ALLOWED_PATHS - TOSS_ALLOWED_AUTH_PATHS,
-                    # Provenance labels in captured inputs; requests still go
-                    # through the enumerated GET adapter above.
-                "programs/quant_decision_inputs.py": {"/api/v1/buying-power", "/api/v1/stocks"},
+                REQUEST_PARITY_OWNER: REQUEST_PARITY_ALLOWED_PATHS
+                - TOSS_ALLOWED_AUTH_PATHS,
+                # Provenance labels in captured inputs; requests still go
+                # through the enumerated GET adapter above.
+                "programs/quant_decision_inputs.py": {
+                    "/api/v1/buying-power",
+                    "/api/v1/stocks",
+                },
                 # 2026-09-28: validate existing official cache provenance;
                 # this label does not construct or issue a provider request.
                 "programs/opportunity_rotation_capture.py": {"/api/v1/stocks"},
-                "facts/etf_issuer.py": {"/api/v1/kodex/product-pdf/", "/api/v1/product/pdf/list"},
+                "facts/etf_issuer.py": {
+                    "/api/v1/kodex/product-pdf/",
+                    "/api/v1/product/pdf/list",
+                },
             }
             assert relative in allowed, (relative, sorted(api_paths))
             assert api_paths <= allowed[relative], sorted(api_paths)
@@ -523,28 +689,36 @@ def test_provider_api_path_literals_are_closed_and_confined():
             }
             assert relative in allowed, (relative, sorted(auth_paths))
             assert auth_paths <= allowed[relative], sorted(auth_paths)
-    owner_api, owner_auth = provider_paths((SRC_ROOT / REQUEST_PARITY_OWNER).read_text())
+    owner_api, owner_auth = provider_paths(
+        (SRC_ROOT / REQUEST_PARITY_OWNER).read_text()
+    )
     assert owner_api | owner_auth == REQUEST_PARITY_ALLOWED_PATHS
 
 
 def test_quant_order_information_is_read_only():
-    from tokmo.facts.toss_reads import build_read_request, TossReadOperation
+    from tokmo.facts.toss_reads import TossReadOperation, build_read_request
     from tokmo.facts.toss_reads_live import TossReadsLiveTransport
-    seen=[]
+
+    seen = []
+
     class OfflineOpener:
-        def open(self,request,**kwargs):
+        def open(self, request, **kwargs):
             seen.append(request.get_method())
             assert request.data is None
-            raise TimeoutError('offline check')
-    transport=TossReadsLiveTransport();transport.opener=OfflineOpener()
+            raise TimeoutError("offline check")
+
+    transport = TossReadsLiveTransport()
+    transport.opener = OfflineOpener()
     for operation, kwargs in (
-        (TossReadOperation.BUYING_POWER, {'currency':'KRW'}),
-        (TossReadOperation.SELLABLE_QUANTITY, {'symbol':'005380'}),
+        (TossReadOperation.BUYING_POWER, {"currency": "KRW"}),
+        (TossReadOperation.SELLABLE_QUANTITY, {"symbol": "005380"}),
         (TossReadOperation.COMMISSIONS, {}),
     ):
-        request=build_read_request(operation,token='synthetic',account_seq='1',**kwargs)
+        request = build_read_request(
+            operation, token="synthetic", account_seq="1", **kwargs
+        )
         transport(request)
-    assert seen==['GET','GET','GET']
+    assert seen == ["GET", "GET", "GET"]
 
 
 def test_the_data_adapter_can_name_no_write_method():
@@ -574,7 +748,7 @@ def test_request_parity_owner_allows_post_only_for_token_path():
                 operation_spec = ast.literal_eval(value)
                 post_specs.append((key.value, operation_spec[0], operation_spec[1]))
     assert post_specs == [("TOKEN", "POST", "/oauth2/token")]
-    assert len(re.findall(r'\bPOST\b', source, re.IGNORECASE)) == 1
+    assert len(re.findall(r"\bPOST\b", source, re.IGNORECASE)) == 1
     for method in ("PUT", "PATCH", "DELETE"):
         assert not re.search(rf"\b{method}\b", source, re.IGNORECASE), method
 
@@ -587,6 +761,7 @@ def test_the_account_sequence_field_name_is_confined_to_the_parser():
 
 
 # --- Slice 7: programs/composition architecture invariants ---
+
 
 def test_programs_toss_holdings_never_imports_records():
     """programs/toss_holdings.py must not import from tokmo.records;
@@ -604,7 +779,7 @@ def test_composition_snapshot_store_branches_are_mutually_exclusive():
     source = (SRC_ROOT / "composition.py").read_text()
     tree = ast.parse(source)
     for node in ast.walk(tree):
-        if (isinstance(node, ast.FunctionDef) and node.name == "run_toss"):
+        if isinstance(node, ast.FunctionDef) and node.name == "run_toss":
             # Find the if snapshot_store is not None / else pattern.
             found_typed = False
             found_legacy = False
@@ -629,13 +804,21 @@ def test_no_constructor_bypass_for_permit_in_composition():
     """composition.py must not construct HoldingsPersistencePermitV1
     directly — it must use authorize_user_request/authorize_named_program."""
     source = (SRC_ROOT / "composition.py").read_text()
-    assert not _permit_constructor_calls(source), \
+    assert not _permit_constructor_calls(source), (
         "composition.py must not construct permits directly"
+    )
+
+
 def test_wti_sec_opendart_remain_green():
     source = (SRC_ROOT / "records/fact_store.py").read_text()
-    assert all(token in source for token in (
-        "WTI_SOURCE", "SEC_SOURCE", "OPENDART_SOURCE",
-    ))
+    assert all(
+        token in source
+        for token in (
+            "WTI_SOURCE",
+            "SEC_SOURCE",
+            "OPENDART_SOURCE",
+        )
+    )
 
 
 # test_post_cutover_cleanup_removes_toss_from_factstore is intentionally
@@ -644,9 +827,8 @@ def test_wti_sec_opendart_remain_green():
 
 def test_actual_cli_uses_routed_holdings_entrypoints():
     source = (SRC_ROOT / "composition.py").read_text()
-    holdings_branch = source[source.index('if args == ["toss-holdings"]'):]
-    holdings_branch = holdings_branch[:holdings_branch.index(
-        'if args == ["setup"]')]
+    holdings_branch = source[source.index('if args == ["toss-holdings"]') :]
+    holdings_branch = holdings_branch[: holdings_branch.index('if args == ["setup"]')]
     assert "run_toss_routed(" in holdings_branch
     assert "toss_report_routed(" in holdings_branch
 
@@ -670,16 +852,19 @@ def test_no_assert_statements_in_src():
 
 def test_kis_paths_are_read_only_and_confined():
     allowed = {
-        '/uapi/etfetn/v1/quotations/inquire-component-stock-price',
-        '/uapi/etfetn/v1/quotations/nav-comparison-time-trend',
-        '/uapi/etfetn/v1/quotations/nav-comparison-daily-trend',
+        "/uapi/etfetn/v1/quotations/inquire-component-stock-price",
+        "/uapi/etfetn/v1/quotations/nav-comparison-time-trend",
+        "/uapi/etfetn/v1/quotations/nav-comparison-daily-trend",
     }
     found = set()
     for relative, _imports in tokmo_modules():
-        paths = {p for value in static_strings((SRC_ROOT / relative).read_text())
-                 for p in re.findall(r'/uapi/[A-Za-z0-9/_{}.-]+', value)}
+        paths = {
+            p
+            for value in static_strings((SRC_ROOT / relative).read_text())
+            for p in re.findall(r"/uapi/[A-Za-z0-9/_{}.-]+", value)
+        }
         if paths:
-            assert relative == 'facts/kis_etf.py'
+            assert relative == "facts/kis_etf.py"
             assert paths <= allowed
             found |= paths
     assert found == allowed

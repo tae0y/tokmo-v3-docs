@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Validate and render Git-tracked narrative playbooks (stdlib only)."""
+
 from __future__ import annotations
 
 import argparse
@@ -70,32 +71,53 @@ def extract_raw_block(text: str, entry_id: str) -> str:
 
 def _entry_markdown(entry: TimelineEntry) -> str:
     fields = [
-        ("entry_id", entry.entry_id), ("source_kind", entry.source_kind),
-        ("source_ref", entry.source_ref), ("event_date", entry.event_date),
+        ("entry_id", entry.entry_id),
+        ("source_kind", entry.source_kind),
+        ("source_ref", entry.source_ref),
+        ("event_date", entry.event_date),
         ("recorded_date", entry.recorded_date),
         ("source_snapshot_date", entry.source_snapshot_date),
         ("source_snapshot_basis", entry.source_snapshot_basis),
     ]
     if entry.legacy_trade_key:
-        fields.extend((("legacy_trade_key", entry.legacy_trade_key),
-                       ("v3_trade_event_id", "unlinked")))
+        fields.extend(
+            (
+                ("legacy_trade_key", entry.legacy_trade_key),
+                ("v3_trade_event_id", "unlinked"),
+            )
+        )
     if entry.legacy_code:
-        fields.extend((("legacy_instrument_code", entry.legacy_code),
-                       ("legacy_instrument_name", entry.legacy_name or "unknown")))
+        fields.extend(
+            (
+                ("legacy_instrument_code", entry.legacy_code),
+                ("legacy_instrument_name", entry.legacy_name or "unknown"),
+            )
+        )
     fields.append(("imported_at", entry.imported_at))
     metadata = "\n".join(f"- `{key}`: `{value}`" for key, value in fields)
-    return (f'<a id="entry-{entry.entry_id}"></a>\n'
-            f"### {entry.heading_date} — {entry.heading}\n\n{metadata}\n\n"
-            f"{render_raw_block(entry.entry_id, entry.payload)}")
+    return (
+        f'<a id="entry-{entry.entry_id}"></a>\n'
+        f"### {entry.heading_date} — {entry.heading}\n\n{metadata}\n\n"
+        f"{render_raw_block(entry.entry_id, entry.payload)}"
+    )
 
 
-def render_instrument_document(*, scope: str, market: str, code: str, name: str,
-                               entries: list[TimelineEntry],
-                               current_understanding: str | None = None) -> str:
-    anchors = "\n".join(
-        f'- **검토할 원문:** [`{entry.entry_id}`](#entry-{entry.entry_id})'
-        for entry in entries
-    ) or "- 아직 원문 기록이 없다."
+def render_instrument_document(
+    *,
+    scope: str,
+    market: str,
+    code: str,
+    name: str,
+    entries: list[TimelineEntry],
+    current_understanding: str | None = None,
+) -> str:
+    anchors = (
+        "\n".join(
+            f"- **검토할 원문:** [`{entry.entry_id}`](#entry-{entry.entry_id})"
+            for entry in entries
+        )
+        or "- 아직 원문 기록이 없다."
+    )
     timeline = "\n\n".join(_entry_markdown(entry) for entry in entries)
     return f'''---
 schema_version: 1
@@ -165,12 +187,17 @@ def validate_tree(root: Path) -> list[str]:
             # Once a document carries the user's own thesis section, its
             # timeline must hold trade rationale only — a thesis in both places
             # would leave two competing "current" answers.
-            stale = [kind for kind in re.findall(r'`source_kind`: `([a-z0-9_]+)`', text)
-                     if kind in THESIS_SOURCE_KINDS]
+            stale = [
+                kind
+                for kind in re.findall(r"`source_kind`: `([a-z0-9_]+)`", text)
+                if kind in THESIS_SOURCE_KINDS
+            ]
             if stale:
-                errors.append(f"{rel}: thesis section present but timeline still "
-                              f"holds {sorted(set(stale))}")
-        for kind in re.findall(r'`source_kind`: `([a-z0-9_]+)`', text):
+                errors.append(
+                    f"{rel}: thesis section present but timeline still "
+                    f"holds {sorted(set(stale))}"
+                )
+        for kind in re.findall(r"`source_kind`: `([a-z0-9_]+)`", text):
             if kind not in TIMELINE_SOURCE_KINDS | THESIS_SOURCE_KINDS:
                 errors.append(f"{rel}: unknown source_kind {kind}")
         ids = re.findall(r'<a id="entry-([^"]+)"></a>', text)
@@ -182,10 +209,14 @@ def validate_tree(root: Path) -> list[str]:
                 extract_raw_block(text, entry_id)
             except ValueError as exc:
                 errors.append(f"{rel}: {exc}")
-        for anchor in re.findall(r'\]\(#entry-([^\)]+)\)', text):
+        for anchor in re.findall(r"\]\(#entry-([^\)]+)\)", text):
             if anchor not in ids:
                 errors.append(f"{rel}: missing anchor {anchor}")
-        if rel.parts and rel.parts[0] in {"personal", "retirement"} and len(rel.parts) == 3:
+        if (
+            rel.parts
+            and rel.parts[0] in {"personal", "retirement"}
+            and len(rel.parts) == 3
+        ):
             scope, market, filename = rel.parts
             code = filename.removesuffix(".md")
             expected = f'playbook_id: "{scope}:{market}:{code}"'

@@ -1,12 +1,14 @@
 """Typed values shared by news connectors and downstream programs."""
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from enum import StrEnum
 from urllib.parse import urlsplit
 
 from tokmo.values.external_news import (
-    ContentMode, EvidenceRole, TimeInterpretation,
+    ContentMode,
+    EvidenceRole,
+    TimeInterpretation,
 )
 
 
@@ -24,10 +26,15 @@ class NewsOriginKind(StrEnum):
     API = "API"
 
 
-REVISABLE_FIELDS = frozenset({
-    "publisher_name", "title", "title_fingerprint", "summary_text",
-    "published_at",
-})
+REVISABLE_FIELDS = frozenset(
+    {
+        "publisher_name",
+        "title",
+        "title_fingerprint",
+        "summary_text",
+        "published_at",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -62,16 +69,18 @@ class NewsConnectorSpec:
         if not isinstance(self.revisable_fields, frozenset):
             raise ValueError("revisable_fields must be a frozenset")
         if not self.revisable_fields <= REVISABLE_FIELDS:
-            raise ValueError(
-                "revisable_fields must be drawn from REVISABLE_FIELDS")
+            raise ValueError("revisable_fields must be drawn from REVISABLE_FIELDS")
         if type(self.identity_churns) is not bool:
             raise ValueError("identity_churns must be bool")
         _https_url(self.canonical_url)
 
 
 def _utc(value: datetime, name: str) -> None:
-    if (not isinstance(value, datetime) or value.tzinfo is None
-            or value.utcoffset() is None):
+    if (
+        not isinstance(value, datetime)
+        or value.tzinfo is None
+        or value.utcoffset() is None
+    ):
         raise ValueError(f"{name} must be timezone-aware")
 
 
@@ -79,67 +88,101 @@ def _https_url(value: str) -> None:
     if type(value) is not str:
         raise ValueError("canonical_url must be a string")
     parsed = urlsplit(value)
-    if (parsed.scheme != "https" or not parsed.hostname
-            or parsed.username is not None or parsed.password is not None):
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
         raise ValueError("canonical_url must be credential-free absolute HTTPS")
 
 
 # Feeds that churn also rewrite the publisher label on a settled article, so
 # the churning connectors carry it alongside the headline fields.
-_HEADLINE_REVISIONS = frozenset({
-    "publisher_name", "title", "title_fingerprint", "summary_text",
-})
+_HEADLINE_REVISIONS = frozenset(
+    {
+        "publisher_name",
+        "title",
+        "title_fingerprint",
+        "summary_text",
+    }
+)
 _TIMED_REVISIONS = _HEADLINE_REVISIONS | {"published_at"}
 _LABEL_REVISIONS = frozenset({"publisher_name", "title", "title_fingerprint"})
 
 BBC_BUSINESS_RSS = NewsConnectorSpec(
-    "bbc-business-rss-v1", NewsOriginKind.RSS, "connector:bbc-business-rss",
-    "BBC Business RSS", "https://feeds.bbci.co.uk/news/business/rss.xml",
-    revisable_fields=_TIMED_REVISIONS, identity_churns=True,
+    "bbc-business-rss-v1",
+    NewsOriginKind.RSS,
+    "connector:bbc-business-rss",
+    "BBC Business RSS",
+    "https://feeds.bbci.co.uk/news/business/rss.xml",
+    revisable_fields=_TIMED_REVISIONS,
+    identity_churns=True,
 )
 NAVER_NEWS_API = NewsConnectorSpec(
-    "naver-news-search-v1", NewsOriginKind.API, "connector:naver-news-search",
-    "Naver News Search API", "https://developers.naver.com/docs/serviceapi/search/news/news.md",
+    "naver-news-search-v1",
+    NewsOriginKind.API,
+    "connector:naver-news-search",
+    "Naver News Search API",
+    "https://developers.naver.com/docs/serviceapi/search/news/news.md",
 )
 FINNHUB_COMPANY_NEWS = NewsConnectorSpec(
-    "finnhub-company-news-v1", NewsOriginKind.API,
-    "connector:finnhub-company-news", "Finnhub Company News",
+    "finnhub-company-news-v1",
+    NewsOriginKind.API,
+    "connector:finnhub-company-news",
+    "Finnhub Company News",
     "https://finnhub.io/docs/api",
     revisable_fields=_TIMED_REVISIONS,
 )
 FINNHUB_MARKET_NEWS = NewsConnectorSpec(
-    "finnhub-market-news-v1", NewsOriginKind.API,
-    "connector:finnhub-market-news", "Finnhub Market News",
+    "finnhub-market-news-v1",
+    NewsOriginKind.API,
+    "connector:finnhub-market-news",
+    "Finnhub Market News",
     "https://finnhub.io/docs/api",
     revisable_fields=_TIMED_REVISIONS,
 )
 YONHAP_MARKET_RSS = NewsConnectorSpec(
-    "yonhap-market-rss-v1", NewsOriginKind.RSS,
-    "connector:yonhap-market-rss", "Yonhap Market RSS",
+    "yonhap-market-rss-v1",
+    NewsOriginKind.RSS,
+    "connector:yonhap-market-rss",
+    "Yonhap Market RSS",
     "https://www.yna.co.kr/rss/market.xml",
-    revisable_fields=_HEADLINE_REVISIONS, identity_churns=True,
+    revisable_fields=_HEADLINE_REVISIONS,
+    identity_churns=True,
 )
 YONHAP_INDUSTRY_RSS = NewsConnectorSpec(
-    "yonhap-industry-rss-v1", NewsOriginKind.RSS,
-    "connector:yonhap-industry-rss", "Yonhap Industry RSS",
+    "yonhap-industry-rss-v1",
+    NewsOriginKind.RSS,
+    "connector:yonhap-industry-rss",
+    "Yonhap Industry RSS",
     "https://www.yna.co.kr/rss/industry.xml",
-    revisable_fields=_HEADLINE_REVISIONS, identity_churns=True,
+    revisable_fields=_HEADLINE_REVISIONS,
+    identity_churns=True,
 )
 JTBC_BREAKING_RSS = NewsConnectorSpec(
-    "jtbc-breaking-rss-v1", NewsOriginKind.RSS,
-    "connector:jtbc-breaking-rss", "JTBC Breaking RSS",
+    "jtbc-breaking-rss-v1",
+    NewsOriginKind.RSS,
+    "connector:jtbc-breaking-rss",
+    "JTBC Breaking RSS",
     "https://news-ex.jtbc.co.kr/v1/get/rss/newsflesh",
-    revisable_fields=_HEADLINE_REVISIONS, identity_churns=True,
+    revisable_fields=_HEADLINE_REVISIONS,
+    identity_churns=True,
 )
 GOOGLE_NEWS_SEARCH_RSS = NewsConnectorSpec(
-    "google-news-search-rss-v1", NewsOriginKind.RSS,
-    "connector:google-news-search-rss", "Google News Search RSS",
+    "google-news-search-rss-v1",
+    NewsOriginKind.RSS,
+    "connector:google-news-search-rss",
+    "Google News Search RSS",
     "https://news.google.com/rss/search",
-    revisable_fields=_LABEL_REVISIONS, identity_churns=True,
+    revisable_fields=_LABEL_REVISIONS,
+    identity_churns=True,
 )
 INVESTING_ANALYST_RSS = NewsConnectorSpec(
-    "investing-analyst-opinion-rss-v1", NewsOriginKind.RSS,
-    "connector:investing-analyst-opinion-rss", "Investing Analyst Opinion RSS",
+    "investing-analyst-opinion-rss-v1",
+    NewsOriginKind.RSS,
+    "connector:investing-analyst-opinion-rss",
+    "Investing Analyst Opinion RSS",
     "https://kr.investing.com/rss/news_1061.rss",
 )
 

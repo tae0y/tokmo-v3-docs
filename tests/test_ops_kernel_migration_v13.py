@@ -9,18 +9,18 @@ format is frozen, so a conditional wire start in the 300s lane fails
 closed on a structural zero group budget.
 """
 
-from datetime import datetime, timezone
 import sqlite3
+from datetime import UTC, datetime
 
 import pytest
 
 from tokmo.records import ops_kernel as module
-from tokmo.records.ops_kernel import OpsKernelStore, SCHEMA_VERSION
+from tokmo.records.ops_kernel import SCHEMA_VERSION, OpsKernelStore
 from tokmo.values.cadence_policy import CADENCE_POLICY_V1
 from tokmo.values.ops_kernel import OpsKernelCorruptError, ProducerRole
 
-NOW = datetime(2026, 8, 18, 1, 0, tzinfo=timezone.utc)
-SLOT = datetime(2026, 8, 18, 1, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 18, 1, 0, tzinfo=UTC)
+SLOT = datetime(2026, 8, 18, 1, 0, tzinfo=UTC)
 TS = "2026-08-18T00:00:00.000000Z"
 
 
@@ -39,8 +39,7 @@ def test_schema_version_is_v15_and_wire_checks_admit_conditional(tmp_path):
     assert SCHEMA_VERSION == 15
     store = OpsKernelStore(tmp_path / "ops" / "ops_kernel.sqlite3")
     with store._read() as connection:
-        assert connection.execute(
-            "PRAGMA user_version").fetchone()[0] == 15
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 15
         sql = connection.execute(
             "SELECT sql FROM sqlite_master WHERE name='cadence_wire_starts'"
         ).fetchone()[0]
@@ -57,11 +56,13 @@ def test_v12_requires_migration_and_v15_admits_conditional(tmp_path):
     connection = sqlite3.connect(path)
     connection.execute(
         "INSERT INTO cadence_ticks VALUES('cadence-300s-v1',?,?,?,?)",
-        (TS, "a" * 64, '{"pinned":1}', TS))
+        (TS, "a" * 64, '{"pinned":1}', TS),
+    )
     connection.execute(
         "INSERT INTO cadence_wire_starts VALUES"
         "('cadence-300s-v1',?, 'TOKEN','TOKEN','token:tick0','SUCCEEDED',?,?,?)",
-        (TS, TS, TS, TS))
+        (TS, TS, TS, TS),
+    )
     connection.commit()
     connection.close()
     before = path.read_bytes()
@@ -77,15 +78,18 @@ def test_v12_requires_migration_and_v15_admits_conditional(tmp_path):
         # the widened CHECK admits the conditional operation/group pair
         connection.execute(
             "INSERT INTO cadence_ticks VALUES('cadence-300s-v1',?,?,?,?)",
-            (TS, "a" * 64, '{"pinned":1}', TS))
+            (TS, "a" * 64, '{"pinned":1}', TS),
+        )
         connection.execute(
             "INSERT INTO cadence_wire_starts VALUES"
             "('cadence-300s-v1',?, 'CONDITIONAL_ORDER_HISTORY',"
             "'CONDITIONAL_ORDERS','conditional:OPEN:0','PLANNED',?,NULL,NULL)",
-            (TS, TS))
+            (TS, TS),
+        )
         connection.commit()
     finally:
         connection.close()
+
 
 def test_v12_float_overlap_rows_survive_refusal(tmp_path):
     from tokmo.values.ops_kernel import OpsKernelMigrationRequiredError
@@ -96,16 +100,38 @@ def test_v12_float_overlap_rows_survive_refusal(tmp_path):
     connection = sqlite3.connect(path)
     for suffix in ("a" * 24, "b" * 24):
         connection.execute(
-            "INSERT INTO hypotheses VALUES(?,?,?,?,?,?,?,?,?,NULL,?,?,?,"
-            "NULL,?,?)",
-            (f"hypothesis:{suffix}", suffix[0] * 64, "CANDIDATE",
-             "s", "EVENT_OCCUR", "t", "[]", "[]", "[]", "NONE",
-             "youtube:12man", "YlVhQO-Fkc8", ts, ts))
+            "INSERT INTO hypotheses VALUES(?,?,?,?,?,?,?,?,?,NULL,?,?,?,NULL,?,?)",
+            (
+                f"hypothesis:{suffix}",
+                suffix[0] * 64,
+                "CANDIDATE",
+                "s",
+                "EVENT_OCCUR",
+                "t",
+                "[]",
+                "[]",
+                "[]",
+                "NONE",
+                "youtube:12man",
+                "YlVhQO-Fkc8",
+                ts,
+                ts,
+            ),
+        )
     connection.execute(
         "INSERT INTO hypothesis_relations VALUES(?,?,?,?,?,?,?,?,?)",
-        ("f" * 32, "hypothesis:" + "a" * 24, "hypothesis:" + "b" * 24,
-         "RELATED_BUT_DISTINCT", "material_conflict", '["touch"]',
-         0.25, "WEEKLY_REVIEW", ts))
+        (
+            "f" * 32,
+            "hypothesis:" + "a" * 24,
+            "hypothesis:" + "b" * 24,
+            "RELATED_BUT_DISTINCT",
+            "material_conflict",
+            '["touch"]',
+            0.25,
+            "WEEKLY_REVIEW",
+            ts,
+        ),
+    )
     connection.commit()
     connection.close()
 
@@ -119,6 +145,7 @@ def test_v12_float_overlap_rows_survive_refusal(tmp_path):
         ).fetchone() == (0.25, "real")
     finally:
         connection.close()
+
 
 def test_every_legacy_schema_version_through_v12_requires_migration(tmp_path):
     from tokmo.values.ops_kernel import OpsKernelMigrationRequiredError
@@ -138,9 +165,8 @@ def test_every_legacy_schema_version_through_v12_requires_migration(tmp_path):
         with pytest.raises(OpsKernelMigrationRequiredError):
             OpsKernelStore(path)
         with sqlite3.connect(path) as connection:
-            assert connection.execute(
-                "PRAGMA user_version"
-            ).fetchone() == (version,)
+            assert connection.execute("PRAGMA user_version").fetchone() == (version,)
+
 
 def test_legacy_v12_bytes_are_unmutated_by_refusal(tmp_path):
     from tokmo.values.ops_kernel import OpsKernelMigrationRequiredError
@@ -151,6 +177,7 @@ def test_legacy_v12_bytes_are_unmutated_by_refusal(tmp_path):
     with pytest.raises(OpsKernelMigrationRequiredError):
         OpsKernelStore(migrated_path)
     assert migrated_path.read_bytes() == before
+
 
 def test_malformed_v12_fails_closed_without_mutation(tmp_path):
     path = tmp_path / "ops" / "ops_kernel.sqlite3"
@@ -165,19 +192,26 @@ def test_malformed_v12_fails_closed_without_mutation(tmp_path):
     assert path.read_bytes() == before
 
 
-def test_300s_lane_conditional_start_fails_closed_on_zero_group_budget(
-        tmp_path):
+def test_300s_lane_conditional_start_fails_closed_on_zero_group_budget(tmp_path):
     """The frozen pinned-snapshot format carries no conditional budget, so
     the 300s lane structurally cannot start a CONDITIONAL_ORDERS wire."""
     from tokmo.values.ops_kernel import OpsKernelBudgetExceeded
 
     store = OpsKernelStore(tmp_path / "ops" / "ops_kernel.sqlite3")
     store.plan_cadence_requests(
-        ProducerRole.COLLECTOR, CADENCE_POLICY_V1, scheduled_for_utc=SLOT,
-        requests=(("CONDITIONAL_ORDERS", "conditional:OPEN:0"),), now=NOW)
+        ProducerRole.COLLECTOR,
+        CADENCE_POLICY_V1,
+        scheduled_for_utc=SLOT,
+        requests=(("CONDITIONAL_ORDERS", "conditional:OPEN:0"),),
+        now=NOW,
+    )
     with pytest.raises(OpsKernelBudgetExceeded):
         store.start_cadence_request(
-            ProducerRole.COLLECTOR, CADENCE_POLICY_V1,
-            scheduled_for_utc=SLOT, operation="CONDITIONAL_ORDERS",
-            native_identity="conditional:OPEN:0", now=NOW)
+            ProducerRole.COLLECTOR,
+            CADENCE_POLICY_V1,
+            scheduled_for_utc=SLOT,
+            operation="CONDITIONAL_ORDERS",
+            native_identity="conditional:OPEN:0",
+            now=NOW,
+        )
     store.close()

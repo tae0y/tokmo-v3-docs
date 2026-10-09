@@ -18,11 +18,11 @@ Forbidden in evidence: raw token, account scope/seq, native ref,
 request URL, file path, response body, secret, exception text.
 """
 
-from datetime import datetime
-from pathlib import Path
 import os
 import sqlite3
 import stat
+from datetime import datetime
+from pathlib import Path
 
 from tokmo.values.ops_kernel import iso, parse_iso
 
@@ -88,8 +88,7 @@ class CanaryEvidenceStoreError(ValueError):
 
 
 def _iso_utc(dt: datetime) -> str:
-    if (not isinstance(dt, datetime) or dt.tzinfo is None
-            or dt.utcoffset() is None):
+    if not isinstance(dt, datetime) or dt.tzinfo is None or dt.utcoffset() is None:
         raise CanaryEvidenceStoreError("datetime must be aware")
     return iso(dt)
 
@@ -140,10 +139,17 @@ class CanaryEvidenceStore:
 
     # ── Session ──────────────────────────────────────────────────
 
-    def start_session(self, *, session_id: str, market: str, symbol: str,
-                      max_ticks: int, max_provider_starts: int,
-                      t0_utc: datetime,
-                      canonical_fingerprint_pre: "str | None" = None) -> None:
+    def start_session(
+        self,
+        *,
+        session_id: str,
+        market: str,
+        symbol: str,
+        max_ticks: int,
+        max_provider_starts: int,
+        t0_utc: datetime,
+        canonical_fingerprint_pre: "str | None" = None,
+    ) -> None:
         with self._connect() as conn:
             conn.execute(
                 "INSERT INTO canary_session("
@@ -153,9 +159,16 @@ class CanaryEvidenceStore:
                 "canonical_fingerprint_pre, canonical_fingerprint_post, "
                 "created_at, finished_at) "
                 "VALUES(?,?,?,?,?,?,0,0,NULL,?,NULL,?,NULL)",
-                (session_id, market, symbol, max_ticks,
-                 max_provider_starts, _iso_utc(t0_utc),
-                 canonical_fingerprint_pre, _iso_utc(self._clock())),
+                (
+                    session_id,
+                    market,
+                    symbol,
+                    max_ticks,
+                    max_provider_starts,
+                    _iso_utc(t0_utc),
+                    canonical_fingerprint_pre,
+                    _iso_utc(self._clock()),
+                ),
             )
 
     def read_session(self, session_id: str) -> "dict | None":
@@ -175,18 +188,29 @@ class CanaryEvidenceStore:
             ).fetchone()
         return None if row is None else dict(row)
 
-    def finish_session(self, session_id: str, *, completed_ticks: int,
-                       total_provider_starts: int, stop_reason: str,
-                       canonical_fingerprint_post: "str | None" = None) -> None:
+    def finish_session(
+        self,
+        session_id: str,
+        *,
+        completed_ticks: int,
+        total_provider_starts: int,
+        stop_reason: str,
+        canonical_fingerprint_post: "str | None" = None,
+    ) -> None:
         with self._connect() as conn:
             conn.execute(
                 "UPDATE canary_session SET completed_ticks=?, "
                 "total_provider_starts=?, stop_reason=?, "
                 "canonical_fingerprint_post=?, finished_at=? "
                 "WHERE session_id=?",
-                (completed_ticks, total_provider_starts, stop_reason,
-                 canonical_fingerprint_post, _iso_utc(self._clock()),
-                 session_id),
+                (
+                    completed_ticks,
+                    total_provider_starts,
+                    stop_reason,
+                    canonical_fingerprint_post,
+                    _iso_utc(self._clock()),
+                    session_id,
+                ),
             )
 
     # ── Ticks ────────────────────────────────────────────────────
@@ -194,8 +218,7 @@ class CanaryEvidenceStore:
     def has_tick(self, session_id: str, tick_index: int) -> bool:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT 1 FROM canary_evidence "
-                "WHERE session_id=? AND tick_index=?",
+                "SELECT 1 FROM canary_evidence WHERE session_id=? AND tick_index=?",
                 (session_id, tick_index),
             ).fetchone()
         return row is not None
@@ -209,18 +232,29 @@ class CanaryEvidenceStore:
             ).fetchall()
         return tuple(row["tick_index"] for row in rows)
 
-    def record_tick(self, *, session_id: str, tick_index: int,
-                    scheduled_utc: datetime, observed_utc: datetime,
-                    market: str, symbol: str,
-                    price: "str | None", currency: "str | None",
-                    source: "str | None",
-                    quote_timestamp: "datetime | None",
-                    quote_fetched_at: "datetime | None",
-                    token_started: int, price_batch_started: int,
-                    provider_start_count: int,
-                    cumulative_provider_starts: int,
-                    duration_ms: int, lag_seconds: float,
-                    outcome: str, reason: "str | None") -> None:
+    def record_tick(
+        self,
+        *,
+        session_id: str,
+        tick_index: int,
+        scheduled_utc: datetime,
+        observed_utc: datetime,
+        market: str,
+        symbol: str,
+        price: "str | None",
+        currency: "str | None",
+        source: "str | None",
+        quote_timestamp: "datetime | None",
+        quote_fetched_at: "datetime | None",
+        token_started: int,
+        price_batch_started: int,
+        provider_start_count: int,
+        cumulative_provider_starts: int,
+        duration_ms: int,
+        lag_seconds: float,
+        outcome: str,
+        reason: "str | None",
+    ) -> None:
         with self._connect() as conn:
             conn.execute(
                 "INSERT INTO canary_evidence("
@@ -230,14 +264,27 @@ class CanaryEvidenceStore:
                 "provider_start_count, cumulative_provider_starts, "
                 "duration_ms, lag_seconds, outcome, reason, session_id) "
                 "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (tick_index, _iso_utc(scheduled_utc),
-                 _iso_utc(observed_utc), market, symbol,
-                 price, currency, source,
-                 _iso_utc(quote_timestamp) if quote_timestamp else None,
-                 _iso_utc(quote_fetched_at) if quote_fetched_at else None,
-                 token_started, price_batch_started,
-                 provider_start_count, cumulative_provider_starts,
-                 duration_ms, lag_seconds, outcome, reason, session_id),
+                (
+                    tick_index,
+                    _iso_utc(scheduled_utc),
+                    _iso_utc(observed_utc),
+                    market,
+                    symbol,
+                    price,
+                    currency,
+                    source,
+                    _iso_utc(quote_timestamp) if quote_timestamp else None,
+                    _iso_utc(quote_fetched_at) if quote_fetched_at else None,
+                    token_started,
+                    price_batch_started,
+                    provider_start_count,
+                    cumulative_provider_starts,
+                    duration_ms,
+                    lag_seconds,
+                    outcome,
+                    reason,
+                    session_id,
+                ),
             )
 
     def read_ticks(self, session_id: "str | None" = None) -> tuple:
@@ -256,8 +303,12 @@ class CanaryEvidenceStore:
         for row in rows:
             d = dict(row)
             # Parse datetime fields back to datetime objects
-            for key in ("scheduled_utc", "observed_utc",
-                        "quote_timestamp", "quote_fetched_at"):
+            for key in (
+                "scheduled_utc",
+                "observed_utc",
+                "quote_timestamp",
+                "quote_fetched_at",
+            ):
                 if d.get(key) is not None:
                     d[key] = parse_iso(d[key])
             result.append(d)
@@ -265,9 +316,9 @@ class CanaryEvidenceStore:
 
     # ── Provider-start intent ledger (B4) ────────────────────────
 
-    def record_provider_start_intent(self, *, purpose_identity: str,
-                                     operation: str, session_id: str,
-                                     tick_index: int) -> int:
+    def record_provider_start_intent(
+        self, *, purpose_identity: str, operation: str, session_id: str, tick_index: int
+    ) -> int:
         """Write-ahead durable intent before any outbound provider call.
 
         Returns the intent_id. The purpose ledger is cumulative: it counts
@@ -279,13 +330,17 @@ class CanaryEvidenceStore:
                 "purpose_identity, operation, intended_at, settled, "
                 "session_id, tick_index, outcome) "
                 "VALUES(?,?,?,0,?,?,NULL)",
-                (purpose_identity, operation,
-                 _iso_utc(self._clock()), session_id, tick_index),
+                (
+                    purpose_identity,
+                    operation,
+                    _iso_utc(self._clock()),
+                    session_id,
+                    tick_index,
+                ),
             )
             return cur.lastrowid
 
-    def settle_provider_start_intent(self, intent_id: int, *,
-                                     outcome: str) -> None:
+    def settle_provider_start_intent(self, intent_id: int, *, outcome: str) -> None:
         with self._connect() as conn:
             conn.execute(
                 "UPDATE provider_start_intent SET settled=1, outcome=? "
@@ -293,8 +348,7 @@ class CanaryEvidenceStore:
                 (outcome, intent_id),
             )
 
-    def cumulative_provider_starts_by_purpose(
-            self, purpose_identity: str) -> int:
+    def cumulative_provider_starts_by_purpose(self, purpose_identity: str) -> int:
         """Count ALL intents for this purpose, settled or not.
 
         This is the authoritative cumulative count (B4): a crash between
@@ -303,8 +357,7 @@ class CanaryEvidenceStore:
         """
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT COUNT(*) FROM provider_start_intent "
-                "WHERE purpose_identity=?",
+                "SELECT COUNT(*) FROM provider_start_intent WHERE purpose_identity=?",
                 (purpose_identity,),
             ).fetchone()
         return int(row[0])

@@ -1,4 +1,5 @@
 """Personalized event value contracts without account identifiers."""
+
 from dataclasses import dataclass
 
 

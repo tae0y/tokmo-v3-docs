@@ -12,17 +12,16 @@ machine-readable report whose invariant assertions fail the run on any
 contract violation.
 """
 
-from datetime import date, datetime, timedelta, timezone
 import json
-import os
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 from tokmo.programs.virtual_replay import (
     DEFAULT_48H_START,
-    ReplayReportPathError,
     SCENARIO_BUILDERS,
+    ReplayReportPathError,
     build_default_48h_scenario,
     build_smoke_scenario,
     run_virtual_replay,
@@ -30,7 +29,7 @@ from tokmo.programs.virtual_replay import (
 )
 from tokmo.values.cadence_policy import CADENCE_POLICY_V1
 
-UTC = timezone.utc
+UTC = UTC
 POLICY = "cadence-300s-v1"
 
 
@@ -77,13 +76,13 @@ def test_default_scenario_fixture_facts_are_explicit_and_independent():
     # KR 08-04 calendar provider fails its first two admitted wire attempts;
     # the kernel retry/backoff ladder owns the actual retry slots
     assert scenario.calendar_failures["KR"] == {
-        "local_date": "2026-08-04", "fail_attempts": 2,
+        "local_date": "2026-08-04",
+        "fail_attempts": 2,
     }
     # the unknown-market order that must quarantine (symbol not in holdings)
     orders = scenario.fixture["orders"]
     assert any(
-        entry["symbol"] == "MYST01"
-        for rows in orders.values() for entry in rows
+        entry["symbol"] == "MYST01" for rows in orders.values() for entry in rows
     )
 
 
@@ -160,7 +159,8 @@ def test_full_replay_outcome_ledger_matches_the_fault_plan(full_replay):
     assert outcomes["COMPLETE"] > 200  # KR Monday + KR special Tuesday + US
     assert outcomes["SKIPPED_CLOSED"] > 250
     failed_reasons = {
-        entry["slot_utc"]: entry["reason"] for entry in report["failures"]
+        entry["slot_utc"]: entry["reason"]
+        for entry in report["failures"]
         if entry["outcome"] == "FAILED"
     }
     iso = lambda index: slot_at(index).isoformat().replace("+00:00", "Z")
@@ -183,12 +183,13 @@ def test_full_replay_calendar_refresh_is_once_per_changed_local_date(full_replay
     assert 3 <= attempts[2] - attempts[1] <= 4  # ~15 minutes
     # US: cold 08-02, then exactly one fetch per market-local midnight
     assert [(f["local_date"], f["slot_index"]) for f in current["US"]] == [
-        ("2026-08-02", 0), ("2026-08-03", 162), ("2026-08-04", 450),
+        ("2026-08-02", 0),
+        ("2026-08-03", 162),
+        ("2026-08-04", 450),
     ]
     # every in-between slot performed KR calendar wire zero
     assert report["proofs"]["backoff_wire_zero_slots"] == [
-        index for index in range(attempts[0], attempts[-1])
-        if index not in attempts
+        index for index in range(attempts[0], attempts[-1]) if index not in attempts
     ]
 
 
@@ -265,10 +266,12 @@ def test_full_replay_accumulates_official_history_and_reports_lag(full_replay):
     )
     from tokmo.values.session_gate import Market
 
-    dates = HistorySessionDatesV1(RegularSessionHistoryStore(
-        root / "ops" / "regular_session_history.sqlite3",
-        clock=lambda: datetime(2026, 8, 5, tzinfo=UTC),
-    ))
+    dates = HistorySessionDatesV1(
+        RegularSessionHistoryStore(
+            root / "ops" / "regular_session_history.sqlite3",
+            clock=lambda: datetime(2026, 8, 5, tzinfo=UTC),
+        )
+    )
     served = dates.regular_session_dates(Market.KR, date(2026, 8, 3), 20)
     assert len(served) == 20
     # official facts only: the US holiday Monday never appears as a US session
@@ -288,26 +291,29 @@ def test_full_replay_every_invariant_assertion_passed(full_replay):
 # -- custom tiny policy boundary (SDS §11.1 injected values) ----------------
 
 
-def test_custom_tiny_policy_rejects_quotes_n_plus_1_before_wire(
-        tmp_path, monkeypatch):
+def test_custom_tiny_policy_rejects_quotes_n_plus_1_before_wire(tmp_path, monkeypatch):
     from types import MappingProxyType
 
-    from tokmo.values import cadence_policy as policy_module
     from tokmo.programs import production_cadence as cadence_module
+    from tokmo.values import cadence_policy as policy_module
     from tokmo.values.cadence_policy import CadencePolicyV1, TickRequestLimitsV1
 
     tiny = CadencePolicyV1(
         policy_version="cadence-300s-tinytest",
         request_limits=TickRequestLimitsV1(quote_starts=1),
     )
-    registry = MappingProxyType({
-        POLICY: policy_module.CADENCE_POLICY_V1, tiny.policy_version: tiny,
-    })
+    registry = MappingProxyType(
+        {
+            POLICY: policy_module.CADENCE_POLICY_V1,
+            tiny.policy_version: tiny,
+        }
+    )
     monkeypatch.setattr(policy_module, "CADENCE_POLICY_REGISTRY", registry)
     monkeypatch.setattr(cadence_module, "CADENCE_POLICY_REGISTRY", registry)
 
     scenario = build_smoke_scenario(
-        policy_version=tiny.policy_version, open_kr_symbols=201,
+        policy_version=tiny.policy_version,
+        open_kr_symbols=201,
     )
     report = run_virtual_replay(tmp_path / "shadow", scenario)
     # 201 open KR symbols need two PRICE_BATCH wires per tick; the tiny
@@ -347,13 +353,15 @@ def test_report_write_is_atomic_private_and_shadow_only(tmp_path):
 
 
 def test_replay_invokes_the_exact_production_symbol_once_per_slot(
-        tmp_path, monkeypatch):
-    import tokmo.programs.production_cadence as production_cadence
-    import tokmo.programs.virtual_replay as virtual_replay
+    tmp_path, monkeypatch
+):
+    from tokmo.programs import production_cadence, virtual_replay
 
     # the replay's bound name IS the production function, not a duplicate
-    assert (virtual_replay.run_production_cadence_once
-            is production_cadence.run_production_cadence_once)
+    assert (
+        virtual_replay.run_production_cadence_once
+        is production_cadence.run_production_cadence_once
+    )
 
     calls = []
     real = virtual_replay.run_production_cadence_once
@@ -367,28 +375,36 @@ def test_replay_invokes_the_exact_production_symbol_once_per_slot(
     report = run_virtual_replay(tmp_path / "shadow", scenario)
     assert report["invoked"] == 12
     assert calls == [
-        scenario.start_slot_utc + timedelta(seconds=300 * index)
-        for index in range(12)
+        scenario.start_slot_utc + timedelta(seconds=300 * index) for index in range(12)
     ]
 
 
 def test_cli_exits_2_when_an_invariant_fails(tmp_path, monkeypatch, capsys):
-    import tokmo.programs.virtual_replay as virtual_replay
+    from tokmo.programs import virtual_replay
 
     failing = {
-        "scenario": "smoke-12", "planned_ticks": 12, "invoked": 12,
+        "scenario": "smoke-12",
+        "planned_ticks": 12,
+        "invoked": 12,
         "outcomes": {"COMPLETE": 12},
         "assertions": [{"name": "broken", "passed": False, "detail": "boom"}],
     }
     monkeypatch.setattr(
-        virtual_replay, "run_virtual_replay",
+        virtual_replay,
+        "run_virtual_replay",
         lambda root, scenario, progress=None: failing,
     )
     report_path = tmp_path / "reports" / "replay.json"
-    exit_code = virtual_replay.main([
-        "--scenario", "smoke-12", "--root", str(tmp_path / "shadow"),
-        "--report", str(report_path),
-    ])
+    exit_code = virtual_replay.main(
+        [
+            "--scenario",
+            "smoke-12",
+            "--root",
+            str(tmp_path / "shadow"),
+            "--report",
+            str(report_path),
+        ]
+    )
     assert exit_code == 2
     summary = json.loads(capsys.readouterr().out)
     assert summary["assertions_failed"] == 1

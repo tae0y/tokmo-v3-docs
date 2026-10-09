@@ -12,8 +12,8 @@ no key-format CHECK and this module is the authoritative enforcement point.
 """
 
 import re
-from dataclasses import dataclass
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from tokmo.values.receipt_v1 import ACCOUNT_SCOPE_RE
 
@@ -51,10 +51,12 @@ SOURCE_CONTRACTS: dict[str, SourceContract] = {
         allows_linked_supersession=False,
     ),
     "retirement_excel_delta_v1": SourceContract(
-        source="retirement_excel_delta_v1", contract_version=1,
+        source="retirement_excel_delta_v1",
+        contract_version=1,
         account_scopes=frozenset({"retirement_pension_1"}),
         key_pattern=r"batch-[0-9a-f]{64}-row-[0-9]{6}",
-        sequential_full_history=False, allows_linked_supersession=False,
+        sequential_full_history=False,
+        allows_linked_supersession=False,
     ),
     "toss-orders-v1": SourceContract(
         source="toss-orders-v1",

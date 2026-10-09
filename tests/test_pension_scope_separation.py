@@ -2,26 +2,23 @@
 
 M11: behavioral tests exercising actual resolvers and scope logic.
 """
+
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from decimal import Decimal
-from zoneinfo import ZoneInfo
 
-import pytest
-
+from tokmo.values.account_scope_patterns import (
+    ACCOUNT_SCOPE_RE,
+    PENSION_SCOPE_RE,
+)
+from tokmo.values.pension_holdings import (
+    make_composite_resolver,
+    pension_account_scope,
+)
 from tokmo.values.portfolio_scope import (
     PortfolioScope,
     ScopeUnresolved,
     resolve_account_scope_pattern,
-)
-from tokmo.values.pension_holdings import (
-    pension_account_scope,
-    make_composite_resolver,
-)
-from tokmo.values.account_scope_patterns import (
-    ACCOUNT_SCOPE_RE,
-    PENSION_SCOPE_RE,
 )
 
 
@@ -55,8 +52,7 @@ class TestMoneyImpactCrossScope:
         }
 
         scopes_for_symbol = {
-            s for (s, m, sym) in held_symbols
-            if m == "KR" and sym == "069500"
+            s for (s, m, sym) in held_symbols if m == "KR" and sym == "069500"
         }
         assert len(scopes_for_symbol) == 2
         assert len(scopes_for_symbol) > 1  # cross-scope → None
@@ -67,17 +63,16 @@ class TestMoneyImpactCrossScope:
             (PortfolioScope.PERSONAL, "KR", "005930"),
         }
         scopes_for_symbol = {
-            s for (s, m, sym) in held_symbols
-            if m == "KR" and sym == "005930"
+            s for (s, m, sym) in held_symbols if m == "KR" and sym == "005930"
         }
         assert len(scopes_for_symbol) == 1
 
     def test_within_personal_sum_preserved(self):
         """Two PERSONAL accounts holding same symbol still sum inside PERSONAL."""
         held_quantity = {
-            (PortfolioScope.PERSONAL, "KR", "005930"): Decimal("150"),
+            (PortfolioScope.PERSONAL, "KR", "005930"): Decimal(150),
         }
-        assert held_quantity[(PortfolioScope.PERSONAL, "KR", "005930")] == Decimal("150")
+        assert held_quantity[(PortfolioScope.PERSONAL, "KR", "005930")] == Decimal(150)
 
 
 class TestCompositeResolver:

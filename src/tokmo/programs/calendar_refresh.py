@@ -16,10 +16,10 @@ second one-time kernel claim. Forged, terminal, mismatched, or already
 claimed receipts perform provider wire zero and cache mutation zero.
 """
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import Enum
-from typing import Callable, Mapping
 
 from tokmo.records.calendar_cache import (
     CalendarCacheConflictError,
@@ -64,7 +64,9 @@ class MarketRefreshResult:
             raise ValueError("only a successful refresh commits")
         if self.refreshed and self.receipt is None:
             raise ValueError("a committed refresh requires its STARTED receipt")
-        if self.rejudged and (self.state is not MarketRefreshState.SUCCESS or self.refreshed):
+        if self.rejudged and (
+            self.state is not MarketRefreshState.SUCCESS or self.refreshed
+        ):
             raise ValueError("a rejudged result is an uncommitted current success")
 
 
@@ -77,11 +79,17 @@ def _valid_receipt(receipt, market, local_date) -> bool:
     )
 
 
-def _refresh_one(store, kernel, fetcher, market, local_date, entry, receipt,
-                 now) -> MarketRefreshResult:
+def _refresh_one(
+    store, kernel, fetcher, market, local_date, entry, receipt, now
+) -> MarketRefreshResult:
     def result(state, refreshed=False, bound_receipt=None, rejudged=False):
         return MarketRefreshResult(
-            market, local_date, state, refreshed, bound_receipt, rejudged,
+            market,
+            local_date,
+            state,
+            refreshed,
+            bound_receipt,
+            rejudged,
         )
 
     if entry is not None and entry.trade_date == local_date.isoformat():
@@ -122,12 +130,16 @@ def _refresh_one(store, kernel, fetcher, market, local_date, entry, receipt,
             reread = store.read()
         except CalendarCacheCorruptError:
             return result(MarketRefreshState.CACHE_UPDATE_FAILED, bound_receipt=receipt)
-        current = None if reread is None else (
-            reread.kr if market is Market.KR else reread.us
+        current = (
+            None
+            if reread is None
+            else (reread.kr if market is Market.KR else reread.us)
         )
         if current is not None and current.trade_date == local_date.isoformat():
             return result(
-                MarketRefreshState.SUCCESS, bound_receipt=receipt, rejudged=True,
+                MarketRefreshState.SUCCESS,
+                bound_receipt=receipt,
+                rejudged=True,
             )
         return result(MarketRefreshState.CACHE_CONFLICT, bound_receipt=receipt)
     except (CalendarCacheCorruptError, OpsKernelError, OSError, ValueError):
@@ -136,8 +148,11 @@ def _refresh_one(store, kernel, fetcher, market, local_date, entry, receipt,
 
 
 def refresh_markets(
-    *, store: CalendarCacheStore, fetchers: Mapping[Market, Callable],
-    now: datetime, receipts: Mapping[Market, CalendarStartReceiptV1 | None],
+    *,
+    store: CalendarCacheStore,
+    fetchers: Mapping[Market, Callable],
+    now: datetime,
+    receipts: Mapping[Market, CalendarStartReceiptV1 | None],
     kernel,
 ) -> tuple[MarketRefreshResult, ...]:
     """Refresh both markets; ``kernel`` is the authoritative OpsKernel whose
@@ -148,14 +163,23 @@ def refresh_markets(
     except CalendarCacheCorruptError:
         return tuple(
             MarketRefreshResult(
-                market, local_dates[market],
-                MarketRefreshState.CACHE_UPDATE_FAILED, False,
-            ) for market in Market
+                market,
+                local_dates[market],
+                MarketRefreshState.CACHE_UPDATE_FAILED,
+                False,
+            )
+            for market in Market
         )
     return tuple(
         _refresh_one(
-            store, kernel, fetchers[market], market, local_dates[market],
+            store,
+            kernel,
+            fetchers[market],
+            market,
+            local_dates[market],
             None if cache is None else (cache.kr if market is Market.KR else cache.us),
-            receipts.get(market), now,
-        ) for market in Market
+            receipts.get(market),
+            now,
+        )
+        for market in Market
     )

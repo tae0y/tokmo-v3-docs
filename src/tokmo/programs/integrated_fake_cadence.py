@@ -1,17 +1,16 @@
 """External-I/O-free, restartable one-day cadence composition for Slice F fixtures."""
 
-from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
 import fcntl
 import os
-from pathlib import Path
 import secrets
 import sqlite3
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 from types import MappingProxyType
-from typing import Callable, Mapping
 
 from tokmo.programs.analysis_pipeline import run_analysis_pipeline
-from tokmo.values.portfolio_scope import resolve_account_scope_pattern
 from tokmo.programs.legacy_g2 import (
     legacy_assemble_analysis_materials,
     legacy_run_holdings_sync,
@@ -31,6 +30,7 @@ from tokmo.values.calendar_refresh import market_local_date
 from tokmo.values.material_pack import JobKind
 from tokmo.values.ops_kernel import ProducerRole
 from tokmo.values.ops_tick import tick_id_from_utc
+from tokmo.values.portfolio_scope import resolve_account_scope_pattern
 from tokmo.values.session_gate import Market
 
 
@@ -121,13 +121,21 @@ def _production_root() -> Path:
 def _confined_fake_root(root: Path) -> Path:
     candidate = Path(root).resolve()
     production = _production_root().resolve()
-    if candidate == production or candidate in production.parents or production in candidate.parents:
+    if (
+        candidate == production
+        or candidate in production.parents
+        or production in candidate.parents
+    ):
         raise ValueError("production root denied")
     return candidate
 
 
-def _request_report(store: OpsKernelStore, ticks) -> tuple[int, int, int, int, dict[str, int]]:
-    rows = tuple(row for tick in ticks for row in store.read_planned_requests(tick.tick_id))
+def _request_report(
+    store: OpsKernelStore, ticks
+) -> tuple[int, int, int, int, dict[str, int]]:
+    rows = tuple(
+        row for tick in ticks for row in store.read_planned_requests(tick.tick_id)
+    )
     operations: dict[str, int] = {}
     for row in rows:
         if row["started_at"] is not None:
@@ -174,16 +182,24 @@ def _open_progress(path: Path) -> sqlite3.Connection:
 
 
 def _run_integrated_fake_day_range(
-    *, utc_day: date, root: Path, deps: _IntegratedStageDepsV1,
-    compressed: bool = True, start_tick: int = 0, end_tick: int = 288,
+    *,
+    utc_day: date,
+    root: Path,
+    deps: _IntegratedStageDepsV1,
+    compressed: bool = True,
+    start_tick: int = 0,
+    end_tick: int = 288,
 ) -> IntegratedCadenceReportV1:
     """Private bounded restart/test seam for ``[start_tick, end_tick)``."""
     if type(utc_day) is not date or not isinstance(deps, _IntegratedStageDepsV1):
         raise ValueError("invalid integrated cadence input")
     if compressed is not True:
         raise ValueError("fake cadence must be compressed")
-    if (type(start_tick) is not int or type(end_tick) is not int
-            or not 0 <= start_tick <= end_tick <= 288):
+    if (
+        type(start_tick) is not int
+        or type(end_tick) is not int
+        or not 0 <= start_tick <= end_tick <= 288
+    ):
         raise ValueError("invalid integrated cadence range")
 
     confined = _confined_fake_root(root)
@@ -196,19 +212,26 @@ def _run_integrated_fake_day_range(
         store = OpsKernelStore(confined / "ops" / "ops_kernel.sqlite3")
         progress = _open_progress(confined / "ops" / "integrated_cadence.sqlite3")
         completed = {
-            row[0] for row in progress.execute(
+            row[0]
+            for row in progress.execute(
                 "SELECT tick_index FROM completed_ticks WHERE utc_day=?",
                 (utc_day.isoformat(),),
             )
         }
         store.reconcile_requests(
-            ProducerRole.COLLECTOR, invocation_id=secrets.token_hex(16), now=deps.clock(),
+            ProducerRole.COLLECTOR,
+            invocation_id=secrets.token_hex(16),
+            now=deps.clock(),
         )
 
-        start = datetime.combine(utc_day, datetime.min.time(), tzinfo=timezone.utc)
+        start = datetime.combine(utc_day, datetime.min.time(), tzinfo=UTC)
         stages = (
-            deps.calendar_provider, deps.session_gate, deps.holdings_runner,
-            deps.quotes_runner, deps.trades_runner, deps.barrier_runner,
+            deps.calendar_provider,
+            deps.session_gate,
+            deps.holdings_runner,
+            deps.quotes_runner,
+            deps.trades_runner,
+            deps.barrier_runner,
             deps.analysis_runner,
         )
         for index in range(start_tick, end_tick):
@@ -218,7 +241,10 @@ def _run_integrated_fake_day_range(
             context = None
             for stage in stages:
                 value = stage(
-                    tick=tick, root=confined, ops_kernel=store, prior=context,
+                    tick=tick,
+                    root=confined,
+                    ops_kernel=store,
+                    prior=context,
                     counters=counters,
                 )
                 if value is not None:
@@ -230,17 +256,27 @@ def _run_integrated_fake_day_range(
             progress.commit()
             executed_ticks.append(tick)
 
-        planned, started, settled, unknown, operations = _request_report(store, executed_ticks)
+        planned, started, settled, unknown, operations = _request_report(
+            store, executed_ticks
+        )
         calendar_started = sum(
-            count for operation, count in operations.items()
+            count
+            for operation, count in operations.items()
             if operation.startswith("CALENDAR_DAY_")
         )
         return IntegratedCadenceReportV1(
-            utc_day.isoformat(), len(executed_ticks), counters.logical_slots,
-            planned, started, settled, unknown,
+            utc_day.isoformat(),
+            len(executed_ticks),
+            counters.logical_slots,
+            planned,
+            started,
+            settled,
+            unknown,
             MappingProxyType(dict(sorted(operations.items()))),
-            started - calendar_started, calendar_started,
-            counters.socket_count, counters.dns_count,
+            started - calendar_started,
+            calendar_started,
+            counters.socket_count,
+            counters.dns_count,
         )
     finally:
         if progress is not None:
@@ -249,17 +285,28 @@ def _run_integrated_fake_day_range(
         os.close(lock_descriptor)
 
 
-def _production_stage_deps(root: Path, deps: IntegratedCadenceDepsV1) -> _IntegratedStageDepsV1:
+def _production_stage_deps(
+    root: Path, deps: IntegratedCadenceDepsV1
+) -> _IntegratedStageDepsV1:
     """Construct the existing A-E production stores and their seven stage runners."""
     clock = deps.clock
-    calendar_cache = CalendarCacheStore(root / "ops" / "calendar_cache.json", clock=clock)
-    holdings_store = CurrentHoldingsStore(root / "stores" / "current_holdings.json", clock=clock)
-    quotes_store = LatestQuoteStore(root / "stores" / "latest_quotes.sqlite3", clock=clock)
+    calendar_cache = CalendarCacheStore(
+        root / "ops" / "calendar_cache.json", clock=clock
+    )
+    holdings_store = CurrentHoldingsStore(
+        root / "stores" / "current_holdings.json", clock=clock
+    )
+    quotes_store = LatestQuoteStore(
+        root / "stores" / "latest_quotes.sqlite3", clock=clock
+    )
     trades_store = TradeLedgerStore(
-        root / "stores" / "trade_ledger.sqlite3", clock=clock,
+        root / "stores" / "trade_ledger.sqlite3",
+        clock=clock,
         id_factory=lambda: secrets.token_hex(16),
     )
-    scan_state = OrderScanStateStore(root / "stores" / "order_scan_state.sqlite3", clock=clock)
+    scan_state = OrderScanStateStore(
+        root / "stores" / "order_scan_state.sqlite3", clock=clock
+    )
     packs = MaterialPackWriter(root / "ops", clock=clock)
     receipts = {
         job: ReceiptStore(root / "ops" / "receipts" / f"{job.value}.json", clock=clock)
@@ -279,16 +326,21 @@ def _production_stage_deps(root: Path, deps: IntegratedCadenceDepsV1) -> _Integr
         now = tick.start_utc
         providers = {
             market: lambda market=market: deps.calendar_provider(
-                market=market, local_trade_date=market_local_date(market, now),
-                tick=tick, request_gate=gate,
-            ) for market in Market
+                market=market,
+                local_trade_date=market_local_date(market, now),
+                tick=tick,
+                request_gate=gate,
+            )
+            for market in Market
         }
         return providers
 
     def session(*, tick, prior, counters, **_):
         result = run_session_gate(
-            kr_calendar_provider=prior[Market.KR], us_calendar_provider=prior[Market.US],
-            cache_read=calendar_cache.read, cache_write=calendar_cache.write,
+            kr_calendar_provider=prior[Market.KR],
+            us_calendar_provider=prior[Market.US],
+            cache_read=calendar_cache.read,
+            cache_write=calendar_cache.write,
             now=tick.start_utc,
         )
         counters.add_logical_slots(sum(item.open for item in result.verdicts) * 3)
@@ -296,39 +348,56 @@ def _production_stage_deps(root: Path, deps: IntegratedCadenceDepsV1) -> _Integr
 
     def holdings(*, tick, prior, ops_kernel, **_):
         legacy_run_holdings_sync(
-            tick=tick, session_result=prior["session"],
+            tick=tick,
+            session_result=prior["session"],
             holdings_provider=gate_holder["providers"]["holdings"],
-            store=holdings_store, pack_writer=packs,
-            receipt_store=receipts[JobKind.HOLDINGS], reservation_seal=lambda *_: None,
-            incident_writer=lambda *_: None, clock=clock, now=tick.start_utc,
+            store=holdings_store,
+            pack_writer=packs,
+            receipt_store=receipts[JobKind.HOLDINGS],
+            reservation_seal=lambda *_: None,
+            incident_writer=lambda *_: None,
+            clock=clock,
+            now=tick.start_utc,
             job_lock_path=root / "ops" / "locks" / "holdings.lock",
         )
         return prior
 
     def quotes(*, tick, prior, ops_kernel, **_):
         legacy_run_quotes_sync(
-            tick=tick, session_result=prior["session"], holdings=holdings_store.read(),
+            tick=tick,
+            session_result=prior["session"],
+            holdings=holdings_store.read(),
             quotes_provider=gate_holder["providers"]["quotes"],
             quote_store=lambda outcome: quotes_store.save_batch(outcome.facts),
-            pack_writer=packs, receipt_store=receipts[JobKind.QUOTES],
-            reservation_seal=lambda *_: None, incident_writer=lambda *_: None,
-            clock=clock, now=tick.start_utc,
+            pack_writer=packs,
+            receipt_store=receipts[JobKind.QUOTES],
+            reservation_seal=lambda *_: None,
+            incident_writer=lambda *_: None,
+            clock=clock,
+            now=tick.start_utc,
             job_lock_path=root / "ops" / "locks" / "quotes.lock",
         )
         return prior
 
     def trades(*, tick, prior, ops_kernel, **_):
         legacy_run_trades_sync(
-            tick=tick, session_result=prior["session"], holdings=holdings_store.read(),
+            tick=tick,
+            session_result=prior["session"],
+            holdings=holdings_store.read(),
             orders_provider=gate_holder["providers"]["orders"],
-            detail_provider=gate_holder["providers"]["detail"], store=trades_store,
-            scan_state=scan_state, pack_writer=packs,
-            receipt_store=receipts[JobKind.TRADES], reservation_seal=lambda *_: None,
+            detail_provider=gate_holder["providers"]["detail"],
+            store=trades_store,
+            scan_state=scan_state,
+            pack_writer=packs,
+            receipt_store=receipts[JobKind.TRADES],
+            reservation_seal=lambda *_: None,
             incident_writer=lambda *_: None,
             regular_session_dates=deps.regular_session_dates,
-            clock=clock, now=tick.start_utc,
+            clock=clock,
+            now=tick.start_utc,
             job_lock_path=root / "ops" / "locks" / "trades.lock",
-            ops_kernel=ops_kernel, invocation_id=secrets.token_hex(16),
+            ops_kernel=ops_kernel,
+            invocation_id=secrets.token_hex(16),
         )
         return prior
 
@@ -337,7 +406,8 @@ def _production_stage_deps(root: Path, deps: IntegratedCadenceDepsV1) -> _Integr
             item.market for item in prior["session"].verdicts if item.open
         )
         result = legacy_assemble_analysis_materials(
-            tick=tick, open_markets=open_markets,
+            tick=tick,
+            open_markets=open_markets,
             receipt_readers={job: receipts[job].read for job in JobKind},
             pack_reader=lambda path, digest: packs.read_and_verify(Path(path), digest),
             now=tick.start_utc,
@@ -346,19 +416,28 @@ def _production_stage_deps(root: Path, deps: IntegratedCadenceDepsV1) -> _Integr
 
     def analysis(*, tick, prior, ops_kernel, **_):
         return run_analysis_pipeline(
-            tick=tick, barrier=prior["barrier"], store=ops_kernel,
+            tick=tick,
+            barrier=prior["barrier"],
+            store=ops_kernel,
             run_lock_path=root / "ops" / "locks" / "analysis.lock",
-            glm_call=deps.glm_call, sol_call=deps.sol_call,
-            now=tick.start_utc, clock=clock,
+            glm_call=deps.glm_call,
+            sol_call=deps.sol_call,
+            now=tick.start_utc,
+            clock=clock,
             numeric_evidence_sink=deps.numeric_evidence_sink,
             resolve_scope=resolve_account_scope_pattern,
         )
 
-    return _IntegratedStageDepsV1(calendar, session, holdings, quotes, trades, barrier, analysis, clock)
+    return _IntegratedStageDepsV1(
+        calendar, session, holdings, quotes, trades, barrier, analysis, clock
+    )
 
 
 def run_integrated_fake_day(
-    *, utc_day: date, root: Path, deps: IntegratedCadenceDepsV1,
+    *,
+    utc_day: date,
+    root: Path,
+    deps: IntegratedCadenceDepsV1,
     compressed: bool = True,
 ) -> IntegratedCadenceReportV1:
     """Run one isolated 288-tick UTC fake day through the production A-E composition."""
@@ -367,5 +446,8 @@ def run_integrated_fake_day(
         raise ValueError("invalid integrated cadence input")
     stages = _production_stage_deps(confined, deps)
     return _run_integrated_fake_day_range(
-        utc_day=utc_day, root=confined, deps=stages, compressed=compressed,
+        utc_day=utc_day,
+        root=confined,
+        deps=stages,
+        compressed=compressed,
     )

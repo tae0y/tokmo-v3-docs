@@ -2,20 +2,17 @@
 
 N4: calls authorize_pension_import from holdings_persistence.py.
 """
+
 from __future__ import annotations
 
-from datetime import datetime
-from pathlib import Path
 from uuid import uuid4
 
 from tokmo.records.holdings_persistence import authorize_pension_import
 from tokmo.records.holdings_snapshots import HoldingsSnapshotStore
-from tokmo.records.pension_revisions import PensionRegistryStore
 from tokmo.values.holdings import (
+    PENSION_SOURCE,
     CompleteHoldingsSnapshot,
     HoldingsSnapshotAccount,
-    PENSION_SOURCE,
-    TossHoldingFact,
 )
 from tokmo.values.pension_holdings import PensionHoldingsRevisionV1
 
@@ -42,12 +39,14 @@ def write_canonical_pension_snapshot(
         clock=clock,
     )
     from tokmo.records.holdings_persistence import DenialToken
+
     if isinstance(permit, DenialToken):
         raise PensionIngestionError(permit.reason)
 
     accounts = []
     if revision.holding_count > 0:
         from tokmo.values.holdings import TossHoldingFact
+
         toss_holdings = tuple(
             TossHoldingFact(
                 symbol=h.symbol,
@@ -62,21 +61,25 @@ def write_canonical_pension_snapshot(
             )
             for h in revision.holdings
         )
-        accounts.append(HoldingsSnapshotAccount(
-            account_ordinal=1,
-            holdings=toss_holdings,
-        ))
+        accounts.append(
+            HoldingsSnapshotAccount(
+                account_ordinal=1,
+                holdings=toss_holdings,
+            )
+        )
     else:
         # LIQUIDATED: single empty account
-        accounts.append(HoldingsSnapshotAccount(
-            account_ordinal=1,
-            holdings=(),
-        ))
+        accounts.append(
+            HoldingsSnapshotAccount(
+                account_ordinal=1,
+                holdings=(),
+            )
+        )
 
-    from tokmo.values.holdings import CompleteHoldingsSnapshot
     from tokmo.records.holdings_snapshots import (
-        snapshot_content_hash, canonical_snapshot_bytes,
+        snapshot_content_hash,
     )
+
     snapshot = CompleteHoldingsSnapshot(
         snapshot_id=snapshot_id,
         source=PENSION_SOURCE,
@@ -84,8 +87,9 @@ def write_canonical_pension_snapshot(
         discovered_account_count=len(accounts),
         accounts=tuple(accounts),
         content_hash=snapshot_content_hash(
-            _build_snapshot_for_hash(snapshot_id, PENSION_SOURCE,
-                                     revision.source_as_of, tuple(accounts))
+            _build_snapshot_for_hash(
+                snapshot_id, PENSION_SOURCE, revision.source_as_of, tuple(accounts)
+            )
         ),
     )
     receipt = snapshot_store.append(snapshot, permit)
@@ -96,7 +100,6 @@ def write_canonical_pension_snapshot(
 
 def _build_snapshot_for_hash(snapshot_id, source, captured_at, accounts):
     """Build a CompleteHoldingsSnapshot for content hash computation."""
-    from tokmo.values.holdings import CompleteHoldingsSnapshot
     # We need the content hash but can't build it from the final object
     # (chicken-and-egg). Build with a dummy hash first, compute, then return.
     return CompleteHoldingsSnapshot(

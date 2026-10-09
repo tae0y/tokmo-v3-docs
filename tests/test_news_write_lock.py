@@ -4,21 +4,21 @@ A second connection in the same process shares SQLite's per-inode lock state
 and still sees SQLITE_BUSY, so only a separate process proves POSIX exclusion.
 """
 
-from contextlib import nullcontext
-from datetime import datetime, timezone
 import json
 import os
-from pathlib import Path
 import sqlite3
 import subprocess
 import sys
+from contextlib import nullcontext
+from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
 from tokmo.programs.external_news_storage import bootstrap_external_news
 from tokmo.records.external_news import ExternalNewsStore
 
-NOW = datetime(2026, 8, 2, 1, 2, 3, 456789, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 2, 1, 2, 3, 456789, tzinfo=UTC)
 SRC = str(Path(__file__).resolve().parents[1] / "src")
 _PROBE = """
 import sqlite3, sys
@@ -57,12 +57,19 @@ print(json.dumps({"saved": len(saved)}))
 
 
 def _probe(path):
-    return subprocess.run([sys.executable, "-c", _PROBE, str(path)],
-        capture_output=True, text=True, timeout=30, check=True).stdout.strip()
+    return subprocess.run(
+        [sys.executable, "-c", _PROBE, str(path)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=True,
+    ).stdout.strip()
 
 
 @pytest.mark.parametrize("batched", [False, True])
-def test_other_process_cannot_reserve_while_connector_transaction_is_open(tmp_path, batched):
+def test_other_process_cannot_reserve_while_connector_transaction_is_open(
+    tmp_path, batched
+):
     path = tmp_path / "news.sqlite3"
     bootstrap_external_news(path, now=NOW)
     store = ExternalNewsStore(path)
@@ -78,8 +85,16 @@ def test_separate_process_writers_preserve_every_record_and_integrity(tmp_path):
     path = tmp_path / "news.sqlite3"
     bootstrap_external_news(path, now=NOW)
     env = {**os.environ, "PYTHONPATH": SRC, "PYTHONDONTWRITEBYTECODE": "1"}
-    workers = [subprocess.Popen([sys.executable, "-B", "-c", _WRITER, str(path), f"w{n}", "40"],
-        env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for n in range(4)]
+    workers = [
+        subprocess.Popen(
+            [sys.executable, "-B", "-c", _WRITER, str(path), f"w{n}", "40"],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for n in range(4)
+    ]
     try:
         results = [worker.communicate(timeout=120) for worker in workers]
     finally:
@@ -87,7 +102,9 @@ def test_separate_process_writers_preserve_every_record_and_integrity(tmp_path):
             if worker.poll() is None:
                 worker.kill()
                 worker.wait()
-    assert [worker.returncode for worker in workers] == [0] * 4, [err[-2000:] for _, err in results]
+    assert [worker.returncode for worker in workers] == [0] * 4, [
+        err[-2000:] for _, err in results
+    ]
     saved = [json.loads(out)["saved"] for out, _ in results]
     # Bounded busy failures remain permitted; every committed prefix must
     # survive exactly. Never add retries or require all contenders to win.
@@ -96,6 +113,10 @@ def test_separate_process_writers_preserve_every_record_and_integrity(tmp_path):
     with sqlite3.connect(path) as connection:
         assert connection.execute("PRAGMA quick_check").fetchall() == [("ok",)]
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
-        assert {r[0] for r in connection.execute("SELECT source_article_id FROM news_documents")} == expected
+        assert {
+            r[0]
+            for r in connection.execute("SELECT source_article_id FROM news_documents")
+        } == expected
         assert connection.execute(
-            "SELECT count(*) FROM intake_receipts WHERE status='COLLECTED'").fetchone() == (len(expected),)
+            "SELECT count(*) FROM intake_receipts WHERE status='COLLECTED'"
+        ).fetchone() == (len(expected),)

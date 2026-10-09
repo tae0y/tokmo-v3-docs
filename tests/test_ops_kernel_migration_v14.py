@@ -1,22 +1,23 @@
 """Ops Kernel v14 same-version drift history + v15 explicit migration."""
 
-from datetime import datetime, timezone
 import os
 import sqlite3
 import stat
+from datetime import UTC, datetime
 
 import pytest
 
 from tokmo.records import ops_kernel as module
 from tokmo.records.ops_kernel import OpsKernelStore
 from tokmo.values.cadence_policy import (
-    CADENCE_QUANT_SHADOW_POLICY_V1, TradesChildLimitsV1,
+    CADENCE_QUANT_SHADOW_POLICY_V1,
+    TradesChildLimitsV1,
 )
 from tokmo.values.ops_kernel import OpsKernelCorruptError, ProducerRole
 
 TS = "2026-08-21T00:00:00.000000Z"
 SLOT = "2026-08-21T00:00:00.000000Z"
-NOW = datetime(2026, 8, 21, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 21, tzinfo=UTC)
 
 
 def _build(path, sql):
@@ -40,13 +41,16 @@ def _objects(connection):
 
 def _rows(connection):
     tables = sorted(
-        row[0] for row in connection.execute(
+        row[0]
+        for row in connection.execute(
             "SELECT name FROM sqlite_schema WHERE type='table' "
             "AND name NOT LIKE 'sqlite_%'"
         )
     )
-    return {table: connection.execute(f'SELECT * FROM "{table}"').fetchall()
-            for table in tables}
+    return {
+        table: connection.execute(f'SELECT * FROM "{table}"').fetchall()
+        for table in tables
+    }
 
 
 def _representative_v13(path):
@@ -110,7 +114,9 @@ def test_v13_requires_migration_and_v14_to_v15_changes_only_version(tmp_path):
         )
     snapshot = tmp_path / "ops14" / "snap.sqlite3"
     OpsKernelStore.migrate_v14_to_v15(
-        v14, snapshot_path=snapshot, writers_paused=True,
+        v14,
+        snapshot_path=snapshot,
+        writers_paused=True,
     )
     fresh = OpsKernelStore(tmp_path / "fresh" / "ops_kernel.sqlite3")
     with sqlite3.connect(v14) as migrated, sqlite3.connect(fresh.path) as bootstrap:
@@ -121,6 +127,7 @@ def test_v13_requires_migration_and_v14_to_v15_changes_only_version(tmp_path):
         assert "'MEMBERSHIP_TOSS_STOCKS'" in after_wire_sql
         assert _objects(migrated) == _objects(bootstrap)
     fresh.close()
+
 
 def test_fresh_v15_accepts_membership_toss_stocks(tmp_path):
     store = OpsKernelStore(tmp_path / "ops" / "ops_kernel.sqlite3")
@@ -139,6 +146,7 @@ def test_fresh_v15_accepts_membership_toss_stocks(tmp_path):
         connection.commit()
     store.close()
 
+
 def test_v13_refusal_is_atomic_fail_closed_and_private(tmp_path):
     from tokmo.values.ops_kernel import OpsKernelMigrationRequiredError
 
@@ -156,7 +164,10 @@ def test_v13_refusal_is_atomic_fail_closed_and_private(tmp_path):
     with sqlite3.connect(path) as connection:
         assert connection.execute("PRAGMA user_version").fetchone() == (13,)
         assert connection.execute("PRAGMA quick_check").fetchone() == ("ok",)
-        assert connection.execute("SELECT count(*) FROM cadence_wire_starts").fetchone() == (1,)
+        assert connection.execute(
+            "SELECT count(*) FROM cadence_wire_starts"
+        ).fetchone() == (1,)
+
 
 def test_pre_quant_closed_operations_remain_accepted_on_v15(tmp_path):
     fresh = OpsKernelStore(tmp_path / "ops" / "ops_kernel.sqlite3")
@@ -177,16 +188,20 @@ def test_pre_quant_closed_operations_remain_accepted_on_v15(tmp_path):
         ).fetchall() == [("CONDITIONAL_ORDERS",)]
     store = OpsKernelStore(fresh.path)
     store.plan_cadence_requests(
-        ProducerRole.COLLECTOR, CADENCE_QUANT_SHADOW_POLICY_V1,
+        ProducerRole.COLLECTOR,
+        CADENCE_QUANT_SHADOW_POLICY_V1,
         scheduled_for_utc=NOW,
-        requests=(("MEMBERSHIP_SEC_ISSUER",
-                   "membership:issuer:2026-08-14:AAPL"),),
-        now=NOW, child_limits=TradesChildLimitsV1(),
+        requests=(("MEMBERSHIP_SEC_ISSUER", "membership:issuer:2026-08-14:AAPL"),),
+        now=NOW,
+        child_limits=TradesChildLimitsV1(),
     )
     row = store.start_cadence_request(
-        ProducerRole.COLLECTOR, CADENCE_QUANT_SHADOW_POLICY_V1,
-        scheduled_for_utc=NOW, operation="MEMBERSHIP_SEC_ISSUER",
+        ProducerRole.COLLECTOR,
+        CADENCE_QUANT_SHADOW_POLICY_V1,
+        scheduled_for_utc=NOW,
+        operation="MEMBERSHIP_SEC_ISSUER",
         native_identity="membership:issuer:2026-08-14:AAPL",
-        now=NOW, child_limits=TradesChildLimitsV1(),
+        now=NOW,
+        child_limits=TradesChildLimitsV1(),
     )
     assert row["operation_group"] == "MEMBERSHIP"

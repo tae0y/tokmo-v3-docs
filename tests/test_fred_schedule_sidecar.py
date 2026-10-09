@@ -7,7 +7,7 @@ format. Every assertion here is a parity proof against the tool's own tests.
 """
 
 import ast
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -18,7 +18,7 @@ from tokmo.values.fred_query import (
 )
 
 ROOT = __import__("pathlib").Path(__file__).parents[1]
-UTC = timezone.utc
+UTC = UTC
 NOW = datetime(2026, 8, 7, 12, 45, tzinfo=UTC)
 RELEASE_ID = 50
 RELEASE_DATE = date(2026, 8, 7)
@@ -28,13 +28,15 @@ OFFICIAL_AT = datetime(2026, 8, 7, 12, 30, tzinfo=UTC)
 
 # --- AR-2: release_slot_for ------------------------------------------------
 
+
 def test_release_slot_for_matches_the_inline_fstring_for_every_registered_series():
     """``release_slot_for(series_id, date)`` must equal ``f"{series_id}:{isoformat()}"``."""
     sample_dates = [date(2026, 8, 7), date(2026, 1, 9), date(2025, 12, 31)]
     for series_id in SERIES_REGISTRY:
         for release_date in sample_dates:
             assert release_slot_for(series_id, release_date) == (
-                f"{series_id}:{release_date.isoformat()}")
+                f"{series_id}:{release_date.isoformat()}"
+            )
 
 
 def test_release_slot_for_rejects_unregistered_series():
@@ -49,6 +51,7 @@ def test_release_slot_for_rejects_non_date():
 
 # --- AR-23: the sidecar module opens no host, home or clock -----------------
 
+
 def _imports(relative):
     names = []
     for node in ast.walk(ast.parse((ROOT / relative).read_text())):
@@ -62,10 +65,21 @@ def _imports(relative):
 
 def test_the_sidecar_records_module_opens_no_host_home_or_clock():
     text = (ROOT / "src/tokmo/records/fred_schedule_sidecar.py").read_text()
-    for banned in ("bls.gov", "BLS_SOURCE_URL", "news_release", "https://",
-                   "Path.home()", "datetime.now(", "utcnow(", "os.environ",
-                   "getenv(", "urlopen("):
+    for banned in (
+        "bls.gov",
+        "BLS_SOURCE_URL",
+        "news_release",
+        "https://",
+        "Path.home()",
+        "datetime.now(",
+        "utcnow(",
+        "os.environ",
+        "getenv(",
+        "urlopen(",
+    ):
         assert banned not in text, banned
     names = _imports("src/tokmo/records/fred_schedule_sidecar.py")
-    assert not any(name.startswith(("tokmo.facts", "tokmo.programs",
-                                    "tokmo.runtime")) for name in names)
+    assert not any(
+        name.startswith(("tokmo.facts", "tokmo.programs", "tokmo.runtime"))
+        for name in names
+    )

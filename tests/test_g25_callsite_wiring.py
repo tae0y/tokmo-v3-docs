@@ -9,7 +9,7 @@ The cadence runs on a tmp_path root, and the stores are created under that
 root's standard paths.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -19,8 +19,8 @@ from tokmo.records.account_native_refs import AccountNativeRefStoreV1
 from tokmo.records.calendar_lookahead import CalendarLookaheadStoreV1
 from tokmo.values.session_gate import Market
 
-SLOT = datetime(2026, 8, 3, 14, 0, tzinfo=timezone.utc)
-OBSERVED = datetime(2026, 8, 3, 14, 0, 1, tzinfo=timezone.utc)
+SLOT = datetime(2026, 8, 3, 14, 0, tzinfo=UTC)
+OBSERVED = datetime(2026, 8, 3, 14, 0, 1, tzinfo=UTC)
 
 # A valid Toss account scope pattern: toss-acct-<24 hex chars>
 TOSS_SCOPE = "toss-acct-" + "a" * 24
@@ -40,12 +40,20 @@ def _open_cadence_fixture():
                 "regular_end": "2026-08-03T20:00:00Z",
             },
         },
-        "accounts": [{
-            "seed": "9", "holdings": [
-                {"symbol": "AAPL", "quantity": "1", "avg_price": "100",
-                 "currency": "USD", "market_raw": "US"},
-            ],
-        }],
+        "accounts": [
+            {
+                "seed": "9",
+                "holdings": [
+                    {
+                        "symbol": "AAPL",
+                        "quantity": "1",
+                        "avg_price": "100",
+                        "currency": "USD",
+                        "market_raw": "US",
+                    },
+                ],
+            }
+        ],
         "quotes": {"AAPL": {"price": "101", "currency": "USD"}},
     }
 
@@ -65,12 +73,16 @@ def test_calendar_success_writes_lookahead_today_and_next(tmp_path):
     fixture["calendar"]["KR"]["next_date"] = "2026-08-04"
     fixture["calendar"]["US"]["next_date"] = "2026-08-04"
     deps, _ = build_fixture_cadence_deps(
-        fixture=fixture, clock=lambda: OBSERVED,
+        fixture=fixture,
+        clock=lambda: OBSERVED,
     )
     root = tmp_path / "shadow"
     result = run_production_cadence_once(
-        root=root, policy_version="cadence-300s-v1", scheduled_for_utc=SLOT,
-        observed_now_utc=OBSERVED, deps=deps,
+        root=root,
+        policy_version="cadence-300s-v1",
+        scheduled_for_utc=SLOT,
+        observed_now_utc=OBSERVED,
+        deps=deps,
     )
     assert result.outcome.value == "COMPLETE"
 
@@ -95,12 +107,16 @@ def test_calendar_success_lookahead_provenance_is_receipt_identity(tmp_path):
     fixture = _open_cadence_fixture()
     fixture["calendar"]["KR"]["next_date"] = "2026-08-04"
     deps, _ = build_fixture_cadence_deps(
-        fixture=fixture, clock=lambda: OBSERVED,
+        fixture=fixture,
+        clock=lambda: OBSERVED,
     )
     root = tmp_path / "shadow"
     result = run_production_cadence_once(
-        root=root, policy_version="cadence-300s-v1", scheduled_for_utc=SLOT,
-        observed_now_utc=OBSERVED, deps=deps,
+        root=root,
+        policy_version="cadence-300s-v1",
+        scheduled_for_utc=SLOT,
+        observed_now_utc=OBSERVED,
+        deps=deps,
     )
     assert result.outcome.value == "COMPLETE"
 
@@ -118,12 +134,16 @@ def test_calendar_failed_no_lookahead_mutation(tmp_path):
     fixture = _open_cadence_fixture()
     fixture["calendar"]["KR"]["fail"] = True
     deps, _ = build_fixture_cadence_deps(
-        fixture=fixture, clock=lambda: OBSERVED,
+        fixture=fixture,
+        clock=lambda: OBSERVED,
     )
     root = tmp_path / "shadow"
     result = run_production_cadence_once(
-        root=root, policy_version="cadence-300s-v1", scheduled_for_utc=SLOT,
-        observed_now_utc=OBSERVED, deps=deps,
+        root=root,
+        policy_version="cadence-300s-v1",
+        scheduled_for_utc=SLOT,
+        observed_now_utc=OBSERVED,
+        deps=deps,
     )
     # Calendar failure means not COMPLETE
     assert result.outcome.value != "COMPLETE"
@@ -144,19 +164,25 @@ def test_calendar_failed_no_lookahead_mutation(tmp_path):
 # MarketRefreshState.SUCCESS ONLY — not _CALENDAR_WIRE_SUCCEEDED which
 # erroneously includes CACHE_CONFLICT / CACHE_UPDATE_FAILED.
 
+
 def _kr_calendar_response():
     """A minimal valid KR calendar response for lookahead writer input."""
-    from tokmo.values.toss_market_calendar import (
-        CalendarSession, IntegratedHour, KrMarketCalendarResponse, KrMarketDay,
-    )
     from datetime import date as date_cls
+
+    from tokmo.values.toss_market_calendar import (
+        CalendarSession,
+        IntegratedHour,
+        KrMarketCalendarResponse,
+        KrMarketDay,
+    )
+
     return KrMarketCalendarResponse(
         today=KrMarketDay(
             date_cls(2026, 8, 3),
             IntegratedHour(
                 regular_market=CalendarSession(
-                    datetime(2026, 8, 3, 0, 0, tzinfo=timezone.utc),
-                    datetime(2026, 8, 3, 6, 30, tzinfo=timezone.utc),
+                    datetime(2026, 8, 3, 0, 0, tzinfo=UTC),
+                    datetime(2026, 8, 3, 6, 30, tzinfo=UTC),
                 ),
             ),
         ),
@@ -164,8 +190,8 @@ def _kr_calendar_response():
             date_cls(2026, 8, 1),
             IntegratedHour(
                 regular_market=CalendarSession(
-                    datetime(2026, 8, 1, 0, 0, tzinfo=timezone.utc),
-                    datetime(2026, 8, 1, 6, 30, tzinfo=timezone.utc),
+                    datetime(2026, 8, 1, 0, 0, tzinfo=UTC),
+                    datetime(2026, 8, 1, 6, 30, tzinfo=UTC),
                 ),
             ),
         ),
@@ -173,8 +199,8 @@ def _kr_calendar_response():
             date_cls(2026, 8, 4),
             IntegratedHour(
                 regular_market=CalendarSession(
-                    datetime(2026, 8, 4, 0, 0, tzinfo=timezone.utc),
-                    datetime(2026, 8, 4, 6, 30, tzinfo=timezone.utc),
+                    datetime(2026, 8, 4, 0, 0, tzinfo=UTC),
+                    datetime(2026, 8, 4, 6, 30, tzinfo=UTC),
                 ),
             ),
         ),
@@ -183,30 +209,34 @@ def _kr_calendar_response():
 
 def _us_calendar_response():
     """A minimal valid US calendar response for lookahead writer input."""
-    from tokmo.values.toss_market_calendar import (
-        CalendarSession, UsMarketCalendarResponse, UsMarketDay,
-    )
     from datetime import date as date_cls
+
+    from tokmo.values.toss_market_calendar import (
+        CalendarSession,
+        UsMarketCalendarResponse,
+        UsMarketDay,
+    )
+
     return UsMarketCalendarResponse(
         today=UsMarketDay(
             date_cls(2026, 8, 3),
             regular_market=CalendarSession(
-                datetime(2026, 8, 3, 13, 30, tzinfo=timezone.utc),
-                datetime(2026, 8, 3, 20, 0, tzinfo=timezone.utc),
+                datetime(2026, 8, 3, 13, 30, tzinfo=UTC),
+                datetime(2026, 8, 3, 20, 0, tzinfo=UTC),
             ),
         ),
         previous_business_day=UsMarketDay(
             date_cls(2026, 8, 1),
             regular_market=CalendarSession(
-                datetime(2026, 8, 1, 13, 30, tzinfo=timezone.utc),
-                datetime(2026, 8, 1, 20, 0, tzinfo=timezone.utc),
+                datetime(2026, 8, 1, 13, 30, tzinfo=UTC),
+                datetime(2026, 8, 1, 20, 0, tzinfo=UTC),
             ),
         ),
         next_business_day=UsMarketDay(
             date_cls(2026, 8, 4),
             regular_market=CalendarSession(
-                datetime(2026, 8, 4, 13, 30, tzinfo=timezone.utc),
-                datetime(2026, 8, 4, 20, 0, tzinfo=timezone.utc),
+                datetime(2026, 8, 4, 13, 30, tzinfo=UTC),
+                datetime(2026, 8, 4, 20, 0, tzinfo=UTC),
             ),
         ),
     )
@@ -215,13 +245,18 @@ def _us_calendar_response():
 def _cache_entry_kr():
     """A valid KR cache entry matching the calendar response's today."""
     from tokmo.records.calendar_cache import (
-        CalendarDayCacheSchema2, CalendarSessionCacheSchema2,
+        CalendarDayCacheSchema2,
+        CalendarSessionCacheSchema2,
     )
+
     return CalendarDayCacheSchema2(
         trade_date="2026-08-03",
-        sessions={"regularMarket": CalendarSessionCacheSchema2(
-            start="2026-08-03T00:00:00Z", end="2026-08-03T06:30:00Z",
-        )},
+        sessions={
+            "regularMarket": CalendarSessionCacheSchema2(
+                start="2026-08-03T00:00:00Z",
+                end="2026-08-03T06:30:00Z",
+            )
+        },
         source_trade_date="2026-08-03",
         fetched_at="2026-08-03T00:00:00Z",
         schema_version=2,
@@ -232,13 +267,18 @@ def _cache_entry_kr():
 def _cache_entry_us():
     """A valid US cache entry matching the calendar response's today."""
     from tokmo.records.calendar_cache import (
-        CalendarDayCacheSchema2, CalendarSessionCacheSchema2,
+        CalendarDayCacheSchema2,
+        CalendarSessionCacheSchema2,
     )
+
     return CalendarDayCacheSchema2(
         trade_date="2026-08-03",
-        sessions={"regularMarket": CalendarSessionCacheSchema2(
-            start="2026-08-03T13:30:00Z", end="2026-08-03T20:00:00Z",
-        )},
+        sessions={
+            "regularMarket": CalendarSessionCacheSchema2(
+                start="2026-08-03T13:30:00Z",
+                end="2026-08-03T20:00:00Z",
+            )
+        },
         source_trade_date="2026-08-03",
         fetched_at="2026-08-03T00:00:00Z",
         schema_version=2,
@@ -248,11 +288,14 @@ def _cache_entry_us():
 
 def _make_cache_store(tmp_path, kr_entry=None, us_entry=None):
     """Create a CalendarCacheStore pre-populated with the given entries."""
-    from tokmo.records.calendar_cache import (
-        CalendarCacheSchema2, CalendarCacheStore,
-        _cache_bytes, CALENDAR_CACHE_MAX_BYTES,
-    )
     from tokmo.records.atomic_json import write_atomic_json
+    from tokmo.records.calendar_cache import (
+        CALENDAR_CACHE_MAX_BYTES,
+        CalendarCacheSchema2,
+        CalendarCacheStore,
+        _cache_bytes,
+    )
+
     path = tmp_path / "ops" / "calendar_cache.json"
     store = CalendarCacheStore(path, clock=lambda: OBSERVED)
     if kr_entry is not None or us_entry is not None:
@@ -263,20 +306,25 @@ def _make_cache_store(tmp_path, kr_entry=None, us_entry=None):
             updated_at="2026-08-03T00:00:00Z",
         )
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        write_atomic_json(path, _cache_bytes(schema), max_bytes=CALENDAR_CACHE_MAX_BYTES)
+        write_atomic_json(
+            path, _cache_bytes(schema), max_bytes=CALENDAR_CACHE_MAX_BYTES
+        )
     return store
 
 
 class _FakeDeps:
     """Minimal deps stand-in with just .clock."""
+
     def __init__(self, clock):
         self.clock = clock
 
 
 def _make_receipt(market, date_iso):
     """Create a CalendarStartReceiptV1 with a valid native_identity."""
-    from tokmo.values.ops_kernel import CalendarStartReceiptV1
     from datetime import date as date_cls
+
+    from tokmo.values.ops_kernel import CalendarStartReceiptV1
+
     return CalendarStartReceiptV1(
         policy_version="cadence-300s-v1",
         scheduled_for_utc=SLOT,
@@ -314,8 +362,10 @@ def test_cache_conflict_does_not_write_lookahead(tmp_path, monkeypatch):
     lookahead_store = CalendarLookaheadStoreV1(lookahead_path, clock=lambda: OBSERVED)
 
     kr_result = MarketRefreshResult(
-        Market.KR, datetime(2026, 8, 3, tzinfo=timezone.utc).date(),
-        MarketRefreshState.CACHE_CONFLICT, False,
+        Market.KR,
+        datetime(2026, 8, 3, tzinfo=UTC).date(),
+        MarketRefreshState.CACHE_CONFLICT,
+        False,
         receipt=_make_receipt(Market.KR, "2026-08-03"),
     )
 
@@ -351,12 +401,15 @@ def test_cache_update_failed_does_not_write_lookahead(tmp_path, monkeypatch):
     monkeypatch.setattr(pc_module, "write_lookahead_from_calendar", spy_writer)
 
     lookahead_store = CalendarLookaheadStoreV1(
-        tmp_path / "ops" / "calendar_lookahead.sqlite3", clock=lambda: OBSERVED,
+        tmp_path / "ops" / "calendar_lookahead.sqlite3",
+        clock=lambda: OBSERVED,
     )
 
     us_result = MarketRefreshResult(
-        Market.US, datetime(2026, 8, 3, tzinfo=timezone.utc).date(),
-        MarketRefreshState.CACHE_UPDATE_FAILED, False,
+        Market.US,
+        datetime(2026, 8, 3, tzinfo=UTC).date(),
+        MarketRefreshState.CACHE_UPDATE_FAILED,
+        False,
         receipt=_make_receipt(Market.US, "2026-08-03"),
     )
 
@@ -380,7 +433,9 @@ def test_lookahead_gate_per_market_independence(tmp_path, monkeypatch):
     from tokmo.programs.calendar_refresh import MarketRefreshResult, MarketRefreshState
 
     cache_store = _make_cache_store(
-        tmp_path, kr_entry=_cache_entry_kr(), us_entry=_cache_entry_us(),
+        tmp_path,
+        kr_entry=_cache_entry_kr(),
+        us_entry=_cache_entry_us(),
     )
 
     writer_calls = []
@@ -393,18 +448,23 @@ def test_lookahead_gate_per_market_independence(tmp_path, monkeypatch):
     monkeypatch.setattr(pc_module, "write_lookahead_from_calendar", spy_writer)
 
     lookahead_store = CalendarLookaheadStoreV1(
-        tmp_path / "ops" / "calendar_lookahead.sqlite3", clock=lambda: OBSERVED,
+        tmp_path / "ops" / "calendar_lookahead.sqlite3",
+        clock=lambda: OBSERVED,
     )
 
-    local_date = datetime(2026, 8, 3, tzinfo=timezone.utc).date()
+    local_date = datetime(2026, 8, 3, tzinfo=UTC).date()
     kr_result = MarketRefreshResult(
-        Market.KR, local_date,
-        MarketRefreshState.CACHE_CONFLICT, False,
+        Market.KR,
+        local_date,
+        MarketRefreshState.CACHE_CONFLICT,
+        False,
         receipt=_make_receipt(Market.KR, "2026-08-03"),
     )
     us_result = MarketRefreshResult(
-        Market.US, local_date,
-        MarketRefreshState.SUCCESS, True,
+        Market.US,
+        local_date,
+        MarketRefreshState.SUCCESS,
+        True,
         receipt=_make_receipt(Market.US, "2026-08-03"),
     )
 
@@ -434,7 +494,8 @@ def test_lookahead_gate_per_market_independence(tmp_path, monkeypatch):
 
 
 def test_lookahead_writer_exception_does_not_change_cadence_outcome(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     """M3: If the lookahead writer raises an actual injected exception, the
     cadence tick outcome must be unchanged AND the store must be mutation0.
@@ -445,21 +506,26 @@ def test_lookahead_writer_exception_does_not_change_cadence_outcome(
     fixture["calendar"]["KR"]["next_date"] = "2026-08-04"
     fixture["calendar"]["US"]["next_date"] = "2026-08-04"
     deps, _ = build_fixture_cadence_deps(
-        fixture=fixture, clock=lambda: OBSERVED,
+        fixture=fixture,
+        clock=lambda: OBSERVED,
     )
 
     # Inject a documented evidence-writer exception. Unexpected programmer
     # exceptions intentionally propagate instead of being hidden.
     def boom(**kwargs):
         from tokmo.programs.calendar_lookahead_writer import LookaheadWriterError
+
         raise LookaheadWriterError("injected lookahead writer failure")
 
     monkeypatch.setattr(pc_module, "write_lookahead_from_calendar", boom)
 
     root = tmp_path / "shadow"
     result = run_production_cadence_once(
-        root=root, policy_version="cadence-300s-v1", scheduled_for_utc=SLOT,
-        observed_now_utc=OBSERVED, deps=deps,
+        root=root,
+        policy_version="cadence-300s-v1",
+        scheduled_for_utc=SLOT,
+        observed_now_utc=OBSERVED,
+        deps=deps,
     )
     assert result.outcome.value == "COMPLETE"
 
@@ -472,14 +538,13 @@ def test_lookahead_writer_exception_does_not_change_cadence_outcome(
     assert len(lookahead_store.read_days(Market.US)) == 0
 
     # Observable stage evidence: calendar stage must still show ok
-    calendar_stage = next(
-        s for s in result.stages if s.stage == "calendar"
-    )
+    calendar_stage = next(s for s in result.stages if s.stage == "calendar")
     assert calendar_stage.status == "ok"
 
 
 def test_native_ref_writer_exception_does_not_change_cadence_outcome(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     """M3: If the native ref writer raises an actual injected exception, the
     cadence tick outcome must be unchanged AND the ref store must be mutation0."""
@@ -487,19 +552,24 @@ def test_native_ref_writer_exception_does_not_change_cadence_outcome(
 
     fixture = _open_cadence_fixture()
     deps, _ = build_fixture_cadence_deps(
-        fixture=fixture, clock=lambda: OBSERVED,
+        fixture=fixture,
+        clock=lambda: OBSERVED,
     )
 
     def boom(**kwargs):
         from tokmo.programs.account_native_ref_writer import NativeRefWriterError
+
         raise NativeRefWriterError("injected native ref writer failure")
 
     monkeypatch.setattr(pc_module, "write_native_refs_from_accounts", boom)
 
     root = tmp_path / "shadow"
     result = run_production_cadence_once(
-        root=root, policy_version="cadence-300s-v1", scheduled_for_utc=SLOT,
-        observed_now_utc=OBSERVED, deps=deps,
+        root=root,
+        policy_version="cadence-300s-v1",
+        scheduled_for_utc=SLOT,
+        observed_now_utc=OBSERVED,
+        deps=deps,
     )
     assert result.outcome.value == "COMPLETE"
 
@@ -512,9 +582,7 @@ def test_native_ref_writer_exception_does_not_change_cadence_outcome(
     assert len(list(mapping.scopes())) == 0
 
     # Holdings stage must still be ok
-    holdings_stage = next(
-        s for s in result.stages if s.stage == "holdings"
-    )
+    holdings_stage = next(s for s in result.stages if s.stage == "holdings")
     assert holdings_stage.status == "ok"
 
 
@@ -525,7 +593,8 @@ def test_unexpected_lookahead_programmer_error_propagates(tmp_path, monkeypatch)
     fixture = _open_cadence_fixture()
     fixture["calendar"]["KR"]["next_date"] = "2026-08-04"
     deps, _ = build_fixture_cadence_deps(
-        fixture=fixture, clock=lambda: OBSERVED,
+        fixture=fixture,
+        clock=lambda: OBSERVED,
     )
 
     def boom(**kwargs):
@@ -534,19 +603,24 @@ def test_unexpected_lookahead_programmer_error_propagates(tmp_path, monkeypatch)
     monkeypatch.setattr(pc_module, "write_lookahead_from_calendar", boom)
     with pytest.raises(RuntimeError, match="programmer bug"):
         run_production_cadence_once(
-            root=tmp_path / "shadow", policy_version="cadence-300s-v1",
-            scheduled_for_utc=SLOT, observed_now_utc=OBSERVED, deps=deps,
+            root=tmp_path / "shadow",
+            policy_version="cadence-300s-v1",
+            scheduled_for_utc=SLOT,
+            observed_now_utc=OBSERVED,
+            deps=deps,
         )
 
 
 def test_unexpected_native_ref_programmer_error_is_not_silent(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     """An unexpected native-ref bug must affect the tick, not disappear."""
     from tokmo.programs import production_cadence as pc_module
 
     deps, _ = build_fixture_cadence_deps(
-        fixture=_open_cadence_fixture(), clock=lambda: OBSERVED,
+        fixture=_open_cadence_fixture(),
+        clock=lambda: OBSERVED,
     )
 
     def boom(**kwargs):
@@ -554,22 +628,35 @@ def test_unexpected_native_ref_programmer_error_is_not_silent(
 
     monkeypatch.setattr(pc_module, "write_native_refs_from_accounts", boom)
     result = run_production_cadence_once(
-        root=tmp_path / "shadow", policy_version="cadence-300s-v1",
-        scheduled_for_utc=SLOT, observed_now_utc=OBSERVED, deps=deps,
+        root=tmp_path / "shadow",
+        policy_version="cadence-300s-v1",
+        scheduled_for_utc=SLOT,
+        observed_now_utc=OBSERVED,
+        deps=deps,
     )
     assert result.outcome.value == "PARTIAL"
     assert next(s for s in result.stages if s.stage == "holdings").status == "ok"
     assert next(s for s in result.stages if s.stage == "snapshot").status == "ok"
-    assert any(s.status != "ok" for s in result.stages if s.stage not in (
-        "calendar", "session_gate", "holdings", "snapshot", "projection",
-    ))
+    assert any(
+        s.status != "ok"
+        for s in result.stages
+        if s.stage
+        not in (
+            "calendar",
+            "session_gate",
+            "holdings",
+            "snapshot",
+            "projection",
+        )
+    )
 
 
 # ── m2: malformed next_business_day cannot suppress another market ───────────
 
 
 def test_malformed_next_business_day_does_not_suppress_other_market(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     """m2: A malformed .next_business_day on one market's response must not
     raise an unhandled exception that suppresses the other market's lookahead
@@ -580,7 +667,8 @@ def test_malformed_next_business_day_does_not_suppress_other_market(
     fixture["calendar"]["KR"]["next_date"] = "2026-08-04"
     fixture["calendar"]["US"]["next_date"] = "2026-08-04"
     deps, _ = build_fixture_cadence_deps(
-        fixture=fixture, clock=lambda: OBSERVED,
+        fixture=fixture,
+        clock=lambda: OBSERVED,
     )
 
     # Wrap the fetcher to inject a malformed next_business_day into KR response
@@ -588,16 +676,21 @@ def test_malformed_next_business_day_does_not_suppress_other_market(
 
     def malformed_next_fetch(*, market, local_trade_date, receipt, bearer):
         response = real_calendar_fetch(
-            market=market, local_trade_date=local_trade_date,
-            receipt=receipt, bearer=bearer,
+            market=market,
+            local_trade_date=local_trade_date,
+            receipt=receipt,
+            bearer=bearer,
         )
         if market is Market.KR:
             # Inject a response where next_business_day.date is missing
             # — simulates a malformed provider wrapper
             from dataclasses import replace as dc_replace
+
             from tokmo.values._primitives import MISSING
+
             bad_next = dc_replace(
-                response.next_business_day, date=MISSING,
+                response.next_business_day,
+                date=MISSING,
             )
             return dc_replace(response, next_business_day=bad_next)
         return response
@@ -606,8 +699,11 @@ def test_malformed_next_business_day_does_not_suppress_other_market(
 
     root = tmp_path / "shadow"
     result = run_production_cadence_once(
-        root=root, policy_version="cadence-300s-v1", scheduled_for_utc=SLOT,
-        observed_now_utc=OBSERVED, deps=deps,
+        root=root,
+        policy_version="cadence-300s-v1",
+        scheduled_for_utc=SLOT,
+        observed_now_utc=OBSERVED,
+        deps=deps,
     )
     assert result.outcome.value == "COMPLETE"
 
@@ -626,7 +722,8 @@ def test_malformed_next_business_day_does_not_suppress_other_market(
 
 
 def test_lookahead_writer_failure_records_bounded_stage_reason(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     """m1: A typed writer exception (LookaheadWriterError) must produce a
     bounded sanitized stage reason — no secret/path/raw ref. A lifecycle
@@ -642,29 +739,37 @@ def test_lookahead_writer_failure_records_bounded_stage_reason(
     fixture["calendar"]["KR"]["next_date"] = "2026-08-04"
     fixture["calendar"]["US"]["next_date"] = "2026-08-04"
     deps, _ = build_fixture_cadence_deps(
-        fixture=fixture, clock=lambda: OBSERVED,
+        fixture=fixture,
+        clock=lambda: OBSERVED,
         lifecycle_sink=capturing_sink,
     )
 
     def typed_fail(**kwargs):
         from tokmo.programs.calendar_lookahead_writer import LookaheadWriterError
+
         raise LookaheadWriterError("injected typed writer failure")
 
     monkeypatch.setattr(pc_module, "write_lookahead_from_calendar", typed_fail)
 
     root = tmp_path / "shadow"
     result = run_production_cadence_once(
-        root=root, policy_version="cadence-300s-v1", scheduled_for_utc=SLOT,
-        observed_now_utc=OBSERVED, deps=deps,
+        root=root,
+        policy_version="cadence-300s-v1",
+        scheduled_for_utc=SLOT,
+        observed_now_utc=OBSERVED,
+        deps=deps,
     )
     assert result.outcome.value == "COMPLETE"
 
     # At least one stage event related to lookahead failure should be recorded
     # with a sanitized reason (no secret/path/raw ref in the reason text)
     lookahead_events = [
-        e for e in events
-        if (getattr(e, "stage", None) == "calendar"
-            and (getattr(e, "reason", "") or "").startswith("lookahead_skipped_"))
+        e
+        for e in events
+        if (
+            getattr(e, "stage", None) == "calendar"
+            and (getattr(e, "reason", "") or "").startswith("lookahead_skipped_")
+        )
     ]
     assert len(lookahead_events) >= 1
     for ev in lookahead_events:
@@ -683,12 +788,16 @@ def test_holdings_complete_writes_toss_native_refs(tmp_path):
     persisted through the native ref writer seam."""
     fixture = _open_cadence_fixture()
     deps, _ = build_fixture_cadence_deps(
-        fixture=fixture, clock=lambda: OBSERVED,
+        fixture=fixture,
+        clock=lambda: OBSERVED,
     )
     root = tmp_path / "shadow"
     result = run_production_cadence_once(
-        root=root, policy_version="cadence-300s-v1", scheduled_for_utc=SLOT,
-        observed_now_utc=OBSERVED, deps=deps,
+        root=root,
+        policy_version="cadence-300s-v1",
+        scheduled_for_utc=SLOT,
+        observed_now_utc=OBSERVED,
+        deps=deps,
     )
     assert result.outcome.value == "COMPLETE"
 
@@ -711,12 +820,16 @@ def test_holdings_complete_native_ref_receipt_binding(tmp_path):
     policy_version:tick_id."""
     fixture = _open_cadence_fixture()
     deps, _ = build_fixture_cadence_deps(
-        fixture=fixture, clock=lambda: OBSERVED,
+        fixture=fixture,
+        clock=lambda: OBSERVED,
     )
     root = tmp_path / "shadow"
     result = run_production_cadence_once(
-        root=root, policy_version="cadence-300s-v1", scheduled_for_utc=SLOT,
-        observed_now_utc=OBSERVED, deps=deps,
+        root=root,
+        policy_version="cadence-300s-v1",
+        scheduled_for_utc=SLOT,
+        observed_now_utc=OBSERVED,
+        deps=deps,
     )
     assert result.outcome.value == "COMPLETE"
 
@@ -739,12 +852,16 @@ def test_holdings_failed_no_native_ref_mutation(tmp_path):
     fixture["calendar"]["KR"]["fail"] = True
     fixture["calendar"]["US"]["fail"] = True
     deps, _ = build_fixture_cadence_deps(
-        fixture=fixture, clock=lambda: OBSERVED,
+        fixture=fixture,
+        clock=lambda: OBSERVED,
     )
     root = tmp_path / "shadow"
     run_production_cadence_once(
-        root=root, policy_version="cadence-300s-v1", scheduled_for_utc=SLOT,
-        observed_now_utc=OBSERVED, deps=deps,
+        root=root,
+        policy_version="cadence-300s-v1",
+        scheduled_for_utc=SLOT,
+        observed_now_utc=OBSERVED,
+        deps=deps,
     )
 
     ref_store = AccountNativeRefStoreV1(
@@ -765,12 +882,16 @@ def test_no_duplicate_calendar_reads_for_lookahead(tmp_path):
     fixture["calendar"]["KR"]["next_date"] = "2026-08-04"
     fixture["calendar"]["US"]["next_date"] = "2026-08-04"
     deps, probe = build_fixture_cadence_deps(
-        fixture=fixture, clock=lambda: OBSERVED,
+        fixture=fixture,
+        clock=lambda: OBSERVED,
     )
     root = tmp_path / "shadow"
     run_production_cadence_once(
-        root=root, policy_version="cadence-300s-v1", scheduled_for_utc=SLOT,
-        observed_now_utc=OBSERVED, deps=deps,
+        root=root,
+        policy_version="cadence-300s-v1",
+        scheduled_for_utc=SLOT,
+        observed_now_utc=OBSERVED,
+        deps=deps,
     )
     # m5: exact count, not <=2. Each market's calendar is read exactly once
     # by the main refresh. The lookahead write adds zero extra reads.
@@ -784,11 +905,12 @@ def test_no_duplicate_calendar_reads_for_lookahead(tmp_path):
 def test_pulse_production_deps_assembles_from_canonical_root(tmp_path):
     """build_pulse_production_deps creates all stores under the isolated root
     and returns a PulseDepsV1 with wired readers — no live provider needed."""
-    from tokmo.programs.pulse_production_deps import build_pulse_production_deps
     from tokmo.programs.integrated_pulse import PulseDepsV1
+    from tokmo.programs.pulse_production_deps import build_pulse_production_deps
 
     deps = build_pulse_production_deps(
-        root=tmp_path, clock=lambda: OBSERVED,
+        root=tmp_path,
+        clock=lambda: OBSERVED,
         watchlist_symbols={Market.KR: frozenset(), Market.US: frozenset()},
         dialogue_cutoff=OBSERVED,
     )
@@ -816,19 +938,26 @@ def test_quotes_trades_consumer_seam_remains_wire0(tmp_path):
         clock=lambda: OBSERVED,
     )
     fact = TossCurrentPriceFact(
-        source="toss-current-price-v1", symbol="AAPL",
-        last_price="220.5", currency_raw="USD",
-        timestamp=OBSERVED, fetched_at=OBSERVED,
+        source="toss-current-price-v1",
+        symbol="AAPL",
+        last_price="220.5",
+        currency_raw="USD",
+        timestamp=OBSERVED,
+        fetched_at=OBSERVED,
     )
     store.save_batch((fact,))
     result = read_latest_quotes_for_consumer(
-        store=store, source="toss-current-price-v1", symbols=("AAPL",),
+        store=store,
+        source="toss-current-price-v1",
+        symbols=("AAPL",),
     )
     assert len(result) == 1  # one row read, wire zero
 
     # Future T keeps cadence as fallback and flips to Pulse at the boundary.
-    from tokmo.values.operation_lane_registry import OPERATION_LANE_REGISTRY_V1
-    from tokmo.values.operation_lane_registry import OperationLane
+    from tokmo.values.operation_lane_registry import (
+        OPERATION_LANE_REGISTRY_V1,
+        OperationLane,
+    )
 
     price_batch = OPERATION_LANE_REGISTRY_V1.entries["PRICE_BATCH"]
     assert price_batch is not None

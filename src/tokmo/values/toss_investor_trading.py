@@ -6,9 +6,11 @@ from datetime import date, datetime
 from tokmo.values._primitives import MISSING, Missing
 
 __all__ = [
-    "InvestorTradingAmount", "InstitutionTradingBreakdown",
-    "InvestorTradingRecord", "InvestorTradingResponse",
     "_INSTITUTION_BREAKDOWN_KEYS",
+    "InstitutionTradingBreakdown",
+    "InvestorTradingAmount",
+    "InvestorTradingRecord",
+    "InvestorTradingResponse",
 ]
 
 
@@ -19,9 +21,13 @@ class InvestorTradingAmount:
 
 
 _INSTITUTION_BREAKDOWN_KEYS = (
-    "financialInvestment", "insurance", "trust",
-    "privateEquityFund", "bank",
-    "otherFinancialInstitution", "pensionFund",
+    "financialInvestment",
+    "insurance",
+    "trust",
+    "privateEquityFund",
+    "bank",
+    "otherFinancialInstitution",
+    "pensionFund",
 )
 
 
@@ -64,6 +70,7 @@ class InvestorTradingVolume:
 @dataclass(frozen=True)
 class StockInvestorTradingRecord:
     """Selected trading fields; holdings/CFD are not trading-flow evidence."""
+
     date: date
     updated_at: datetime
     individual: InvestorTradingVolume | None | Missing = field(repr=False)

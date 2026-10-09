@@ -17,21 +17,18 @@ Key contracts
 
 from __future__ import annotations
 
-from decimal import Decimal
-
 from tokmo.presentation.options import (
-    FormatOptions,
     CurrencyStyle,
-    DateStyle,
+    FormatOptions,
     Locale,
 )
+from tokmo.presentation.registry import CurrencyConflictError, PresentationRegistry
 from tokmo.presentation.scalars import (
     format_date,
     format_money,
     format_number,
     format_percent,
 )
-from tokmo.presentation.registry import PresentationRegistry, CurrencyConflictError
 from tokmo.values import WtiFact, YieldCurveFact
 
 __all__ = [
@@ -61,6 +58,7 @@ YIELD_CURVE_DEFAULT_OPTIONS = FormatOptions(
 
 # === WTI ===
 
+
 def format_wti(fact: WtiFact, options: FormatOptions) -> str:
     """Render a WTI fact as a sentence.
 
@@ -89,18 +87,25 @@ def format_wti(fact: WtiFact, options: FormatOptions) -> str:
 
 # === Yield Curve ===
 
+
 def format_yield_curve(fact: YieldCurveFact, options: FormatOptions) -> str:
     """Render a yield curve fact as a Korean sentence."""
     date_str = format_date(fact.rate_date, options=options)
 
     two = format_percent(
-        fact.two_year_percent, options=options, suffix="%",
+        fact.two_year_percent,
+        options=options,
+        suffix="%",
     )
     ten = format_percent(
-        fact.ten_year_percent, options=options, suffix="%",
+        fact.ten_year_percent,
+        options=options,
+        suffix="%",
     )
     spread = format_percent(
-        fact.spread_percentage_points, options=options, suffix="%p",
+        fact.spread_percentage_points,
+        options=options,
+        suffix="%p",
     )
 
     return f"미국 국채금리 ({date_str}): 2년 {two} · 10년 {ten} · 스프레드 {spread}"
@@ -108,10 +113,13 @@ def format_yield_curve(fact: YieldCurveFact, options: FormatOptions) -> str:
 
 # === Registration ===
 
+
 def register_market_formatters(registry: PresentationRegistry) -> None:
     """Register WTI and YieldCurve formatters on the given registry."""
     registry.register(
-        WtiFact, _wti_entry, default_options=WTI_DEFAULT_OPTIONS,
+        WtiFact,
+        _wti_entry,
+        default_options=WTI_DEFAULT_OPTIONS,
     )
     registry.register(
         YieldCurveFact,

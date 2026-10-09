@@ -1,27 +1,28 @@
 """Deterministic, exhaustive Slice E candidate enumeration."""
 
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal, ROUND_HALF_UP
 import hashlib
+from collections.abc import Mapping
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from decimal import ROUND_HALF_UP, Decimal
 from types import MappingProxyType
-from typing import Mapping
 
 from tokmo.values import canonical_decimal
 from tokmo.values.analysis_barrier import (
-    AnalysisBarrierResultV1, MarketReadiness, VerifiedMaterialV1,
+    AnalysisBarrierResultV1,
+    MarketReadiness,
+    VerifiedMaterialV1,
 )
-from tokmo.values.session_gate import Market
 from tokmo.values.analysis_contracts import (
+    CRITICAL_INCIDENT_KINDS_V1,
+    QUOTE_WATCH_THRESHOLD_RATIO,
     CandidateEnvelopeV1,
     ChangeBasis,
     EvidenceRefV1,
     FreshnessState,
     IncidentTransition,
-    CRITICAL_INCIDENT_KINDS_V1,
     MaterialKindV1,
     NumericStateV1,
-    QUOTE_WATCH_THRESHOLD_RATIO,
     QuoteTriggerKindV1,
     TriggerHorizonV1,
     TrustClass,
@@ -32,6 +33,7 @@ from tokmo.values.analysis_contracts import (
 from tokmo.values.material_pack import JobKind, canonical_encode
 from tokmo.values.open_market_mask import MaskBindingError
 from tokmo.values.ops_kernel import CandidateAssignment
+from tokmo.values.session_gate import Market
 
 MANIFEST_MAX_CANDIDATES_PER_TICK = 512
 QUOTE_MOVE_THRESHOLD_RATIO = Decimal("0.005")
@@ -80,7 +82,7 @@ class BuildResultV1:
 
 
 def _iso(value: datetime) -> str:
-    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 def material_binding_digest(barrier: AnalysisBarrierResultV1) -> str:
@@ -90,19 +92,23 @@ def material_binding_digest(barrier: AnalysisBarrierResultV1) -> str:
         "tick_id": barrier.tick_id,
         # Included only when present so historical (pre-mask) binding
         # digests remain unchanged.
-        **({} if barrier.mask_digest is None
-           else {"mask_digest": barrier.mask_digest}),
+        **({} if barrier.mask_digest is None else {"mask_digest": barrier.mask_digest}),
         "material_ticks": {
             job.value: barrier.material_ticks.get(job)
             for job in sorted(JobKind, key=lambda item: item.value)
         },
-        "packs": [{
-            "job": material.job.value,
-            "pack_tick_id": material.pack_tick_id,
-            "captured_at": _iso(material.captured_at),
-            "content_hash": material.content_hash,
-            "file_sha256": material.file_sha256,
-        } for material in sorted(barrier.materials.values(), key=lambda item: item.job.value)],
+        "packs": [
+            {
+                "job": material.job.value,
+                "pack_tick_id": material.pack_tick_id,
+                "captured_at": _iso(material.captured_at),
+                "content_hash": material.content_hash,
+                "file_sha256": material.file_sha256,
+            }
+            for material in sorted(
+                barrier.materials.values(), key=lambda item: item.job.value
+            )
+        ],
     }
     return hashlib.sha256(canonical_encode(payload)).hexdigest()
 
@@ -116,26 +122,50 @@ def _parse_time(value, fallback: datetime) -> datetime:
     return parsed
 
 
-def _evidence(kind: MaterialKindV1, source: str, record: str, row,
-              material: VerifiedMaterialV1, observed: datetime) -> EvidenceRefV1:
-    content_hash = hashlib.sha256(canonical_encode({
-        "v": 1, "domain": "tokmo-v3:evidence-content",
-        "row": row, "pack": material.content_hash,
-    })).hexdigest()
+def _evidence(
+    kind: MaterialKindV1,
+    source: str,
+    record: str,
+    row,
+    material: VerifiedMaterialV1,
+    observed: datetime,
+) -> EvidenceRefV1:
+    content_hash = hashlib.sha256(
+        canonical_encode(
+            {
+                "v": 1,
+                "domain": "tokmo-v3:evidence-content",
+                "row": row,
+                "pack": material.content_hash,
+            }
+        )
+    ).hexdigest()
     return EvidenceRefV1(
         evidence_id=evidence_id_for(kind, source, record, content_hash),
-        kind=kind, source=source, source_record_key=record,
-        observed_at=observed, fetched_at=material.captured_at,
-        stored_at=material.captured_at, acquired_at=material.captured_at,
-        content_hash=content_hash, schema_version=1, parser_version="material-pack-v1",
-        trust_class=TrustClass.OFFICIAL_PROVIDER, freshness_state=FreshnessState.FRESH,
-        expires_at=material.captured_at.replace() + __import__("datetime").timedelta(seconds=600),
+        kind=kind,
+        source=source,
+        source_record_key=record,
+        observed_at=observed,
+        fetched_at=material.captured_at,
+        stored_at=material.captured_at,
+        acquired_at=material.captured_at,
+        content_hash=content_hash,
+        schema_version=1,
+        parser_version="material-pack-v1",
+        trust_class=TrustClass.OFFICIAL_PROVIDER,
+        freshness_state=FreshnessState.FRESH,
+        expires_at=material.captured_at.replace()
+        + __import__("datetime").timedelta(seconds=600),
     )
 
 
 def _advance(kind, subject, fields, account_scope, tick):
     return BaselineAdvanceV1(
-        kind, subject, fields, account_scope, tick,
+        kind,
+        subject,
+        fields,
+        account_scope,
+        tick,
         hashlib.sha256(canonical_encode(fields)).hexdigest(),
     )
 
@@ -144,7 +174,9 @@ def _ratio(current: str, prior: str) -> str:
     base = Decimal(prior)
     if base == 0:
         return "0"
-    value = ((Decimal(current) - base) / base).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+    value = ((Decimal(current) - base) / base).quantize(
+        Decimal("0.000001"), rounding=ROUND_HALF_UP
+    )
     return canonical_decimal(value)
 
 
@@ -157,9 +189,9 @@ def _pair_delta(current, prior):
     when the pair cannot be trusted (nonmonotonic observed_at or zero base)."""
     if prior is None:
         return None, None
-    elapsed_min = Decimal(str(
-        (current["observed_at"] - prior["observed_at"]).total_seconds()
-    )) / Decimal(60)
+    elapsed_min = Decimal(
+        str((current["observed_at"] - prior["observed_at"]).total_seconds())
+    ) / Decimal(60)
     if elapsed_min <= 0:
         return None, None
     base = Decimal(prior["last_price"])
@@ -181,7 +213,8 @@ def _horizon_delta(ring, minutes):
     now_observed = ring[0]["observed_at"]
     threshold = now_observed - timedelta(minutes=minutes)
     eligible = [
-        row for row in ring
+        row
+        for row in ring
         if row["observed_at"] <= threshold and row["observed_at"] < now_observed
     ]
     if not eligible:
@@ -210,10 +243,17 @@ def _drift_streak(ring):
 
 
 _NO_RING = {
-    "state": NumericStateV1.DATA_INCOMPLETE, "tick_ratio": None,
-    "delta_5": None, "delta_15": None, "delta_30": None,
-    "ref_15": None, "ref_30": None, "velocity": None, "acceleration": None,
-    "reversal": False, "streak": 0,
+    "state": NumericStateV1.DATA_INCOMPLETE,
+    "tick_ratio": None,
+    "delta_5": None,
+    "delta_15": None,
+    "delta_30": None,
+    "ref_15": None,
+    "ref_30": None,
+    "velocity": None,
+    "acceleration": None,
+    "reversal": False,
+    "streak": 0,
 }
 
 
@@ -223,15 +263,19 @@ def _quote_numeric(ring):
     prev = ring[1] if len(ring) > 1 else None
     older = ring[2] if len(ring) > 2 else None
     delta_now, elapsed_now = _pair_delta(ring[0], prev)
-    delta_prev, elapsed_prev = _pair_delta(prev, older) if prev is not None else (None, None)
+    delta_prev, elapsed_prev = (
+        _pair_delta(prev, older) if prev is not None else (None, None)
+    )
     velocity = None if delta_now is None else _round6(delta_now / elapsed_now)
     prior_velocity = None if delta_prev is None else _round6(delta_prev / elapsed_prev)
     acceleration = (
-        None if velocity is None or prior_velocity is None
+        None
+        if velocity is None or prior_velocity is None
         else _round6((velocity - prior_velocity) / elapsed_prev)
     )
     reversal = (
-        delta_now is not None and delta_prev is not None
+        delta_now is not None
+        and delta_prev is not None
         and abs(delta_now) >= QUOTE_MOVE_NOISE_FLOOR_RATIO
         and abs(delta_prev) >= QUOTE_MOVE_NOISE_FLOOR_RATIO
         and (delta_now > 0) != (delta_prev > 0)
@@ -248,11 +292,10 @@ def _quote_numeric(ring):
     elif reversal:
         state = NumericStateV1.REVERSAL
     elif (
-        (tick_ratio is not None and abs(tick_ratio) >= QUOTE_MOVE_THRESHOLD_RATIO)
-        or any(
-            delta is not None and abs(delta) >= QUOTE_CUMULATIVE_THRESHOLD_RATIO
-            for delta in (delta_15, delta_30)
-        )
+        tick_ratio is not None and abs(tick_ratio) >= QUOTE_MOVE_THRESHOLD_RATIO
+    ) or any(
+        delta is not None and abs(delta) >= QUOTE_CUMULATIVE_THRESHOLD_RATIO
+        for delta in (delta_15, delta_30)
     ):
         state = NumericStateV1.MATERIAL_MOVE
     elif tick_ratio is not None and abs(tick_ratio) >= QUOTE_WATCH_THRESHOLD_RATIO:
@@ -260,11 +303,17 @@ def _quote_numeric(ring):
     else:
         state = NumericStateV1.NORMAL
     return {
-        "state": state, "tick_ratio": tick_ratio,
-        "delta_5": delta_5, "delta_15": delta_15, "delta_30": delta_30,
-        "ref_15": ref_15, "ref_30": ref_30,
-        "velocity": velocity, "acceleration": acceleration,
-        "reversal": reversal, "streak": streak,
+        "state": state,
+        "tick_ratio": tick_ratio,
+        "delta_5": delta_5,
+        "delta_15": delta_15,
+        "delta_30": delta_30,
+        "ref_15": ref_15,
+        "ref_30": ref_30,
+        "velocity": velocity,
+        "acceleration": acceleration,
+        "reversal": reversal,
+        "streak": streak,
     }
 
 
@@ -274,12 +323,14 @@ def _quote_trigger(first_observation, ring, numeric, previous):
         return QuoteTriggerKindV1.FIRST_OBSERVATION, TriggerHorizonV1.NONE, None
     if numeric["reversal"]:
         return (
-            QuoteTriggerKindV1.REVERSAL, TriggerHorizonV1.TICK,
+            QuoteTriggerKindV1.REVERSAL,
+            TriggerHorizonV1.TICK,
             ring[1]["last_price"],
         )
     if abs(numeric["streak"]) == QUOTE_DRIFT_TICK_THRESHOLD:
         return (
-            QuoteTriggerKindV1.PERSISTENT_DRIFT, TriggerHorizonV1.STREAK,
+            QuoteTriggerKindV1.PERSISTENT_DRIFT,
+            TriggerHorizonV1.STREAK,
             ring[QUOTE_DRIFT_TICK_THRESHOLD]["last_price"],
         )
     for delta_key, ref_key, horizon in (
@@ -297,7 +348,8 @@ def _quote_trigger(first_observation, ring, numeric, previous):
             )
         ):
             return (
-                QuoteTriggerKindV1.CUMULATIVE_DRIFT, horizon,
+                QuoteTriggerKindV1.CUMULATIVE_DRIFT,
+                horizon,
                 numeric[ref_key]["last_price"],
             )
     if (
@@ -305,12 +357,14 @@ def _quote_trigger(first_observation, ring, numeric, previous):
         and abs(numeric["tick_ratio"]) >= QUOTE_MOVE_THRESHOLD_RATIO
     ):
         return (
-            QuoteTriggerKindV1.THRESHOLD_MOVE, TriggerHorizonV1.TICK,
+            QuoteTriggerKindV1.THRESHOLD_MOVE,
+            TriggerHorizonV1.TICK,
             ring[1]["last_price"],
         )
     if numeric["state"] is not previous["state"]:
         return (
-            QuoteTriggerKindV1.STATE_TRANSITION, TriggerHorizonV1.TICK,
+            QuoteTriggerKindV1.STATE_TRANSITION,
+            TriggerHorizonV1.TICK,
             ring[1]["last_price"] if len(ring) > 1 else None,
         )
     return None
@@ -324,11 +378,15 @@ def quote_history_subjects(barrier: AnalysisBarrierResultV1) -> tuple[str, ...]:
     quotes = barrier.materials.get(JobKind.QUOTES)
     if quotes is None:
         return ()
-    return tuple(sorted({
-        subject_id_for(MaterialKindV1.QUOTE_STATE, [market, row["symbol"]])
-        for market, rows in quotes.payload["markets"].items()
-        for row in rows
-    }))
+    return tuple(
+        sorted(
+            {
+                subject_id_for(MaterialKindV1.QUOTE_STATE, [market, row["symbol"]])
+                for market, rows in quotes.payload["markets"].items()
+                for row in rows
+            }
+        )
+    )
 
 
 def build_candidates(
@@ -365,57 +423,94 @@ def build_candidates(
             else:
                 scope = None
             for row in account["holdings"]:
-                market = row["market_field"] if row["market_field"] in {"KR", "US"} else row["market_raw"]
+                market = (
+                    row["market_field"]
+                    if row["market_field"] in {"KR", "US"}
+                    else row["market_raw"]
+                )
                 if market not in proceed:
                     continue
                 from tokmo.values.portfolio_scope import PortfolioScope
+
                 if isinstance(scope, PortfolioScope):
                     held_symbols.add((scope, market, row["symbol"]))
                     key = (scope, market, row["symbol"])
-                    held_quantity[key] = (
-                        held_quantity.get(key, Decimal(0))
-                        + Decimal(row["quantity"])
+                    held_quantity[key] = held_quantity.get(key, Decimal(0)) + Decimal(
+                        row["quantity"]
                     )
                 subject = subject_id_for(
                     MaterialKindV1.HOLDINGS_CHANGE,
                     [market, account["account_scope"], row["symbol"]],
                 )
                 fields = {
-                    "market": market, "account_scope": account["account_scope"],
-                    "symbol": row["symbol"], "account_type_label": account["account_type_label"],
-                    "ordinal_at_observation": account["ordinal"], "currency": row["currency"],
-                    "quantity": row["quantity"], "avg_price": row["avg_price"], "present": True,
+                    "market": market,
+                    "account_scope": account["account_scope"],
+                    "symbol": row["symbol"],
+                    "account_type_label": account["account_type_label"],
+                    "ordinal_at_observation": account["ordinal"],
+                    "currency": row["currency"],
+                    "quantity": row["quantity"],
+                    "avg_price": row["avg_price"],
+                    "present": True,
                 }
                 prior = baselines.get((MaterialKindV1.HOLDINGS_CHANGE, subject))
-                advances.append(_advance(
-                    MaterialKindV1.HOLDINGS_CHANGE, subject, fields,
-                    account["account_scope"], barrier.tick_id,
-                ))
+                advances.append(
+                    _advance(
+                        MaterialKindV1.HOLDINGS_CHANGE,
+                        subject,
+                        fields,
+                        account["account_scope"],
+                        barrier.tick_id,
+                    )
+                )
                 if prior is not None and (
                     prior.fields["quantity"] != row["quantity"]
                     or prior.fields["avg_price"] != row["avg_price"]
                 ):
-                    change = ("QUANTITY_CHANGED" if prior.fields["quantity"] != row["quantity"]
-                              else "AVG_PRICE_CHANGED")
-                    evidence = _evidence(
-                        MaterialKindV1.HOLDINGS_CHANGE, "toss-holdings-v1",
-                        f"{market}:{row['symbol']}", row, holdings, holdings.captured_at,
+                    change = (
+                        "QUANTITY_CHANGED"
+                        if prior.fields["quantity"] != row["quantity"]
+                        else "AVG_PRICE_CHANGED"
                     )
-                    candidates.append(CandidateEnvelopeV1(
-                        candidate_id_for(barrier.tick_id, MaterialKindV1.HOLDINGS_CHANGE, subject),
-                        subject, MaterialKindV1.HOLDINGS_CHANGE, market, barrier.tick_id,
-                        CandidateAssignment.FULL_REVIEW, (evidence,), {
-                            "market": market, "account_type_label": account["account_type_label"],
-                            "portfolio_relation": "HELD",
-                            "ordinal": account["ordinal"], "symbol": row["symbol"],
-                            "change_kind": change, "baseline_tick_id": prior.source_tick_id,
-                            "current_quantity": row["quantity"], "current_avg_price": row["avg_price"],
-                            "baseline_quantity": prior.fields["quantity"],
-                            "baseline_avg_price": prior.fields["avg_price"],
-                            "quantity_delta_ratio": _ratio(row["quantity"], prior.fields["quantity"]),
-                            "currency": row["currency"],
-                        }, now,
-                    ))
+                    evidence = _evidence(
+                        MaterialKindV1.HOLDINGS_CHANGE,
+                        "toss-holdings-v1",
+                        f"{market}:{row['symbol']}",
+                        row,
+                        holdings,
+                        holdings.captured_at,
+                    )
+                    candidates.append(
+                        CandidateEnvelopeV1(
+                            candidate_id_for(
+                                barrier.tick_id, MaterialKindV1.HOLDINGS_CHANGE, subject
+                            ),
+                            subject,
+                            MaterialKindV1.HOLDINGS_CHANGE,
+                            market,
+                            barrier.tick_id,
+                            CandidateAssignment.FULL_REVIEW,
+                            (evidence,),
+                            {
+                                "market": market,
+                                "account_type_label": account["account_type_label"],
+                                "portfolio_relation": "HELD",
+                                "ordinal": account["ordinal"],
+                                "symbol": row["symbol"],
+                                "change_kind": change,
+                                "baseline_tick_id": prior.source_tick_id,
+                                "current_quantity": row["quantity"],
+                                "current_avg_price": row["avg_price"],
+                                "baseline_quantity": prior.fields["quantity"],
+                                "baseline_avg_price": prior.fields["avg_price"],
+                                "quantity_delta_ratio": _ratio(
+                                    row["quantity"], prior.fields["quantity"]
+                                ),
+                                "currency": row["currency"],
+                            },
+                            now,
+                        )
+                    )
 
     quotes = barrier.materials.get(JobKind.QUOTES)
     if quotes is not None:
@@ -423,33 +518,60 @@ def build_candidates(
             if market not in proceed:
                 continue
             for row in rows:
-                subject = subject_id_for(MaterialKindV1.QUOTE_STATE, [market, row["symbol"]])
-                prior = baselines.get((MaterialKindV1.QUOTE_STATE, subject))
-                baseline_fields = {"market": market, "symbol": row["symbol"], "last_price": row["last_price"]}
-                advances.append(_advance(MaterialKindV1.QUOTE_STATE, subject, baseline_fields, None,
-                                         barrier.tick_id))
-                observed = _parse_time(
-                    row["provider_timestamp"], _parse_time(row["fetched_at"], now),
+                subject = subject_id_for(
+                    MaterialKindV1.QUOTE_STATE, [market, row["symbol"]]
                 )
-                prior_ring = tuple(sorted(
-                    (
-                        item for item in history.get(subject, ())
-                        if item["tick_id"] < barrier.tick_id
-                    ),
-                    key=lambda item: item["tick_id"], reverse=True,
-                ))[:7]
-                ring = ({
-                    "tick_id": barrier.tick_id, "observed_at": observed,
+                prior = baselines.get((MaterialKindV1.QUOTE_STATE, subject))
+                baseline_fields = {
+                    "market": market,
+                    "symbol": row["symbol"],
                     "last_price": row["last_price"],
-                },) + prior_ring
+                }
+                advances.append(
+                    _advance(
+                        MaterialKindV1.QUOTE_STATE,
+                        subject,
+                        baseline_fields,
+                        None,
+                        barrier.tick_id,
+                    )
+                )
+                observed = _parse_time(
+                    row["provider_timestamp"],
+                    _parse_time(row["fetched_at"], now),
+                )
+                prior_ring = tuple(
+                    sorted(
+                        (
+                            item
+                            for item in history.get(subject, ())
+                            if item["tick_id"] < barrier.tick_id
+                        ),
+                        key=lambda item: item["tick_id"],
+                        reverse=True,
+                    )
+                )[:7]
+                ring = (
+                    {
+                        "tick_id": barrier.tick_id,
+                        "observed_at": observed,
+                        "last_price": row["last_price"],
+                    },
+                ) + prior_ring
                 numeric = _quote_numeric(ring)
                 previous = _quote_numeric(prior_ring)
                 state_value = numeric["state"].value
                 numeric_state_counts[state_value] = (
-                    numeric_state_counts.get(state_value, 0) + 1)
-                history_advances.append(HistoryAdvanceV1(
-                    subject, barrier.tick_id, observed, row["last_price"],
-                ))
+                    numeric_state_counts.get(state_value, 0) + 1
+                )
+                history_advances.append(
+                    HistoryAdvanceV1(
+                        subject,
+                        barrier.tick_id,
+                        observed,
+                        row["last_price"],
+                    )
+                )
                 # replay of an already-committed tick sees its own baseline;
                 # the true prior observation is then the durable ring only
                 first_observation = prior is None or (
@@ -460,7 +582,8 @@ def build_candidates(
                     continue
                 trigger_kind, trigger_horizon, reference_price = trigger
                 trigger_fire_counts[trigger_kind.value] = (
-                    trigger_fire_counts.get(trigger_kind.value, 0) + 1)
+                    trigger_fire_counts.get(trigger_kind.value, 0) + 1
+                )
                 money_impact = None
                 if (
                     barrier.materials.get(JobKind.HOLDINGS) is not None
@@ -468,58 +591,93 @@ def build_candidates(
                 ):
                     # N5: find scopes holding this (market, symbol)
                     scopes_for_symbol = {
-                        s for (s, m, sym) in held_symbols
+                        s
+                        for (s, m, sym) in held_symbols
                         if m == market and sym == row["symbol"]
                     }
                     if len(scopes_for_symbol) == 1:
                         scope_key = scopes_for_symbol.pop()
                         key = (scope_key, market, row["symbol"])
                         if key in held_quantity:
-                            money_impact = canonical_decimal((
-                                held_quantity[key]
-                                * (Decimal(row["last_price"]) - Decimal(reference_price))
-                            ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+                            money_impact = canonical_decimal(
+                                (
+                                    held_quantity[key]
+                                    * (
+                                        Decimal(row["last_price"])
+                                        - Decimal(reference_price)
+                                    )
+                                ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                            )
                     # cross-scope (>1): money_impact stays None
                 evidence = _evidence(
-                    MaterialKindV1.QUOTE_STATE, "toss-current-price-v1",
-                    f"{market}:{row['symbol']}", row, quotes, observed,
+                    MaterialKindV1.QUOTE_STATE,
+                    "toss-current-price-v1",
+                    f"{market}:{row['symbol']}",
+                    row,
+                    quotes,
+                    observed,
                 )
-                candidates.append(CandidateEnvelopeV1(
-                    candidate_id_for(barrier.tick_id, MaterialKindV1.QUOTE_STATE, subject),
-                    subject, MaterialKindV1.QUOTE_STATE, market, barrier.tick_id,
-                    CandidateAssignment.FULL_REVIEW, (evidence,), {
-                        "market": market, "symbol": row["symbol"], "last_price": row["last_price"],
-                        "portfolio_relation": (
-                            "HELD" if any(
-                                sym == row["symbol"] and mkt == market
-                                for (_, mkt, sym) in held_symbols
-                            ) else "UNHELD"
+                candidates.append(
+                    CandidateEnvelopeV1(
+                        candidate_id_for(
+                            barrier.tick_id, MaterialKindV1.QUOTE_STATE, subject
                         ),
-                        "currency_raw": row["currency_raw"],
-                        "provider_timestamp": row["provider_timestamp"],
-                        "fetched_at": _parse_time(row["fetched_at"], now),
-                        "change_basis": (ChangeBasis.BASELINE_DELTA.value if prior
-                                         else ChangeBasis.CURRENT_FACT_ONLY.value),
-                        "baseline_price": prior.fields["last_price"] if prior else None,
-                        "price_delta_ratio": _ratio(row["last_price"], prior.fields["last_price"])
-                        if prior else None,
-                        "numeric_state": numeric["state"].value,
-                        "trigger_kind": trigger_kind.value,
-                        "trigger_reference_price": (
-                            None if reference_price is None
-                            else canonical_decimal(Decimal(reference_price))
-                        ),
-                        "trigger_horizon": trigger_horizon.value,
-                        "price_delta_ratio_5m": _decimal_text(numeric["delta_5"]),
-                        "price_delta_ratio_15m": _decimal_text(numeric["delta_15"]),
-                        "price_delta_ratio_30m": _decimal_text(numeric["delta_30"]),
-                        "velocity_per_min": _decimal_text(numeric["velocity"]),
-                        "acceleration_per_min2": _decimal_text(numeric["acceleration"]),
-                        "reversal": numeric["reversal"],
-                        "persistent_drift_ticks": numeric["streak"],
-                        "money_impact": money_impact,
-                    }, now,
-                ))
+                        subject,
+                        MaterialKindV1.QUOTE_STATE,
+                        market,
+                        barrier.tick_id,
+                        CandidateAssignment.FULL_REVIEW,
+                        (evidence,),
+                        {
+                            "market": market,
+                            "symbol": row["symbol"],
+                            "last_price": row["last_price"],
+                            "portfolio_relation": (
+                                "HELD"
+                                if any(
+                                    sym == row["symbol"] and mkt == market
+                                    for (_, mkt, sym) in held_symbols
+                                )
+                                else "UNHELD"
+                            ),
+                            "currency_raw": row["currency_raw"],
+                            "provider_timestamp": row["provider_timestamp"],
+                            "fetched_at": _parse_time(row["fetched_at"], now),
+                            "change_basis": (
+                                ChangeBasis.BASELINE_DELTA.value
+                                if prior
+                                else ChangeBasis.CURRENT_FACT_ONLY.value
+                            ),
+                            "baseline_price": prior.fields["last_price"]
+                            if prior
+                            else None,
+                            "price_delta_ratio": _ratio(
+                                row["last_price"], prior.fields["last_price"]
+                            )
+                            if prior
+                            else None,
+                            "numeric_state": numeric["state"].value,
+                            "trigger_kind": trigger_kind.value,
+                            "trigger_reference_price": (
+                                None
+                                if reference_price is None
+                                else canonical_decimal(Decimal(reference_price))
+                            ),
+                            "trigger_horizon": trigger_horizon.value,
+                            "price_delta_ratio_5m": _decimal_text(numeric["delta_5"]),
+                            "price_delta_ratio_15m": _decimal_text(numeric["delta_15"]),
+                            "price_delta_ratio_30m": _decimal_text(numeric["delta_30"]),
+                            "velocity_per_min": _decimal_text(numeric["velocity"]),
+                            "acceleration_per_min2": _decimal_text(
+                                numeric["acceleration"]
+                            ),
+                            "reversal": numeric["reversal"],
+                            "persistent_drift_ticks": numeric["streak"],
+                            "money_impact": money_impact,
+                        },
+                        now,
+                    )
+                )
 
     trades = barrier.materials.get(JobKind.TRADES)
     if trades is not None:
@@ -539,7 +697,8 @@ def build_candidates(
                         # failure, never a deferred candidate.
                         raise MaskBindingError(
                             "closed-market execution crossed the masked "
-                            "analysis boundary")
+                            "analysis boundary"
+                        )
                     assignment = CandidateAssignment.EXPLICITLY_DEFERRED
                 else:
                     continue
@@ -548,95 +707,163 @@ def build_candidates(
                     [market, row["instrument_raw"], row["source_record_key"]],
                 )
                 evidence = _evidence(
-                    MaterialKindV1.COMPLETED_EXECUTION, "toss-orders-v1",
-                    row["source_record_key"], row, trades, _parse_time(row["filled_at"], now),
+                    MaterialKindV1.COMPLETED_EXECUTION,
+                    "toss-orders-v1",
+                    row["source_record_key"],
+                    row,
+                    trades,
+                    _parse_time(row["filled_at"], now),
                 )
-                candidates.append(CandidateEnvelopeV1(
-                    candidate_id_for(barrier.tick_id, MaterialKindV1.COMPLETED_EXECUTION, subject),
-                    subject, MaterialKindV1.COMPLETED_EXECUTION, market, barrier.tick_id,
-                    assignment, (evidence,), {
-                        "market": market, "symbol": row["instrument_raw"],
-                        "source_record_key": row["source_record_key"], "trade_date": row["trade_date"],
-                        "transaction_type_raw": row["transaction_type_raw"],
-                        "quantity": row["quantity"], "unit_price": row["unit_price"],
-                        "amount": row["amount"], "currency_raw": row["currency_raw"],
-                        "filled_at": _parse_time(row["filled_at"], now),
-                    }, now,
-                ))
+                candidates.append(
+                    CandidateEnvelopeV1(
+                        candidate_id_for(
+                            barrier.tick_id, MaterialKindV1.COMPLETED_EXECUTION, subject
+                        ),
+                        subject,
+                        MaterialKindV1.COMPLETED_EXECUTION,
+                        market,
+                        barrier.tick_id,
+                        assignment,
+                        (evidence,),
+                        {
+                            "market": market,
+                            "symbol": row["instrument_raw"],
+                            "source_record_key": row["source_record_key"],
+                            "trade_date": row["trade_date"],
+                            "transaction_type_raw": row["transaction_type_raw"],
+                            "quantity": row["quantity"],
+                            "unit_price": row["unit_price"],
+                            "amount": row["amount"],
+                            "currency_raw": row["currency_raw"],
+                            "filled_at": _parse_time(row["filled_at"], now),
+                        },
+                        now,
+                    )
+                )
 
     for incident in incident_rows:
         key = incident.key
         subject = subject_id_for(
-            MaterialKindV1.OPERATIONAL_INCIDENT, [key.kind, key.subject],
+            MaterialKindV1.OPERATIONAL_INCIDENT,
+            [key.kind, key.subject],
         )
         fields = {
-            "incident_kind": key.kind, "incident_subject": key.subject,
-            "state": incident.state.value, "impact_ref": incident.impact_ref,
+            "incident_kind": key.kind,
+            "incident_subject": key.subject,
+            "state": incident.state.value,
+            "impact_ref": incident.impact_ref,
         }
         prior = baselines.get((MaterialKindV1.OPERATIONAL_INCIDENT, subject))
-        advances.append(_advance(
-            MaterialKindV1.OPERATIONAL_INCIDENT, subject, fields, None,
-            barrier.tick_id,
-        ))
-        prior_pair = None if prior is None else (
-            prior.fields["state"], prior.fields["impact_ref"],
+        advances.append(
+            _advance(
+                MaterialKindV1.OPERATIONAL_INCIDENT,
+                subject,
+                fields,
+                None,
+                barrier.tick_id,
+            )
+        )
+        prior_pair = (
+            None
+            if prior is None
+            else (
+                prior.fields["state"],
+                prior.fields["impact_ref"],
+            )
         )
         pair = (incident.state.value, incident.impact_ref)
         if prior_pair == pair:
             continue
         transition = (
-            IncidentTransition.FIRST if prior is None
+            IncidentTransition.FIRST
+            if prior is None
             else IncidentTransition.RESOLVED
             if incident.state.value == "RESOLVED"
             else IncidentTransition.IMPACT_CHANGED
         )
         row = (
-            key.kind, key.subject, incident.state.value,
-            incident.impact_ref, incident.count,
+            key.kind,
+            key.subject,
+            incident.state.value,
+            incident.impact_ref,
+            incident.count,
         )
         evidence = EvidenceRefV1(
             evidence_id_for(
-                MaterialKindV1.OPERATIONAL_INCIDENT, "tokmo-ops-kernel-v1",
+                MaterialKindV1.OPERATIONAL_INCIDENT,
+                "tokmo-ops-kernel-v1",
                 f"{key.kind}:{key.subject}",
-                hashlib.sha256(canonical_encode({
-                    "v": 1, "domain": "tokmo-v3:evidence-content",
-                    "row": row, "pack": "",
-                })).hexdigest(),
+                hashlib.sha256(
+                    canonical_encode(
+                        {
+                            "v": 1,
+                            "domain": "tokmo-v3:evidence-content",
+                            "row": row,
+                            "pack": "",
+                        }
+                    )
+                ).hexdigest(),
             ),
-            MaterialKindV1.OPERATIONAL_INCIDENT, "tokmo-ops-kernel-v1",
-            f"{key.kind}:{key.subject}", incident.last_seen_at,
-            incident.last_seen_at, incident.last_seen_at, incident.last_seen_at,
-            hashlib.sha256(canonical_encode({
-                "v": 1, "domain": "tokmo-v3:evidence-content",
-                "row": row, "pack": "",
-            })).hexdigest(),
-            2, "ops-kernel-incident-v1", TrustClass.DERIVED,
+            MaterialKindV1.OPERATIONAL_INCIDENT,
+            "tokmo-ops-kernel-v1",
+            f"{key.kind}:{key.subject}",
+            incident.last_seen_at,
+            incident.last_seen_at,
+            incident.last_seen_at,
+            incident.last_seen_at,
+            hashlib.sha256(
+                canonical_encode(
+                    {
+                        "v": 1,
+                        "domain": "tokmo-v3:evidence-content",
+                        "row": row,
+                        "pack": "",
+                    }
+                )
+            ).hexdigest(),
+            2,
+            "ops-kernel-incident-v1",
+            TrustClass.DERIVED,
             FreshnessState.FRESH,
             incident.last_seen_at + __import__("datetime").timedelta(seconds=600),
         )
-        candidates.append(CandidateEnvelopeV1(
-            candidate_id_for(
-                barrier.tick_id, MaterialKindV1.OPERATIONAL_INCIDENT, subject,
-            ),
-            subject, MaterialKindV1.OPERATIONAL_INCIDENT, "GLOBAL",
-            barrier.tick_id,
-            CandidateAssignment.CRITICAL
-            if key.kind in CRITICAL_INCIDENT_KINDS_V1
-            else CandidateAssignment.FULL_REVIEW,
-            (evidence,), {
-                "incident_kind": key.kind, "incident_subject": key.subject,
-                "transition": transition.value, "count": incident.count,
-                "impact_ref": incident.impact_ref,
-            }, now,
-        ))
+        candidates.append(
+            CandidateEnvelopeV1(
+                candidate_id_for(
+                    barrier.tick_id,
+                    MaterialKindV1.OPERATIONAL_INCIDENT,
+                    subject,
+                ),
+                subject,
+                MaterialKindV1.OPERATIONAL_INCIDENT,
+                "GLOBAL",
+                barrier.tick_id,
+                CandidateAssignment.CRITICAL
+                if key.kind in CRITICAL_INCIDENT_KINDS_V1
+                else CandidateAssignment.FULL_REVIEW,
+                (evidence,),
+                {
+                    "incident_kind": key.kind,
+                    "incident_subject": key.subject,
+                    "transition": transition.value,
+                    "count": incident.count,
+                    "impact_ref": incident.impact_ref,
+                },
+                now,
+            )
+        )
 
-    candidates.sort(key=lambda item: (item.kind.value, item.subject_id, item.candidate_id))
+    candidates.sort(
+        key=lambda item: (item.kind.value, item.subject_id, item.candidate_id)
+    )
     advances.sort(key=lambda item: (item.kind.value, item.subject_id))
     history_advances.sort(key=lambda item: item.subject_id)
     if len(candidates) > MANIFEST_MAX_CANDIDATES_PER_TICK:
         raise ValueError("candidate capacity exceeded")
     return BuildResultV1(
-        material_binding_digest(barrier), tuple(candidates), tuple(advances),
+        material_binding_digest(barrier),
+        tuple(candidates),
+        tuple(advances),
         tuple(history_advances),
         MappingProxyType(dict(sorted(numeric_state_counts.items()))),
         MappingProxyType(dict(sorted(trigger_fire_counts.items()))),

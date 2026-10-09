@@ -12,19 +12,31 @@ mask-mandatory seams in the owning program modules and must never import
 this module.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from tokmo.programs.analysis_barrier import (
-    _LEGACY_G2_CAPABILITY as _BARRIER_LEGACY, _assemble,
+    _LEGACY_G2_CAPABILITY as _BARRIER_LEGACY,
+)
+from tokmo.programs.analysis_barrier import (
+    _assemble,
 )
 from tokmo.programs.holdings_sync import (
-    _LEGACY_G2_CAPABILITY as _HOLDINGS_LEGACY, _locked_holdings_sync,
+    _LEGACY_G2_CAPABILITY as _HOLDINGS_LEGACY,
+)
+from tokmo.programs.holdings_sync import (
+    _locked_holdings_sync,
 )
 from tokmo.programs.quotes_sync import (
-    _LEGACY_G2_CAPABILITY as _QUOTES_LEGACY, _locked_quotes_sync,
+    _LEGACY_G2_CAPABILITY as _QUOTES_LEGACY,
+)
+from tokmo.programs.quotes_sync import (
+    _locked_quotes_sync,
 )
 from tokmo.programs.trades_sync import (
-    _LEGACY_G2_CAPABILITY as _TRADES_LEGACY, _locked_trades_sync,
+    _LEGACY_G2_CAPABILITY as _TRADES_LEGACY,
+)
+from tokmo.programs.trades_sync import (
+    _locked_trades_sync,
 )
 from tokmo.values.session_gate import MARKET_TIMEZONE, Market
 
@@ -32,14 +44,14 @@ from tokmo.values.session_gate import MARKET_TIMEZONE, Market
 def _legacy_us_dst(instant: datetime) -> bool:
     """Legacy hand-coded US Eastern DST window (G2 acceptance only)."""
     year = instant.year
-    march_first = datetime(year, 3, 1, tzinfo=timezone.utc)
+    march_first = datetime(year, 3, 1, tzinfo=UTC)
     first_sunday = 1 + (6 - march_first.weekday()) % 7
     second_sunday = first_sunday + 7
-    november_first = datetime(year, 11, 1, tzinfo=timezone.utc)
+    november_first = datetime(year, 11, 1, tzinfo=UTC)
     november_sunday = 1 + (6 - november_first.weekday()) % 7
-    start = datetime(year, 3, second_sunday, 7, tzinfo=timezone.utc)
-    end = datetime(year, 11, november_sunday, 6, tzinfo=timezone.utc)
-    return start <= instant.astimezone(timezone.utc) < end
+    start = datetime(year, 3, second_sunday, 7, tzinfo=UTC)
+    end = datetime(year, 11, november_sunday, 6, tzinfo=UTC)
+    return start <= instant.astimezone(UTC) < end
 
 
 def _legacy_local_date(value: datetime, market: Market):
@@ -49,68 +61,136 @@ def _legacy_local_date(value: datetime, market: Market):
         offset = 9
     else:
         offset = -4 if _legacy_us_dst(value) else -5
-    return (value.astimezone(timezone.utc) + timedelta(hours=offset)).date()
+    return (value.astimezone(UTC) + timedelta(hours=offset)).date()
 
 
 def _legacy_market_date_ok(captured_at, market, now):
     return _legacy_local_date(captured_at, market) == _legacy_local_date(now, market)
 
 
-def legacy_run_holdings_sync(*, tick, session_result, holdings_provider,
-                             store, pack_writer, receipt_store,
-                             reservation_seal, incident_writer, clock, now,
-                             job_lock_path):
+def legacy_run_holdings_sync(
+    *,
+    tick,
+    session_result,
+    holdings_provider,
+    store,
+    pack_writer,
+    receipt_store,
+    reservation_seal,
+    incident_writer,
+    clock,
+    now,
+    job_lock_path,
+):
     """Legacy G2 holdings collector: session-verdict states, no mask."""
     return _locked_holdings_sync(
-        tick=tick, session_result=session_result,
-        holdings_provider=holdings_provider, store=store,
-        pack_writer=pack_writer, receipt_store=receipt_store,
-        reservation_seal=reservation_seal, incident_writer=incident_writer,
-        clock=clock, now=now, job_lock_path=job_lock_path, mask=None,
+        tick=tick,
+        session_result=session_result,
+        holdings_provider=holdings_provider,
+        store=store,
+        pack_writer=pack_writer,
+        receipt_store=receipt_store,
+        reservation_seal=reservation_seal,
+        incident_writer=incident_writer,
+        clock=clock,
+        now=now,
+        job_lock_path=job_lock_path,
+        mask=None,
         legacy=_HOLDINGS_LEGACY,
     )
 
 
-def legacy_run_quotes_sync(*, tick, session_result, holdings, quotes_provider,
-                           quote_store, pack_writer, receipt_store,
-                           reservation_seal, incident_writer, clock, now,
-                           job_lock_path):
+def legacy_run_quotes_sync(
+    *,
+    tick,
+    session_result,
+    holdings,
+    quotes_provider,
+    quote_store,
+    pack_writer,
+    receipt_store,
+    reservation_seal,
+    incident_writer,
+    clock,
+    now,
+    job_lock_path,
+):
     """Legacy G2 quotes collector: session-verdict states, no mask."""
     return _locked_quotes_sync(
-        tick=tick, session_result=session_result, holdings=holdings,
-        quotes_provider=quotes_provider, quote_store=quote_store,
-        pack_writer=pack_writer, receipt_store=receipt_store,
-        reservation_seal=reservation_seal, incident_writer=incident_writer,
-        clock=clock, now=now, job_lock_path=job_lock_path, mask=None,
+        tick=tick,
+        session_result=session_result,
+        holdings=holdings,
+        quotes_provider=quotes_provider,
+        quote_store=quote_store,
+        pack_writer=pack_writer,
+        receipt_store=receipt_store,
+        reservation_seal=reservation_seal,
+        incident_writer=incident_writer,
+        clock=clock,
+        now=now,
+        job_lock_path=job_lock_path,
+        mask=None,
         legacy=_QUOTES_LEGACY,
     )
 
 
-def legacy_run_trades_sync(*, tick, session_result, holdings, orders_provider,
-                           detail_provider, store, scan_state, pack_writer,
-                           receipt_store, reservation_seal, incident_writer,
-                           regular_session_dates, clock, now,
-                           job_lock_path, ops_kernel=None, invocation_id=None):
+def legacy_run_trades_sync(
+    *,
+    tick,
+    session_result,
+    holdings,
+    orders_provider,
+    detail_provider,
+    store,
+    scan_state,
+    pack_writer,
+    receipt_store,
+    reservation_seal,
+    incident_writer,
+    regular_session_dates,
+    clock,
+    now,
+    job_lock_path,
+    ops_kernel=None,
+    invocation_id=None,
+):
     """Legacy G2 trades collector: session-verdict states, host-date
     anchors, exact order-currency market classification, no mask."""
     return _locked_trades_sync(
-        tick=tick, session_result=session_result, holdings=holdings,
-        orders_provider=orders_provider, detail_provider=detail_provider,
-        store=store, scan_state=scan_state, pack_writer=pack_writer,
-        receipt_store=receipt_store, reservation_seal=reservation_seal,
+        tick=tick,
+        session_result=session_result,
+        holdings=holdings,
+        orders_provider=orders_provider,
+        detail_provider=detail_provider,
+        store=store,
+        scan_state=scan_state,
+        pack_writer=pack_writer,
+        receipt_store=receipt_store,
+        reservation_seal=reservation_seal,
         incident_writer=incident_writer,
-        regular_session_dates=regular_session_dates, clock=clock, now=now,
-        job_lock_path=job_lock_path, ops_kernel=ops_kernel,
-        invocation_id=invocation_id, mask=None, legacy=_TRADES_LEGACY,
+        regular_session_dates=regular_session_dates,
+        clock=clock,
+        now=now,
+        job_lock_path=job_lock_path,
+        ops_kernel=ops_kernel,
+        invocation_id=invocation_id,
+        mask=None,
+        legacy=_TRADES_LEGACY,
     )
 
 
-def legacy_assemble_analysis_materials(*, tick, open_markets, receipt_readers,
-                                       pack_reader, now):
+def legacy_assemble_analysis_materials(
+    *, tick, open_markets, receipt_readers, pack_reader, now
+):
     """Legacy G2 analysis barrier: caller-supplied open markets and the
     legacy hand-coded DST local-date freshness, no mask."""
     return _assemble(
-        tick=tick, open_markets=open_markets, receipt_readers=receipt_readers,
-        pack_reader=pack_reader, now=now, mask=None,
-        legacy_market_date_ok=_legacy_market_date_ok, legacy=_BARRIER_LEGACY,
+        tick=tick,
+        open_markets=open_markets,
+        receipt_readers=receipt_readers,
+        pack_reader=pack_reader,
+        now=now,
+        mask=None,
+        legacy_market_date_ok=_legacy_market_date_ok,
+        legacy=_BARRIER_LEGACY,
     )

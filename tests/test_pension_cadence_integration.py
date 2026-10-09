@@ -3,13 +3,13 @@
 M11: replaces inspect.getsource substring assertions with real behavioral
 tests that exercise the actual functions and entrypoints.
 """
+
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 import pytest
-
 
 _KST = ZoneInfo("Asia/Seoul")
 
@@ -47,12 +47,14 @@ class TestCompositeResolverM11:
 
     def test_composite_resolver_separates_pension_and_personal(self):
         from tokmo.values.pension_holdings import (
-            pension_account_scope,
             make_composite_resolver,
+            pension_account_scope,
         )
         from tokmo.values.portfolio_scope import (
-            PortfolioScope, ScopeUnresolved,
+            PortfolioScope,
+            ScopeUnresolved,
         )
+
         personal_scope = "toss-acct-" + "a" * 24
         pension_scope = pension_account_scope()
         resolver = make_composite_resolver({personal_scope: PortfolioScope.PERSONAL})
@@ -62,8 +64,9 @@ class TestCompositeResolverM11:
 
 
 def _empty_barrier():
-    from tokmo.values.session_gate import Market
     from tokmo.values.analysis_barrier import AnalysisBarrierResultV1, MarketReadiness
+    from tokmo.values.session_gate import Market
+
     return AnalysisBarrierResultV1(
         tick_id=1,
         materials={},
@@ -80,20 +83,22 @@ class TestResolveScopeRequiredM4:
 
     def test_build_material_deltas_requires_scope(self):
         from tokmo.programs.material_delta import build_material_deltas
+
         with pytest.raises(ValueError, match="resolve_scope is required"):
             build_material_deltas(
                 barrier=_empty_barrier(),
                 baselines={},
-                now=datetime(2026, 8, 5, tzinfo=timezone.utc),
+                now=datetime(2026, 8, 5, tzinfo=UTC),
             )
 
     def test_build_candidates_requires_scope(self):
         from tokmo.programs.candidate_builder import build_candidates
+
         with pytest.raises(ValueError, match="resolve_scope is required"):
             build_candidates(
                 barrier=_empty_barrier(),
                 baselines={},
-                now=datetime(2026, 8, 5, tzinfo=timezone.utc),
+                now=datetime(2026, 8, 5, tzinfo=UTC),
             )
 
 
@@ -102,18 +107,20 @@ class TestGenerationR2ValidatorM9:
 
     def _make_valid_r2_payload(self):
         return {
-            "accounts": [{
-                "account_scope": "pension-excel-" + "a" * 15,
-                "account_type_label": "pension-excel-v1",
-                "ordinal": 1,
-                "holdings": [],
-                "source_provenance": "PENSION_EXCEL",
-                "pension_revision_id": "a" * 32,
-                "pension_source_as_of": "2026-07-01T00:00:00+09:00",
-                "pension_source_age_days": 35,
-                "pension_freshness_class": "AGED_MANUAL_SOURCE",
-                "pension_semantic_digest": "b" * 64,
-            }],
+            "accounts": [
+                {
+                    "account_scope": "pension-excel-" + "a" * 15,
+                    "account_type_label": "pension-excel-v1",
+                    "ordinal": 1,
+                    "holdings": [],
+                    "source_provenance": "PENSION_EXCEL",
+                    "pension_revision_id": "a" * 32,
+                    "pension_source_as_of": "2026-07-01T00:00:00+09:00",
+                    "pension_source_age_days": 35,
+                    "pension_freshness_class": "AGED_MANUAL_SOURCE",
+                    "pension_semantic_digest": "b" * 64,
+                }
+            ],
             "global_inventory": True,
             "payload_version": 2,
             "pension_provenance": {
@@ -129,6 +136,7 @@ class TestGenerationR2ValidatorM9:
 
     def test_rejects_bool_ordinal(self):
         from tokmo.values.material_pack import _validate_holdings_generation_r2
+
         payload = self._make_valid_r2_payload()
         payload["accounts"][0]["ordinal"] = True
         with pytest.raises(ValueError):
@@ -136,6 +144,7 @@ class TestGenerationR2ValidatorM9:
 
     def test_rejects_string_ordinal(self):
         from tokmo.values.material_pack import _validate_holdings_generation_r2
+
         payload = self._make_valid_r2_payload()
         payload["accounts"][0]["ordinal"] = "2"
         with pytest.raises(ValueError):
@@ -143,6 +152,7 @@ class TestGenerationR2ValidatorM9:
 
     def test_rejects_int_label(self):
         from tokmo.values.material_pack import _validate_holdings_generation_r2
+
         payload = self._make_valid_r2_payload()
         payload["accounts"][0]["account_type_label"] = 5
         with pytest.raises(ValueError):
@@ -150,6 +160,7 @@ class TestGenerationR2ValidatorM9:
 
     def test_rejects_non_string_provenance_fields(self):
         from tokmo.values.material_pack import _validate_holdings_generation_r2
+
         payload = self._make_valid_r2_payload()
         payload["pension_provenance"]["revision_id"] = 123
         with pytest.raises(ValueError):

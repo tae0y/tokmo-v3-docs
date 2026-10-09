@@ -7,18 +7,17 @@ Ceiling: 1 FRED observation start, 0 BLS starts, per invocation.
 """
 
 import json
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 from tokmo.fred_query_composition import (
+    MACRO_FRED_RECEIPT_FIELDS,
+    BudgetedFredTransportV1,
     FredFixtureTransportOutcomeV1,
     FredFixtureTransportV1,
-    FredQueryProductionDepsV1,
     FredStartBudget,
-    BudgetedFredTransportV1,
-    MACRO_FRED_RECEIPT_FIELDS,
     build_fixture_api_key_provider_v1,
     build_macro_fred_caller_v1,
     build_production_fred_query_deps_v1,
@@ -33,29 +32,51 @@ from tokmo.values.fred_query import (
     build_fred_release_schedule_v1,
 )
 
-UTC = timezone.utc
+UTC = UTC
 NOW = datetime(2026, 8, 7, 12, 45, tzinfo=UTC)
 RELEASE_ID = 50
 RELEASE_DATE = date(2026, 8, 7)
 SLOT = "PAYEMS:2026-08-07"
 OFFICIAL_AT = datetime(2026, 8, 7, 12, 30, tzinfo=UTC)
 
-MAY = {"realtime_start": "2026-06-05", "realtime_end": "9999-12-31",
-       "date": "2026-05-01", "value": "150800"}
-JUNE = {"realtime_start": "2026-07-02", "realtime_end": "9999-12-31",
-        "date": "2026-06-01", "value": "150900"}
-JULY = {"realtime_start": "2026-08-07", "realtime_end": "9999-12-31",
-        "date": "2026-07-01", "value": "151000"}
+MAY = {
+    "realtime_start": "2026-06-05",
+    "realtime_end": "9999-12-31",
+    "date": "2026-05-01",
+    "value": "150800",
+}
+JUNE = {
+    "realtime_start": "2026-07-02",
+    "realtime_end": "9999-12-31",
+    "date": "2026-06-01",
+    "value": "150900",
+}
+JULY = {
+    "realtime_start": "2026-08-07",
+    "realtime_end": "9999-12-31",
+    "date": "2026-07-01",
+    "value": "151000",
+}
 
 
 def _body(rows, *, count=None, limit=3, start="2026-05-01", end="2026-07-31"):
-    return json.dumps({
-        "realtime_start": "1776-07-04", "realtime_end": "9999-12-31",
-        "observation_start": start, "observation_end": end,
-        "units": "lin", "output_type": 4, "file_type": "json",
-        "order_by": "observation_date", "sort_order": "asc",
-        "count": len(rows) if count is None else count,
-        "offset": 0, "limit": limit, "observations": list(rows)}).encode()
+    return json.dumps(
+        {
+            "realtime_start": "1776-07-04",
+            "realtime_end": "9999-12-31",
+            "observation_start": start,
+            "observation_end": end,
+            "units": "lin",
+            "output_type": 4,
+            "file_type": "json",
+            "order_by": "observation_date",
+            "sort_order": "asc",
+            "count": len(rows) if count is None else count,
+            "offset": 0,
+            "limit": limit,
+            "observations": list(rows),
+        }
+    ).encode()
 
 
 def _seed_sidecar(root: Path):
@@ -70,46 +91,68 @@ def _seed_sidecar(root: Path):
         "bls_tzid": "America/New_York",
         "bls_resolved_zone": "America/New_York",
         "official_release_at_utc": OFFICIAL_AT.isoformat(
-            timespec="microseconds").replace("+00:00", "Z"),
+            timespec="microseconds"
+        ).replace("+00:00", "Z"),
         "bls_body_sha256": "d" * 64,
         "bls_body_bytes": 1064,
         "grace_seconds": 900,
         "join_rule": "SUMMARY_EXACT+TZID_ALLOWLIST+DST_CROSSCHECK+"
-                     "LOCAL_DATE_EQUAL+SINGLETON",
+        "LOCAL_DATE_EQUAL+SINGLETON",
     }
     schedule = build_fred_release_schedule_v1(
-        series_id=SERIES_PAYEMS, release_id=RELEASE_ID,
-        release_date=RELEASE_DATE, official_release_at=OFFICIAL_AT,
-        schedule_provenance=provenance)
+        series_id=SERIES_PAYEMS,
+        release_id=RELEASE_ID,
+        release_date=RELEASE_DATE,
+        official_release_at=OFFICIAL_AT,
+        schedule_provenance=provenance,
+    )
     payload = build_sidecar_payload_v1(
-        schedule=schedule, release_id=RELEASE_ID, release_date=RELEASE_DATE,
-        official_release_at=OFFICIAL_AT, provenance=provenance)
+        schedule=schedule,
+        release_id=RELEASE_ID,
+        release_date=RELEASE_DATE,
+        official_release_at=OFFICIAL_AT,
+        provenance=provenance,
+    )
     write_schedule_sidecar_v1(root / SIDECAR_NAME, payload)
 
 
 def _build_deps(root, *, transport_outcomes=(), clock_value=NOW):
     transport = FredFixtureTransportV1(outcomes=tuple(transport_outcomes))
     return build_production_fred_query_deps_v1(
-        root=root, sidecar_path=root / SIDECAR_NAME,
+        root=root,
+        sidecar_path=root / SIDECAR_NAME,
         transport=transport,
         api_key_provider=build_fixture_api_key_provider_v1(),
-        clock=lambda: clock_value), transport
+        clock=lambda: clock_value,
+    ), transport
 
 
 # --- AR-10: receipt key set ------------------------------------------------
 
+
 def test_receipt_key_set_is_exactly_macro_fred_receipt_fields():
     assert MACRO_FRED_RECEIPT_FIELDS == (
-        "fred_status", "fred_schedule_source", "fred_release_slot",
-        "fred_due_state", "fred_coverage", "fred_provider_starts",
-        "fred_bls_starts", "fred_query_identity", "fred_revision_identity",
-        "fred_provenance_digest", "fred_direction",
-        "fred_current_value", "fred_current_date",
-        "fred_prior_value", "fred_prior_date", "fred_error_class",
+        "fred_status",
+        "fred_schedule_source",
+        "fred_release_slot",
+        "fred_due_state",
+        "fred_coverage",
+        "fred_provider_starts",
+        "fred_bls_starts",
+        "fred_query_identity",
+        "fred_revision_identity",
+        "fred_provenance_digest",
+        "fred_direction",
+        "fred_current_value",
+        "fred_current_date",
+        "fred_prior_value",
+        "fred_prior_date",
+        "fred_error_class",
     )
 
 
 # --- AR-4: the caller never raises -----------------------------------------
+
 
 class _RaisingTransport:
     requests = []
@@ -123,10 +166,12 @@ def test_a_raising_transport_yields_contained_error(tmp_path):
     _seed_sidecar(root)
     transport = _RaisingTransport()
     deps = build_production_fred_query_deps_v1(
-        root=root, sidecar_path=root / SIDECAR_NAME,
+        root=root,
+        sidecar_path=root / SIDECAR_NAME,
         transport=transport,
         api_key_provider=build_fixture_api_key_provider_v1(),
-        clock=lambda: NOW)
+        clock=lambda: NOW,
+    )
     caller = build_macro_fred_caller_v1(deps)
     result = caller()
     assert set(result) == set(MACRO_FRED_RECEIPT_FIELDS)
@@ -144,10 +189,12 @@ def test_a_raising_clock_yields_contained_error(tmp_path):
         raise OSError("clock_broke")
 
     deps = build_production_fred_query_deps_v1(
-        root=root, sidecar_path=root / SIDECAR_NAME,
+        root=root,
+        sidecar_path=root / SIDECAR_NAME,
         transport=transport,
         api_key_provider=build_fixture_api_key_provider_v1(),
-        clock=bad_clock)
+        clock=bad_clock,
+    )
     caller = build_macro_fred_caller_v1(deps)
     result = caller()
     assert result["fred_status"] == "CONTAINED_ERROR"
@@ -160,16 +207,19 @@ def test_non_aware_utc_clock_yields_contained_error(tmp_path):
     _seed_sidecar(root)
     transport = FredFixtureTransportV1(outcomes=())
     deps = build_production_fred_query_deps_v1(
-        root=root, sidecar_path=root / SIDECAR_NAME,
+        root=root,
+        sidecar_path=root / SIDECAR_NAME,
         transport=transport,
         api_key_provider=build_fixture_api_key_provider_v1(),
-        clock=lambda: datetime(2026, 8, 7, 12, 45))  # naive
+        clock=lambda: datetime(2026, 8, 7, 12, 45),
+    )  # naive
     caller = build_macro_fred_caller_v1(deps)
     result = caller()
     assert result["fred_status"] == "CONTAINED_ERROR"
 
 
 # --- AR-5: absent/expired/invalid sidecar → 0 starts ------------------------
+
 
 def test_absent_sidecar_yields_schedule_absent_with_zero_starts(tmp_path):
     root = tmp_path / "fred"
@@ -189,12 +239,13 @@ def test_invalid_sidecar_yields_schedule_invalid_with_zero_starts(tmp_path):
     # Corrupt the sidecar.
     sidecar = root / SIDECAR_NAME
     import hashlib
+
     from tokmo.values.fred_query import canonical_json
+
     payload = json.loads(sidecar.read_bytes())
     payload["payload_digest"] = "0" * 64
     body = {k: v for k, v in payload.items() if k != "payload_digest"}
-    payload["payload_digest"] = hashlib.sha256(
-        canonical_json(body)).hexdigest()
+    payload["payload_digest"] = hashlib.sha256(canonical_json(body)).hexdigest()
     sidecar.write_bytes(canonical_json(payload))
     # Break the digest on purpose:
     payload["payload_digest"] = "0" * 64
@@ -224,6 +275,7 @@ def test_expired_sidecar_yields_schedule_expired_with_zero_starts(tmp_path):
 
 # --- AR-7: reusable success → ENRICHED with 0 starts -----------------------
 
+
 def test_reusable_cache_success_enriches_with_zero_starts(tmp_path):
     root = tmp_path / "fred"
     _seed_sidecar(root)
@@ -235,8 +287,7 @@ def test_reusable_cache_success_enriches_with_zero_starts(tmp_path):
     assert first["fred_provider_starts"] == 1
 
     # Second call: cache should be fresh → 0 starts.
-    deps2, transport2 = _build_deps(
-        root, clock_value=NOW + timedelta(minutes=5))
+    deps2, transport2 = _build_deps(root, clock_value=NOW + timedelta(minutes=5))
     second = build_macro_fred_caller_v1(deps2)()
     assert second["fred_status"] == "ENRICHED"
     assert second["fred_provider_starts"] == 0
@@ -245,13 +296,16 @@ def test_reusable_cache_success_enriches_with_zero_starts(tmp_path):
 
 # --- AR-8: ceiling is 1 FRED, 0 BLS ----------------------------------------
 
+
 def test_second_transport_call_raises_budget_exceeded(tmp_path):
     root = tmp_path / "fred"
     _seed_sidecar(root)
-    transport = FredFixtureTransportV1(outcomes=(
-        FredFixtureTransportOutcomeV1("success", _body([MAY, JUNE, JULY])),
-        FredFixtureTransportOutcomeV1("success", _body([MAY, JUNE, JULY])),
-    ))
+    transport = FredFixtureTransportV1(
+        outcomes=(
+            FredFixtureTransportOutcomeV1("success", _body([MAY, JUNE, JULY])),
+            FredFixtureTransportOutcomeV1("success", _body([MAY, JUNE, JULY])),
+        )
+    )
     budget = FredStartBudget(maximum=1)
     wire = BudgetedFredTransportV1(transport, budget)
     wire(object(), "f" * 32)
@@ -269,6 +323,7 @@ def test_bls_starts_always_zero_for_every_outcome(tmp_path):
 
 
 # --- AR-9: sidecar is byte-identical after caller run ----------------------
+
 
 def test_sidecar_is_byte_identical_after_caller_run(tmp_path):
     import hashlib
@@ -288,20 +343,22 @@ def test_sidecar_is_byte_identical_after_caller_run(tmp_path):
 
 # --- AR-6: caller short-circuit agrees with evaluate_fred_due_v1 -----------
 
-def test_caller_short_circuit_agrees_with_evaluate_fred_due_on_absent_schedule(tmp_path):
+
+def test_caller_short_circuit_agrees_with_evaluate_fred_due_on_absent_schedule(
+    tmp_path,
+):
     from tokmo.programs.macro_fred_inputs import evaluate_fred_due_v1
-    from tokmo.values.fred_query import (
-        FredDueStateV1, FredSeriesQueryV1,
-    )
     from tokmo.records.fred_query_cache import FredQueryCacheV1
+    from tokmo.values.fred_query import (
+        FredDueStateV1,
+        FredSeriesQueryV1,
+    )
 
     root = tmp_path / "fred"
     root.mkdir(mode=0o700, parents=True)
     cache = FredQueryCacheV1(root, opened_at=NOW)
-    query = FredSeriesQueryV1(SERIES_PAYEMS, date(2026, 5, 1),
-                              date(2026, 7, 31), NOW)
-    decision = evaluate_fred_due_v1(query=query, schedule=None, cache=cache,
-                                    now=NOW)
+    query = FredSeriesQueryV1(SERIES_PAYEMS, date(2026, 5, 1), date(2026, 7, 31), NOW)
+    decision = evaluate_fred_due_v1(query=query, schedule=None, cache=cache, now=NOW)
     assert decision.state is FredDueStateV1.UNAVAILABLE_RELEASE_SCHEDULE
 
     # The caller with no sidecar must agree on the unavailable status.
@@ -312,6 +369,7 @@ def test_caller_short_circuit_agrees_with_evaluate_fred_due_on_absent_schedule(t
 
 
 # --- AR-10: all values are JSON-serializable scalars ------------------------
+
 
 def test_every_receipt_value_is_json_round_trippable(tmp_path):
     root = tmp_path / "fred"
@@ -331,14 +389,15 @@ def test_every_receipt_value_is_json_round_trippable(tmp_path):
 
 # --- M-5: ScheduleSidecarInvalid reason preserved in fred_error_class --------
 
+
 def test_schedule_invalid_preserves_specific_sidecar_reason(tmp_path):
     """The closed ScheduleSidecarInvalid reason must appear in fred_error_class."""
     root = tmp_path / "fred"
     _seed_sidecar(root)
     # Corrupt the digest.
     sidecar = root / SIDECAR_NAME
-    import hashlib as _hashlib
     from tokmo.values.fred_query import canonical_json
+
     payload = json.loads(sidecar.read_bytes())
     payload["payload_digest"] = "0" * 64
     sidecar.write_bytes(canonical_json(payload))
@@ -354,7 +413,9 @@ def test_schedule_invalid_preserves_unregistered_series_reason(tmp_path):
     _seed_sidecar(root)
     sidecar = root / SIDECAR_NAME
     import hashlib as _hashlib
+
     from tokmo.values.fred_query import canonical_json
+
     payload = json.loads(sidecar.read_bytes())
     payload["series_id"] = "UNRATE"
     body = {k: v for k, v in payload.items() if k != "payload_digest"}
@@ -368,6 +429,7 @@ def test_schedule_invalid_preserves_unregistered_series_reason(tmp_path):
 
 # --- m-7: loaded schedule source/slot retained on contained post-load error ---
 
+
 def test_contained_error_after_successful_load_retains_schedule_source(tmp_path):
     """When a CONTAINED_ERROR happens after a successful sidecar load,
     the receipt must still say which schedule/source was being processed."""
@@ -375,10 +437,12 @@ def test_contained_error_after_successful_load_retains_schedule_source(tmp_path)
     _seed_sidecar(root)
     transport = _RaisingTransport()
     deps = build_production_fred_query_deps_v1(
-        root=root, sidecar_path=root / SIDECAR_NAME,
+        root=root,
+        sidecar_path=root / SIDECAR_NAME,
         transport=transport,
         api_key_provider=build_fixture_api_key_provider_v1(),
-        clock=lambda: NOW)
+        clock=lambda: NOW,
+    )
     result = build_macro_fred_caller_v1(deps)()
     assert result["fred_status"] == "CONTAINED_ERROR"
     assert result["fred_schedule_source"] == "SIDECAR"
@@ -386,6 +450,7 @@ def test_contained_error_after_successful_load_retains_schedule_source(tmp_path)
 
 
 # --- m-4: AR-9 directory fingerprint proves sidecar untouched ----------------
+
 
 def test_sidecar_directory_fingerprint_unchanged_after_caller_run(tmp_path):
     """Directory fingerprint (mode, size, sha256 for every entry) must be
@@ -410,22 +475,28 @@ def _directory_fingerprint(root):
     import hashlib as _hashlib
     import os as _os
     import stat as _stat
+
     entries = []
     for path in sorted(root.rglob("*")):
         info = _os.lstat(path)
-        digest = (_hashlib.sha256(path.read_bytes()).hexdigest()
-                  if _stat.S_ISREG(info.st_mode) and not _stat.S_ISLNK(info.st_mode)
-                  else None)
-        entries.append({
-            "name": path.relative_to(root).as_posix(),
-            "mode": _stat.S_IMODE(info.st_mode),
-            "size": info.st_size,
-            "sha256": digest,
-        })
+        digest = (
+            _hashlib.sha256(path.read_bytes()).hexdigest()
+            if _stat.S_ISREG(info.st_mode) and not _stat.S_ISLNK(info.st_mode)
+            else None
+        )
+        entries.append(
+            {
+                "name": path.relative_to(root).as_posix(),
+                "mode": _stat.S_IMODE(info.st_mode),
+                "size": info.st_size,
+                "sha256": digest,
+            }
+        )
     return entries
 
 
 # --- m-5/minor: LOCAL_STATE_UNAVAILABLE test for cache corruption ------------
+
 
 def test_corrupt_cache_after_load_yields_local_state_unavailable(tmp_path):
     """Physical DB corruption after a successful load should yield
@@ -439,6 +510,7 @@ def test_corrupt_cache_after_load_yields_local_state_unavailable(tmp_path):
 
     # Corrupt the cache DB physically.
     from tokmo.records.fred_query_cache import DATABASE_NAME
+
     db = root / DATABASE_NAME
     db.write_bytes(b"not a database")
 
@@ -449,6 +521,7 @@ def test_corrupt_cache_after_load_yields_local_state_unavailable(tmp_path):
 
 
 # --- m-10: canonical_decimal projection through _scalar ----------------------
+
 
 def test_enriched_receipt_projects_decimal_values_as_canonical_strings(tmp_path):
     """Decimal observation values must be projected as canonical_decimal strings,

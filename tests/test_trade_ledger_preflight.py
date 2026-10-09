@@ -23,7 +23,6 @@ from tokmo.records.trade_ledger_privacy import (
     StoreReadError,
 )
 
-
 RETIREMENT = SOURCE_CONTRACTS["retirement_excel_v1"]
 
 
@@ -33,7 +32,11 @@ def keys(*numbers):
 
 def test_registry_holds_frozen_retirement_and_toss_orders_contracts():
     # Additive period-export source; both legacy contracts remain frozen below.
-    assert set(SOURCE_CONTRACTS) == {"retirement_excel_v1", "retirement_excel_delta_v1", "toss-orders-v1"}
+    assert set(SOURCE_CONTRACTS) == {
+        "retirement_excel_v1",
+        "retirement_excel_delta_v1",
+        "toss-orders-v1",
+    }
     assert RETIREMENT.source == "retirement_excel_v1"
     assert RETIREMENT.contract_version == 1
     assert RETIREMENT.account_scopes == frozenset({"retirement_pension_1"})
@@ -41,22 +44,32 @@ def test_registry_holds_frozen_retirement_and_toss_orders_contracts():
     assert RETIREMENT.allows_linked_supersession is False
     assert RETIREMENT.scope_validator is None
     toss = SOURCE_CONTRACTS["toss-orders-v1"]
-    assert registered_contract(
-        SOURCE_CONTRACTS, toss.source, "toss-acct-" + "a" * 24
-    ) is toss
+    assert (
+        registered_contract(SOURCE_CONTRACTS, toss.source, "toss-acct-" + "a" * 24)
+        is toss
+    )
     assert registered_contract(SOURCE_CONTRACTS, toss.source, "raw-account") is None
 
 
 def test_registered_contract_fails_closed_on_unknown_source_or_scope():
-    assert registered_contract(
-        SOURCE_CONTRACTS, "retirement_excel_v1", "retirement_pension_1"
-    ) is RETIREMENT
-    assert registered_contract(
-        SOURCE_CONTRACTS, "fixture_unregistered_source", "retirement_pension_1"
-    ) is None
-    assert registered_contract(
-        SOURCE_CONTRACTS, "retirement_excel_v1", "fixture_other_scope"
-    ) is None
+    assert (
+        registered_contract(
+            SOURCE_CONTRACTS, "retirement_excel_v1", "retirement_pension_1"
+        )
+        is RETIREMENT
+    )
+    assert (
+        registered_contract(
+            SOURCE_CONTRACTS, "fixture_unregistered_source", "retirement_pension_1"
+        )
+        is None
+    )
+    assert (
+        registered_contract(
+            SOURCE_CONTRACTS, "retirement_excel_v1", "fixture_other_scope"
+        )
+        is None
+    )
 
 
 @pytest.mark.parametrize(

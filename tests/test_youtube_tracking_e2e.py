@@ -6,19 +6,19 @@ to a tmp_path store.
 """
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from tokmo.records.ops_kernel import OpsKernelStore
+from tokmo.programs.material_recall import (
+    recall_for_deltas,
+    record_would_have_sent_shadow,
+)
 from tokmo.programs.youtube_tracking import (
     admit_report_candidates,
     parse_tracking_candidates,
     provenance_from_archive_meta,
 )
-from tokmo.programs.material_recall import (
-    recall_for_deltas,
-    record_would_have_sent_shadow,
-)
+from tokmo.records.ops_kernel import OpsKernelStore
 from tokmo.values.analysis_admission import MaterialDeltaV1
 from tokmo.values.analysis_contracts import (
     ChangeBasis,
@@ -29,7 +29,7 @@ from tokmo.values.analysis_contracts import (
 )
 
 FIXTURES = Path(__file__).parent / "fixtures" / "youtube"
-NOW = datetime(2026, 8, 13, 5, 30, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 13, 5, 30, tzinfo=UTC)
 
 SYNTHETIC_REPORT = """❓ 오늘 물어볼 질문 3개
 ...
@@ -57,8 +57,10 @@ def test_archived_fixture_dry_run_admission_recall_shadow(tmp_path):
 
     provenance = provenance_from_archive_meta(meta)
     candidates = parse_tracking_candidates(
-        SYNTHETIC_REPORT, source_ref=provenance.source_ref,
-        revision=provenance.revision, observed_at=NOW,
+        SYNTHETIC_REPORT,
+        source_ref=provenance.source_ref,
+        revision=provenance.revision,
+        observed_at=NOW,
     )
     assert len(candidates) == 1
 
@@ -107,11 +109,17 @@ def test_archived_fixture_dry_run_admission_recall_shadow(tmp_path):
     assert [recall.hypothesis_id for recall in recalls] == [hypothesis_id]
 
     shadow = record_would_have_sent_shadow(
-        store, recalls, (material,), now=NOW,
+        store,
+        recalls,
+        (material,),
+        now=NOW,
     )
     assert shadow.new_records == 1
     replay_shadow = record_would_have_sent_shadow(
-        store, recalls, (material,), now=NOW + timedelta(hours=1),
+        store,
+        recalls,
+        (material,),
+        now=NOW + timedelta(hours=1),
     )
     assert replay_shadow.new_records == 0
     assert replay_shadow.duplicates == 1

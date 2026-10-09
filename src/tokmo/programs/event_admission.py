@@ -10,13 +10,12 @@ enabled ordered criterion IDs, and exact typed threshold values. Use
 checked-in immutable configuration for v1.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from types import MappingProxyType
-from typing import Mapping
 
-from tokmo.values.material_pack import canonical_encode
 from tokmo.values.analysis_admission import (
     AdmissionDecisionV1,
     CriterionIdV1,
@@ -27,9 +26,9 @@ from tokmo.values.analysis_admission import (
 from tokmo.values.analysis_contracts import (
     FreshnessState,
     MaterialKindV1,
-    NumericStateV1,
     QuoteTriggerKindV1,
 )
+from tokmo.values.material_pack import canonical_encode
 
 
 class EventAdmissionPolicyConfigError(ValueError):
@@ -38,15 +37,19 @@ class EventAdmissionPolicyConfigError(ValueError):
 
 # Bounded threshold keys. Ratio thresholds must be canonical decimals in
 # [0, 1]. Integer-count thresholds are non-negative finite decimals.
-_RATIO_KEYS = frozenset({
-    "quote_move_threshold_ratio",
-    "quote_cumulative_threshold_ratio",
-    "quote_move_noise_floor_ratio",
-    "quote_watch_threshold_ratio",
-})
-_COUNT_KEYS = frozenset({
-    "quote_drift_tick_threshold",
-})
+_RATIO_KEYS = frozenset(
+    {
+        "quote_move_threshold_ratio",
+        "quote_cumulative_threshold_ratio",
+        "quote_move_noise_floor_ratio",
+        "quote_watch_threshold_ratio",
+    }
+)
+_COUNT_KEYS = frozenset(
+    {
+        "quote_drift_tick_threshold",
+    }
+)
 _THRESHOLD_KEYS = _RATIO_KEYS | _COUNT_KEYS
 
 
@@ -62,7 +65,8 @@ class EventAdmissionPolicyV1:
     policy_version: str
     enabled_criteria: tuple[CriterionIdV1, ...]
     thresholds: Mapping[str, str] = field(
-        default_factory=lambda: MappingProxyType({}), repr=False,
+        default_factory=lambda: MappingProxyType({}),
+        repr=False,
     )
 
     def __post_init__(self):
@@ -92,9 +96,7 @@ class EventAdmissionPolicyV1:
                     f"non-canonical threshold: {key}"
                 ) from error
             if not value.is_finite():
-                raise EventAdmissionPolicyConfigError(
-                    f"non-finite threshold: {key}"
-                )
+                raise EventAdmissionPolicyConfigError(f"non-finite threshold: {key}")
             if key in _RATIO_KEYS:
                 if value < 0 or value > 1:
                     raise EventAdmissionPolicyConfigError(
@@ -107,10 +109,14 @@ class EventAdmissionPolicyV1:
                     )
             validated[key] = raw
         object.__setattr__(
-            self, "thresholds", MappingProxyType(dict(validated)),
+            self,
+            "thresholds",
+            MappingProxyType(dict(validated)),
         )
         object.__setattr__(
-            self, "enabled_criteria", tuple(self.enabled_criteria),
+            self,
+            "enabled_criteria",
+            tuple(self.enabled_criteria),
         )
 
     def thresholds_canonical(self) -> dict[str, str]:
@@ -119,14 +125,17 @@ class EventAdmissionPolicyV1:
 
     @property
     def policy_digest(self) -> str:
-        raw = canonical_encode({
-            "domain": "tokmo-v3:event-admission-policy:v1",
-            "schema_version": self.schema_version,
-            "policy_version": self.policy_version,
-            "criteria": [c.value for c in self.enabled_criteria],
-            "thresholds": self.thresholds_canonical(),
-        })
+        raw = canonical_encode(
+            {
+                "domain": "tokmo-v3:event-admission-policy:v1",
+                "schema_version": self.schema_version,
+                "policy_version": self.policy_version,
+                "criteria": [c.value for c in self.enabled_criteria],
+                "thresholds": self.thresholds_canonical(),
+            }
+        )
         import hashlib
+
         return hashlib.sha256(raw).hexdigest()
 
     def _ordinal_of(self, criterion_id: CriterionIdV1) -> int:
@@ -165,14 +174,21 @@ DEFAULT_EVENT_ADMISSION_POLICY_V1 = EventAdmissionPolicyV1(
 
 # Closed incident-kind registries from analysis_contracts (imported indirectly
 # to avoid a circular dependency on the criterion module).
-_CRITICAL_INCIDENT_KINDS = frozenset({
-    "execution-identity-conflict", "execution-quarantine",
-    "trades-quarantine-observed",
-    "holdings-identity-collision", "holdings_material_unavailable",
-    "quotes_material_unavailable", "trades_material_unavailable",
-    "kr_holdings_unavailable", "us_holdings_unavailable",
-    "kr_holdings_missing", "us_holdings_missing",
-})
+_CRITICAL_INCIDENT_KINDS = frozenset(
+    {
+        "execution-identity-conflict",
+        "execution-quarantine",
+        "trades-quarantine-observed",
+        "holdings-identity-collision",
+        "holdings_material_unavailable",
+        "quotes_material_unavailable",
+        "trades_material_unavailable",
+        "kr_holdings_unavailable",
+        "us_holdings_unavailable",
+        "kr_holdings_missing",
+        "us_holdings_missing",
+    }
+)
 
 
 def _dec(value) -> Decimal | None:
@@ -185,7 +201,8 @@ def _dec(value) -> Decimal | None:
 
 
 def _evaluate_criterion(
-    delta: MaterialDeltaV1, criterion_id: CriterionIdV1,
+    delta: MaterialDeltaV1,
+    criterion_id: CriterionIdV1,
     thresholds: Mapping[str, str],
 ) -> CriterionResultV1:
     """Evaluate one criterion against one delta.
@@ -199,7 +216,8 @@ def _evaluate_criterion(
     if criterion_id is CriterionIdV1.COMPLETED_EXECUTION:
         matched = kind is MaterialKindV1.COMPLETED_EXECUTION
         reason = (
-            CriterionReasonV1.EVENT_COMPLETED_EXECUTION if matched
+            CriterionReasonV1.EVENT_COMPLETED_EXECUTION
+            if matched
             else CriterionReasonV1.EVENT_NO_CRITERION_MATCHED
         )
         return CriterionResultV1(criterion_id, matched, reason)
@@ -225,7 +243,9 @@ def _evaluate_criterion(
                 "AVG_PRICE_CHANGED": CriterionReasonV1.EVENT_HOLDINGS_AVG_PRICE_CHANGED,
                 "POSITION_CLOSED": CriterionReasonV1.EVENT_HOLDINGS_POSITION_CLOSED,
             }
-            reason = reason_map.get(change, CriterionReasonV1.EVENT_NO_CRITERION_MATCHED)
+            reason = reason_map.get(
+                change, CriterionReasonV1.EVENT_NO_CRITERION_MATCHED
+            )
             matched = change in reason_map
         else:
             matched = False
@@ -235,7 +255,9 @@ def _evaluate_criterion(
     # Quote criteria
     if kind is not MaterialKindV1.QUOTE_STATE:
         return CriterionResultV1(
-            criterion_id, False, CriterionReasonV1.EVENT_NO_CRITERION_MATCHED,
+            criterion_id,
+            False,
+            CriterionReasonV1.EVENT_NO_CRITERION_MATCHED,
         )
 
     move_threshold = _dec(thresholds.get("quote_move_threshold_ratio"))
@@ -251,25 +273,31 @@ def _evaluate_criterion(
 
     if criterion_id is CriterionIdV1.QUOTE_THRESHOLD_MOVE:
         ratio = _dec(cf.get("price_delta_ratio"))
-        matched = (
-            trigger == QuoteTriggerKindV1.THRESHOLD_MOVE.value
-            or (ratio is not None and move_threshold is not None
-                and abs(ratio) >= move_threshold)
+        matched = trigger == QuoteTriggerKindV1.THRESHOLD_MOVE.value or (
+            ratio is not None
+            and move_threshold is not None
+            and abs(ratio) >= move_threshold
         )
         return CriterionResultV1(
-            criterion_id, matched,
-            CriterionReasonV1.EVENT_QUOTE_THRESHOLD_MOVE if matched
+            criterion_id,
+            matched,
+            CriterionReasonV1.EVENT_QUOTE_THRESHOLD_MOVE
+            if matched
             else CriterionReasonV1.EVENT_NO_CRITERION_MATCHED,
             observed_value=(str(ratio) if ratio is not None else None),
-            threshold_value=(str(move_threshold) if move_threshold is not None else None),
+            threshold_value=(
+                str(move_threshold) if move_threshold is not None else None
+            ),
         )
 
     if criterion_id is CriterionIdV1.QUOTE_REVERSAL:
         reversal = cf.get("reversal", False)
         matched = bool(reversal) or trigger == QuoteTriggerKindV1.REVERSAL.value
         return CriterionResultV1(
-            criterion_id, matched,
-            CriterionReasonV1.EVENT_QUOTE_REVERSAL if matched
+            criterion_id,
+            matched,
+            CriterionReasonV1.EVENT_QUOTE_REVERSAL
+            if matched
             else CriterionReasonV1.EVENT_NO_CRITERION_MATCHED,
         )
 
@@ -283,38 +311,48 @@ def _evaluate_criterion(
             trigger == QuoteTriggerKindV1.PERSISTENT_DRIFT.value
         )
         return CriterionResultV1(
-            criterion_id, matched,
-            CriterionReasonV1.EVENT_QUOTE_PERSISTENT_DRIFT if matched
+            criterion_id,
+            matched,
+            CriterionReasonV1.EVENT_QUOTE_PERSISTENT_DRIFT
+            if matched
             else CriterionReasonV1.EVENT_NO_CRITERION_MATCHED,
         )
 
     if criterion_id is CriterionIdV1.QUOTE_CUMULATIVE_DRIFT:
         matched = trigger == QuoteTriggerKindV1.CUMULATIVE_DRIFT.value
         return CriterionResultV1(
-            criterion_id, matched,
-            CriterionReasonV1.EVENT_QUOTE_CUMULATIVE_DRIFT if matched
+            criterion_id,
+            matched,
+            CriterionReasonV1.EVENT_QUOTE_CUMULATIVE_DRIFT
+            if matched
             else CriterionReasonV1.EVENT_NO_CRITERION_MATCHED,
         )
 
     if criterion_id is CriterionIdV1.QUOTE_STATE_TRANSITION:
         matched = trigger == QuoteTriggerKindV1.STATE_TRANSITION.value
         return CriterionResultV1(
-            criterion_id, matched,
-            CriterionReasonV1.EVENT_QUOTE_STATE_TRANSITION if matched
+            criterion_id,
+            matched,
+            CriterionReasonV1.EVENT_QUOTE_STATE_TRANSITION
+            if matched
             else CriterionReasonV1.EVENT_NO_CRITERION_MATCHED,
         )
 
     if criterion_id is CriterionIdV1.QUOTE_FIRST_OBSERVATION:
         matched = trigger == QuoteTriggerKindV1.FIRST_OBSERVATION.value
         return CriterionResultV1(
-            criterion_id, matched,
-            CriterionReasonV1.EVENT_QUOTE_FIRST_OBSERVATION if matched
+            criterion_id,
+            matched,
+            CriterionReasonV1.EVENT_QUOTE_FIRST_OBSERVATION
+            if matched
             else CriterionReasonV1.EVENT_NO_CRITERION_MATCHED,
         )
 
     # Unknown criterion: never admit
     return CriterionResultV1(
-        criterion_id, False, CriterionReasonV1.EVENT_NO_CRITERION_MATCHED,
+        criterion_id,
+        False,
+        CriterionReasonV1.EVENT_NO_CRITERION_MATCHED,
     )
 
 
@@ -351,20 +389,24 @@ def evaluate_event_admission(
             decision = "ADMIT"
         elif any_matched and stale and not is_operational:
             # Replace all reason codes with the fail-closed stale reason
-            results = [CriterionResultV1(
-                CriterionIdV1.COMPLETED_EXECUTION,  # placeholder criterion
-                False,
-                CriterionReasonV1.EVENT_REQUIRED_MATERIAL_STALE,
-            )]
+            results = [
+                CriterionResultV1(
+                    CriterionIdV1.COMPLETED_EXECUTION,  # placeholder criterion
+                    False,
+                    CriterionReasonV1.EVENT_REQUIRED_MATERIAL_STALE,
+                )
+            ]
             decision = "REJECT"
         else:
             decision = "REJECT"
-        decisions.append(AdmissionDecisionV1(
-            delta_id=delta.delta_id,
-            decision=decision,
-            matched_results=tuple(results),
-            policy_version=policy.policy_version,
-            policy_digest=policy.policy_digest,
-            evaluated_at=evaluated_at,
-        ))
+        decisions.append(
+            AdmissionDecisionV1(
+                delta_id=delta.delta_id,
+                decision=decision,
+                matched_results=tuple(results),
+                policy_version=policy.policy_version,
+                policy_digest=policy.policy_digest,
+                evaluated_at=evaluated_at,
+            )
+        )
     return tuple(decisions)

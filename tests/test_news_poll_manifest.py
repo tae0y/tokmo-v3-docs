@@ -6,7 +6,8 @@ import os
 import pytest
 
 from tokmo.programs.news_poll_manifest import (
-    load_news_poll_manifest, plan_news_group,
+    load_news_poll_manifest,
+    plan_news_group,
 )
 from tokmo.programs.news_poll_policy import NewsGroup
 
@@ -19,7 +20,11 @@ def write_manifest(path, payload):
 def valid_payload():
     return {
         "version": "news16-v1",
-        "naver": {"enabled": False, "query": "SK hynix OR Hyundai Motor", "display": 10},
+        "naver": {
+            "enabled": False,
+            "query": "SK hynix OR Hyundai Motor",
+            "display": 10,
+        },
         "finnhub-company": {"symbols": ["GOOGL", "NVDA", "MSFT", "TSLA"]},
     }
 
@@ -79,8 +84,12 @@ def test_group_plan_expands_only_finnhub_company_symbols(tmp_path):
     plan = plan_news_group(NewsGroup.B, manifest, on_date="2026-08-02")
 
     assert [item.source for item in plan] == [
-        "finnhub-company", "finnhub-company", "finnhub-company", "finnhub-company",
-        "jtbc-breaking", "investing-analyst",
+        "finnhub-company",
+        "finnhub-company",
+        "finnhub-company",
+        "finnhub-company",
+        "jtbc-breaking",
+        "investing-analyst",
     ]
     assert [item.symbol for item in plan[:4]] == ["GOOGL", "NVDA", "MSFT", "TSLA"]
     assert all(item.from_date == "2026-08-01" for item in plan[:4])

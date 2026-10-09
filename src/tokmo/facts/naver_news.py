@@ -1,15 +1,17 @@
 """Closed Naver News Search request and strict JSON parser."""
 
+import json
 from dataclasses import dataclass
-from datetime import timezone
+from datetime import UTC
 from email.utils import parsedate_to_datetime
 from html import unescape
 from html.parser import HTMLParser
-import json
 from urllib.parse import urlsplit
 
 from tokmo.values.news_connectors import (
-    NewsConnectorItem, NewsFetchResult, NewsFetchStatus,
+    NewsConnectorItem,
+    NewsFetchResult,
+    NewsFetchStatus,
 )
 
 
@@ -24,8 +26,9 @@ class NaverNewsRequest:
     query_keys: tuple[str, ...] = ("query", "display", "start", "sort")
 
 
-def build_naver_news_request(query: str, *, display: int = 10,
-                             start: int = 1, sort: str = "date") -> NaverNewsRequest:
+def build_naver_news_request(
+    query: str, *, display: int = 10, start: int = 1, sort: str = "date"
+) -> NaverNewsRequest:
     if type(query) is not str or not query.strip() or len(query) > 200:
         raise ValueError("query must be non-empty and bounded")
     if type(display) is not int or not 1 <= display <= 10:
@@ -45,7 +48,9 @@ class _TextOnly(HTMLParser):
 
 
 def _plain(value: str) -> str:
-    parser = _TextOnly(); parser.feed(value); parser.close()
+    parser = _TextOnly()
+    parser.feed(value)
+    parser.close()
     return " ".join(unescape("".join(parser.parts)).split())
 
 
@@ -62,12 +67,17 @@ def _valid_https(value: object) -> bool:
     if type(value) is not str:
         return False
     parsed = urlsplit(value.strip())
-    return bool(parsed.scheme == "https" and parsed.hostname
-                and parsed.username is None and parsed.password is None)
+    return bool(
+        parsed.scheme == "https"
+        and parsed.hostname
+        and parsed.username is None
+        and parsed.password is None
+    )
 
 
-def parse_naver_news(body: bytes, *, observed_at,
-                     max_items: int = 10) -> NewsFetchResult:
+def parse_naver_news(
+    body: bytes, *, observed_at, max_items: int = 10
+) -> NewsFetchResult:
     if type(body) is not bytes or not 1 <= max_items <= 10:
         return NewsFetchResult(NewsFetchStatus.CONTRACT_MISMATCH)
     try:
@@ -93,15 +103,25 @@ def parse_naver_news(body: bytes, *, observed_at,
             published = parsedate_to_datetime(raw["pubDate"])
             if published.tzinfo is None or published.utcoffset() is None:
                 raise ValueError
-            items.append(NewsConnectorItem(
-                canonical_url=canonical_value, title=title,
-                summary_text=summary or None, observed_at=observed_at,
-                published_at=published.astimezone(timezone.utc),
-            ))
-    except (UnicodeDecodeError, json.JSONDecodeError, ValueError, TypeError,
-            OverflowError):
+            items.append(
+                NewsConnectorItem(
+                    canonical_url=canonical_value,
+                    title=title,
+                    summary_text=summary or None,
+                    observed_at=observed_at,
+                    published_at=published.astimezone(UTC),
+                )
+            )
+    except (
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        ValueError,
+        TypeError,
+        OverflowError,
+    ):
         return NewsFetchResult(NewsFetchStatus.CONTRACT_MISMATCH)
     if not items:
         return NewsFetchResult(NewsFetchStatus.EMPTY)
-    return NewsFetchResult(NewsFetchStatus.COLLECTED, tuple(items),
-                           bytes_received=len(body))
+    return NewsFetchResult(
+        NewsFetchStatus.COLLECTED, tuple(items), bytes_received=len(body)
+    )

@@ -8,18 +8,17 @@ produced them. Atomic replace means stale mappings from a prior account
 rotation are fully removed.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
 from tokmo.records.account_native_refs import AccountNativeRefStoreV1
-from tokmo.values.account_scope_patterns import ACCOUNT_SCOPE_RE
 from tokmo.values.production_cadence import (
-    CadenceAccountsV1,
     AccountScopeIdentityV1,
+    CadenceAccountsV1,
 )
 
-CLOCK_NOW = datetime(2026, 8, 10, 0, 0, tzinfo=timezone.utc)
+CLOCK_NOW = datetime(2026, 8, 10, 0, 0, tzinfo=UTC)
 TOSS_SCOPE = "toss-acct-" + "a" * 24
 TOSS_SCOPE_2 = "toss-acct-" + "b" * 24
 PENSION_SCOPE = "pension-excel-" + "c" * 24
@@ -40,8 +39,10 @@ def _accounts(identities, native_refs):
     return CadenceAccountsV1(
         tuple(identities),
         dict(native_refs),
-        {identity.account_scope: "fp-" + identity.account_scope[-4:]
-         for identity in identities},
+        {
+            identity.account_scope: "fp-" + identity.account_scope[-4:]
+            for identity in identities
+        },
     )
 
 
@@ -56,15 +57,20 @@ def test_toss_scopes_committed_pension_excluded(tmp_path):
     from tokmo.programs.account_native_ref_writer import (
         write_native_refs_from_accounts,
     )
+
     store = _store(tmp_path)
     accounts = _accounts(
-        [_identity(TOSS_SCOPE, 1), _identity(TOSS_SCOPE_2, 2),
-         _identity(PENSION_SCOPE, 3)],
-        {TOSS_SCOPE: RAW_REF_1, TOSS_SCOPE_2: RAW_REF_2,
-         PENSION_SCOPE: PENSION_REF},
+        [
+            _identity(TOSS_SCOPE, 1),
+            _identity(TOSS_SCOPE_2, 2),
+            _identity(PENSION_SCOPE, 3),
+        ],
+        {TOSS_SCOPE: RAW_REF_1, TOSS_SCOPE_2: RAW_REF_2, PENSION_SCOPE: PENSION_REF},
     )
     write_native_refs_from_accounts(
-        accounts=accounts, receipt_binding=BINDING, store=store,
+        accounts=accounts,
+        receipt_binding=BINDING,
+        store=store,
     )
     mapping = store.read_refs()
     assert mapping.scopes() == frozenset({TOSS_SCOPE, TOSS_SCOPE_2})
@@ -80,13 +86,16 @@ def test_account_rotation_atomic_replace(tmp_path):
     from tokmo.programs.account_native_ref_writer import (
         write_native_refs_from_accounts,
     )
+
     store = _store(tmp_path)
     accounts_1 = _accounts(
         [_identity(TOSS_SCOPE, 1), _identity(TOSS_SCOPE_2, 2)],
         {TOSS_SCOPE: RAW_REF_1, TOSS_SCOPE_2: RAW_REF_2},
     )
     write_native_refs_from_accounts(
-        accounts=accounts_1, receipt_binding="old-binding-1", store=store,
+        accounts=accounts_1,
+        receipt_binding="old-binding-1",
+        store=store,
     )
     assert store.read_refs().scopes() == frozenset({TOSS_SCOPE, TOSS_SCOPE_2})
 
@@ -97,7 +106,9 @@ def test_account_rotation_atomic_replace(tmp_path):
         {TOSS_SCOPE_3: "new-ref-3"},
     )
     write_native_refs_from_accounts(
-        accounts=accounts_2, receipt_binding="new-binding-2", store=store,
+        accounts=accounts_2,
+        receipt_binding="new-binding-2",
+        store=store,
     )
     mapping = store.read_refs()
     assert mapping.scopes() == frozenset({TOSS_SCOPE_3})
@@ -109,9 +120,6 @@ def test_account_rotation_atomic_replace(tmp_path):
 def test_empty_accounts_fails_closed(tmp_path):
     """An empty accounts inventory must not silently clear the store.
     The writer itself (not the constructor) must raise."""
-    from tokmo.programs.account_native_ref_writer import (
-        write_native_refs_from_accounts, NativeRefWriterError,
-    )
     store = _store(tmp_path)
     # CadenceAccountsV1 rejects empty identities in __post_init__, so we
     # test the writer-level fail-closed with valid-but-non-Toss inventory
@@ -124,8 +132,10 @@ def test_no_toss_scope_writer_fails_closed(tmp_path):
     """An inventory with valid identities but no live-order-capable Toss
     scope must fail-closed at the writer level — not silently clear."""
     from tokmo.programs.account_native_ref_writer import (
-        write_native_refs_from_accounts, NativeRefWriterError,
+        NativeRefWriterError,
+        write_native_refs_from_accounts,
     )
+
     store = _store(tmp_path)
     # Pension-only inventory — valid identities, no Toss scope
     accounts = _accounts(
@@ -134,7 +144,9 @@ def test_no_toss_scope_writer_fails_closed(tmp_path):
     )
     with pytest.raises(NativeRefWriterError):
         write_native_refs_from_accounts(
-            accounts=accounts, receipt_binding=BINDING, store=store,
+            accounts=accounts,
+            receipt_binding=BINDING,
+            store=store,
         )
 
 
@@ -142,8 +154,10 @@ def test_toss_scope_empty_native_ref_fails_closed(tmp_path):
     """A Toss scope with an empty native ref is a genuine anomaly — the
     writer must fail-closed, not silently skip and partial-commit."""
     from tokmo.programs.account_native_ref_writer import (
-        write_native_refs_from_accounts, NativeRefWriterError,
+        NativeRefWriterError,
+        write_native_refs_from_accounts,
     )
+
     store = _store(tmp_path)
     accounts = _accounts(
         [_identity(TOSS_SCOPE, 1)],
@@ -151,7 +165,9 @@ def test_toss_scope_empty_native_ref_fails_closed(tmp_path):
     )
     with pytest.raises(NativeRefWriterError):
         write_native_refs_from_accounts(
-            accounts=accounts, receipt_binding=BINDING, store=store,
+            accounts=accounts,
+            receipt_binding=BINDING,
+            store=store,
         )
 
 
@@ -159,8 +175,10 @@ def test_toss_scope_missing_native_ref_fails_closed(tmp_path):
     """A Toss scope with a None native ref is a genuine anomaly — the
     writer must fail-closed."""
     from tokmo.programs.account_native_ref_writer import (
-        write_native_refs_from_accounts, NativeRefWriterError,
+        NativeRefWriterError,
+        write_native_refs_from_accounts,
     )
+
     store = _store(tmp_path)
     accounts = _accounts(
         [_identity(TOSS_SCOPE, 1)],
@@ -168,7 +186,9 @@ def test_toss_scope_missing_native_ref_fails_closed(tmp_path):
     )
     with pytest.raises(NativeRefWriterError):
         write_native_refs_from_accounts(
-            accounts=accounts, receipt_binding=BINDING, store=store,
+            accounts=accounts,
+            receipt_binding=BINDING,
+            store=store,
         )
 
 
@@ -176,29 +196,38 @@ def test_receipt_binding_mandatory(tmp_path):
     from tokmo.programs.account_native_ref_writer import (
         write_native_refs_from_accounts,
     )
+
     store = _store(tmp_path)
     accounts = _accounts(
-        [_identity(TOSS_SCOPE)], {TOSS_SCOPE: RAW_REF_1},
+        [_identity(TOSS_SCOPE)],
+        {TOSS_SCOPE: RAW_REF_1},
     )
     with pytest.raises(ValueError):
         write_native_refs_from_accounts(
-            accounts=accounts, receipt_binding="", store=store,
+            accounts=accounts,
+            receipt_binding="",
+            store=store,
         )
 
 
 def test_raw_ref_never_in_exception_or_repr(tmp_path):
     """Raw ref must not leak through the writer's exception paths."""
     from tokmo.programs.account_native_ref_writer import (
-        write_native_refs_from_accounts, NativeRefWriterError,
+        NativeRefWriterError,
+        write_native_refs_from_accounts,
     )
+
     store = _store(tmp_path)
     accounts = _accounts(
-        [_identity(TOSS_SCOPE)], {TOSS_SCOPE: RAW_REF_1},
+        [_identity(TOSS_SCOPE)],
+        {TOSS_SCOPE: RAW_REF_1},
     )
     # Try to trigger an error — empty binding
     try:
         write_native_refs_from_accounts(
-            accounts=accounts, receipt_binding="", store=store,
+            accounts=accounts,
+            receipt_binding="",
+            store=store,
         )
         assert False, "should have raised"
     except (ValueError, NativeRefWriterError) as error:
@@ -211,15 +240,21 @@ def test_write_after_read_roundtrip_is_idempotent(tmp_path):
     from tokmo.programs.account_native_ref_writer import (
         write_native_refs_from_accounts,
     )
+
     store = _store(tmp_path)
     accounts = _accounts(
-        [_identity(TOSS_SCOPE)], {TOSS_SCOPE: RAW_REF_1},
+        [_identity(TOSS_SCOPE)],
+        {TOSS_SCOPE: RAW_REF_1},
     )
     write_native_refs_from_accounts(
-        accounts=accounts, receipt_binding=BINDING, store=store,
+        accounts=accounts,
+        receipt_binding=BINDING,
+        store=store,
     )
     write_native_refs_from_accounts(
-        accounts=accounts, receipt_binding=BINDING, store=store,
+        accounts=accounts,
+        receipt_binding=BINDING,
+        store=store,
     )
     mapping = store.read_refs()
     assert mapping.scopes() == frozenset({TOSS_SCOPE})

@@ -5,34 +5,33 @@ Verticals 1-5, 10 — paraphrase sighting, distinct+relation, merge review,
 replay idempotency, manual merge preserving history, archived replay.
 """
 
-from datetime import datetime, timedelta, timezone
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-import pytest
-
-from tokmo.records.ops_kernel import OpsKernelStore
 from tokmo.programs.youtube_tracking import (
     admit_report_candidates,
     parse_tracking_candidates,
     provenance_from_archive_meta,
 )
+from tokmo.records.ops_kernel import OpsKernelStore
 from tokmo.values.ops_kernel import (
     HypothesisIndexKeyV1,
     IndexKeyKind,
     ProducerRole,
-    SemanticClassification,
     TrackingCandidateV1,
     TriggerKind,
 )
 
-NOW = datetime(2026, 8, 13, 5, 30, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 13, 5, 30, tzinfo=UTC)
 NEXT_DAY = NOW + timedelta(days=1)
 FIXTURES = Path(__file__).parent / "fixtures" / "youtube"
 
 E, M, F, S = (
-    IndexKeyKind.ENTITY, IndexKeyKind.METRIC,
-    IndexKeyKind.EFFECT, IndexKeyKind.SOURCE_EVENT,
+    IndexKeyKind.ENTITY,
+    IndexKeyKind.METRIC,
+    IndexKeyKind.EFFECT,
+    IndexKeyKind.SOURCE_EVENT,
 )
 
 
@@ -96,7 +95,8 @@ def test_paraphrased_cross_date_candidate_is_new_sighting_not_new_hypothesis(tmp
     assert sightings[1].source_ref == "66fuB_7nofM"
     decisions = store.read_admission_decisions()
     assert [row.classification for row in decisions] == [
-        "NO_RELATION", "SAME_HYPOTHESIS_NEW_SIGHTING",
+        "NO_RELATION",
+        "SAME_HYPOTHESIS_NEW_SIGHTING",
     ]
     store.close()
 
@@ -213,7 +213,9 @@ def test_relation_and_queue_replay_are_idempotent(tmp_path):
         ),
     )
     outcome = admit_report_candidates(
-        store, (different_claim, ambiguous), now=NEXT_DAY,
+        store,
+        (different_claim, ambiguous),
+        now=NEXT_DAY,
     )
     # conservative closure: ambiguous conflicts with BOTH priors (its
     # trigger differs from different_claim's) so it links to each; only the
@@ -222,14 +224,14 @@ def test_relation_and_queue_replay_are_idempotent(tmp_path):
     assert outcome.merge_reviews == 1
     relations = store.read_hypothesis_relations()
     assert len(relations) == 2
-    assert all(
-        row.relation_kind == "RELATED_BUT_DISTINCT" for row in relations
-    )
+    assert all(row.relation_kind == "RELATED_BUT_DISTINCT" for row in relations)
     assert len(store.read_merge_reviews()) == 1
     assert len(store.read_admission_decisions()) == 4
     # replay both candidates: nothing duplicates
     replay = admit_report_candidates(
-        store, (different_claim, ambiguous), now=NEXT_DAY + timedelta(hours=1),
+        store,
+        (different_claim, ambiguous),
+        now=NEXT_DAY + timedelta(hours=1),
     )
     assert replay.related_edges == 0
     assert replay.merge_reviews == 0
@@ -238,12 +240,14 @@ def test_relation_and_queue_replay_are_idempotent(tmp_path):
     assert len(store.read_merge_reviews()) == 1
     # the first replay appends the EXACT_DUPLICATE audit per candidate...
     assert len(store.read_admission_decisions()) == 6
-    assert [
-        row.classification for row in store.read_admission_decisions()
-    ].count("EXACT_DUPLICATE") == 2
+    assert [row.classification for row in store.read_admission_decisions()].count(
+        "EXACT_DUPLICATE"
+    ) == 2
     # ...and a second replay appends nothing further (audit idempotent).
     admit_report_candidates(
-        store, (different_claim, ambiguous), now=NEXT_DAY + timedelta(hours=2),
+        store,
+        (different_claim, ambiguous),
+        now=NEXT_DAY + timedelta(hours=2),
     )
     assert len(store.read_admission_decisions()) == 6
     store.close()
@@ -278,7 +282,9 @@ def test_manual_merge_preserves_sightings_and_relation_review_history(tmp_path):
         ),
     )
     outcome = admit_report_candidates(
-        store, (different_claim, ambiguous), now=NEXT_DAY,
+        store,
+        (different_claim, ambiguous),
+        now=NEXT_DAY,
     )
     assert outcome.related_edges == 2
     assert outcome.merge_reviews == 1
@@ -289,8 +295,12 @@ def test_manual_merge_preserves_sightings_and_relation_review_history(tmp_path):
     merged_provenance_before = store.read_hypothesis(merged).provenance_first
 
     from tokmo.values.ops_kernel import HypothesisMergeOutcome
+
     result = store.merge_hypotheses(
-        ProducerRole.ANALYSIS, kept, merged, now=NEXT_DAY + timedelta(days=2),
+        ProducerRole.ANALYSIS,
+        kept,
+        merged,
+        now=NEXT_DAY + timedelta(days=2),
     )
     assert result is HypothesisMergeOutcome.MERGED
 
@@ -330,8 +340,10 @@ TOUCH: PERSONAL
 KEYS: entity:005980, entity:000660, metric:semis:sovereign_flow
 === TRACKING_CANDIDATE END ==="""
     candidates = parse_tracking_candidates(
-        report, source_ref=provenance.source_ref,
-        revision=provenance.revision, observed_at=NOW,
+        report,
+        source_ref=provenance.source_ref,
+        revision=provenance.revision,
+        observed_at=NOW,
     )
     store = make_store(tmp_path)
     outcome = admit_report_candidates(store, candidates, now=NOW)
@@ -366,7 +378,9 @@ def test_exact_replay_of_later_structural_twin_is_duplicate_not_misattributed(tm
     )
     _, base_id = store.upsert_hypothesis(ProducerRole.ANALYSIS, base, now=NOW)
     _, twin_id = store.upsert_hypothesis(
-        ProducerRole.ANALYSIS, twin, now=NOW,
+        ProducerRole.ANALYSIS,
+        twin,
+        now=NOW,
     )
     ids = sorted([base_id, twin_id])
     # sanity: both twins exist and the replayed twin is the later one
@@ -405,6 +419,7 @@ def test_semantic_sighting_preserves_candidate_supporting_evidence(tmp_path):
     hypothesis_id = store.read_open_hypotheses()[0].hypothesis_id
     sightings = store.read_hypothesis_sightings(hypothesis_id)
     assert sightings[-1].evidence_delta == (
-        "yt:2026-08-14:01:30", "yt:2026-08-14:02:00",
+        "yt:2026-08-14:01:30",
+        "yt:2026-08-14:02:00",
     )
     store.close()

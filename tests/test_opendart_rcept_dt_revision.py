@@ -28,22 +28,24 @@ What these tests now pin instead:
 
 import os
 import sqlite3
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pytest
+from test_opendart_bulk import envelope
+from test_opendart_pilot import (
+    Transport,
+    latest_partition_run,
+    migrated_for,
+    operate_tick,
+    seed_baseline,
+    store,
+)
 
 from tokmo.facts.opendart_bulk import Disclosure
 from tokmo.programs.opendart_pilot import run_preflight
 from tokmo.records.opendart_disclosures import SCHEMA, DisclosureStore
 
-from test_opendart_bulk import envelope
-from test_opendart_pilot import (
-    Transport, latest_partition_run, migrated_for, operate_tick, seed_baseline,
-    store,
-)
-
-
-NOW = datetime(2026, 8, 7, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 7, tzinfo=UTC)
 TODAY = date(2026, 8, 7)
 
 # The exact production identity that stalled the lane.
@@ -54,21 +56,37 @@ STOCK_CODE = "163730"
 CORP_CLS = "K"
 REPORT_NM = "주요사항보고서(타법인주식및출자증권양수결정)"
 FLR_NM = "핑거"
-FIRST_SEEN_DT = "20260807"   # what DART served at 22:30Z
-CORRECTED_DT = "20260806"    # what DART serves now
+FIRST_SEEN_DT = "20260807"  # what DART served at 22:30Z
+CORRECTED_DT = "20260806"  # what DART serves now
 
 
 def drifting(rcept_dt):
-    return Disclosure(CORP_CODE, CORP_NAME, STOCK_CODE, CORP_CLS, REPORT_NM,
-                      DRIFT_NO, FLR_NM, rcept_dt, None)
+    return Disclosure(
+        CORP_CODE,
+        CORP_NAME,
+        STOCK_CODE,
+        CORP_CLS,
+        REPORT_NM,
+        DRIFT_NO,
+        FLR_NM,
+        rcept_dt,
+        None,
+    )
 
 
 def wire_row(receipt, rcept_dt="20260806"):
     """One provider row as it arrives on the wire."""
-    return {"corp_code": CORP_CODE, "corp_name": CORP_NAME,
-            "stock_code": STOCK_CODE, "corp_cls": CORP_CLS,
-            "report_nm": REPORT_NM, "rcept_no": receipt, "flr_nm": FLR_NM,
-            "rcept_dt": rcept_dt, "rm": None}
+    return {
+        "corp_code": CORP_CODE,
+        "corp_name": CORP_NAME,
+        "stock_code": STOCK_CODE,
+        "corp_cls": CORP_CLS,
+        "report_nm": REPORT_NM,
+        "rcept_no": receipt,
+        "flr_nm": FLR_NM,
+        "rcept_dt": rcept_dt,
+        "rm": None,
+    }
 
 
 def filler(start, count):
@@ -78,6 +96,7 @@ def filler(start, count):
 # ---------------------------------------------------------------------------
 # 1. rcept_dt drift is a REVISION and the provider value is adopted
 # ---------------------------------------------------------------------------
+
 
 def test_rcept_dt_drift_is_a_revision_and_adopts_the_provider_value(tmp_path):
     db = store(tmp_path)
@@ -95,18 +114,18 @@ def test_rcept_dt_drift_is_a_revision_and_adopts_the_provider_value(tmp_path):
     # The canonical row adopts the provider's newer value, so the next run sees
     # a duplicate instead of re-hitting the same conflict.
     canonical, rcept_dt = db.connection.execute(
-        "select canonical_json,rcept_dt from disclosures where rcept_no=?",
-        (DRIFT_NO,)).fetchone()
+        "select canonical_json,rcept_dt from disclosures where rcept_no=?", (DRIFT_NO,)
+    ).fetchone()
     assert rcept_dt == CORRECTED_DT
     # The denormalised column and the canonical payload must not drift apart.
     assert f'"rcept_dt":"{CORRECTED_DT}"' in canonical
 
     assert db.connection.execute(
-        "select count(*) from conflicts where rcept_no=?",
-        (DRIFT_NO,)).fetchone() == (0,)
+        "select count(*) from conflicts where rcept_no=?", (DRIFT_NO,)
+    ).fetchone() == (0,)
     assert db.connection.execute(
-        "select count(*) from dart_revisions where rcept_no=?",
-        (DRIFT_NO,)).fetchone() == (1,)
+        "select count(*) from dart_revisions where rcept_no=?", (DRIFT_NO,)
+    ).fetchone() == (1,)
     db.close()
 
 
@@ -116,19 +135,29 @@ def test_rm_revision_still_updates_its_denormalised_column(tmp_path):
     run = db.claim("incremental", "20260806", "20260807", NOW)
     db.observe(run, drifting(CORRECTED_DT), NOW)
 
-    revised = Disclosure(CORP_CODE, CORP_NAME, STOCK_CODE, CORP_CLS, REPORT_NM,
-                         DRIFT_NO, FLR_NM, CORRECTED_DT, "정")
+    revised = Disclosure(
+        CORP_CODE,
+        CORP_NAME,
+        STOCK_CODE,
+        CORP_CLS,
+        REPORT_NM,
+        DRIFT_NO,
+        FLR_NM,
+        CORRECTED_DT,
+        "정",
+    )
     assert db.observe(run, revised, NOW) == "revision"
 
     assert db.connection.execute(
-        "select rm,rcept_dt from disclosures where rcept_no=?",
-        (DRIFT_NO,)).fetchone() == ("정", CORRECTED_DT)
+        "select rm,rcept_dt from disclosures where rcept_no=?", (DRIFT_NO,)
+    ).fetchone() == ("정", CORRECTED_DT)
     db.close()
 
 
 # ---------------------------------------------------------------------------
 # 2. The stall is self-healing — a repeat observation is now a duplicate
 # ---------------------------------------------------------------------------
+
 
 def test_rcept_dt_correction_settles_instead_of_repeating(tmp_path):
     db = store(tmp_path)
@@ -149,11 +178,27 @@ def test_corp_name_correction_is_a_revision_and_settles(tmp_path):
     db = store(tmp_path)
     run = db.claim("incremental", "20260811", "20260811", NOW)
     original = Disclosure(
-        "01234567", "압타머사이언스", "291650", CORP_CLS, REPORT_NM,
-        "20260811900691", "압타머사이언스", "20260811", None)
+        "01234567",
+        "압타머사이언스",
+        "291650",
+        CORP_CLS,
+        REPORT_NM,
+        "20260811900691",
+        "압타머사이언스",
+        "20260811",
+        None,
+    )
     corrected = Disclosure(
-        "01234567", "츌립앤사이언스", "291650", CORP_CLS, REPORT_NM,
-        "20260811900691", "압타머사이언스", "20260811", None)
+        "01234567",
+        "츌립앤사이언스",
+        "291650",
+        CORP_CLS,
+        REPORT_NM,
+        "20260811900691",
+        "압타머사이언스",
+        "20260811",
+        None,
+    )
 
     assert db.observe(run, original, NOW) == "new"
     assert db.observe(run, corrected, NOW) == "revision"
@@ -164,14 +209,16 @@ def test_corp_name_correction_is_a_revision_and_settles(tmp_path):
     assert receipt.revision_count == 1
     canonical, corp_name = db.connection.execute(
         "select canonical_json,corp_name from disclosures where rcept_no=?",
-        ("20260811900691",)).fetchone()
+        ("20260811900691",),
+    ).fetchone()
     assert corp_name == "츌립앤사이언스"
     assert '"corp_name":"츌립앤사이언스"' in canonical
 
     previous, observed, changed = db.connection.execute(
         "select previous_canonical_json,observed_canonical_json,changed_fields "
         "from dart_revisions where rcept_no=?",
-        ("20260811900691",)).fetchone()
+        ("20260811900691",),
+    ).fetchone()
     assert previous == original.canonical_json()
     assert observed == corrected.canonical_json()
     assert changed == "corp_name"
@@ -184,8 +231,17 @@ def test_corp_code_drift_is_still_a_conflict(tmp_path):
     run = db.claim("incremental", "20260806", "20260807", NOW)
     db.observe(run, drifting(CORRECTED_DT), NOW)
 
-    impostor = Disclosure("99999999", CORP_NAME, STOCK_CODE, CORP_CLS, REPORT_NM,
-                          DRIFT_NO, FLR_NM, CORRECTED_DT, None)
+    impostor = Disclosure(
+        "99999999",
+        CORP_NAME,
+        STOCK_CODE,
+        CORP_CLS,
+        REPORT_NM,
+        DRIFT_NO,
+        FLR_NM,
+        CORRECTED_DT,
+        None,
+    )
     assert db.observe(run, impostor, NOW) == "conflict"
     assert db.receipt(run.run_id).conflict_count == 1
     db.close()
@@ -196,8 +252,17 @@ def test_stock_code_drift_is_still_a_conflict(tmp_path):
     run = db.claim("incremental", "20260806", "20260807", NOW)
     db.observe(run, drifting(CORRECTED_DT), NOW)
 
-    impostor = Disclosure(CORP_CODE, CORP_NAME, "999999", CORP_CLS, REPORT_NM,
-                          DRIFT_NO, FLR_NM, CORRECTED_DT, None)
+    impostor = Disclosure(
+        CORP_CODE,
+        CORP_NAME,
+        "999999",
+        CORP_CLS,
+        REPORT_NM,
+        DRIFT_NO,
+        FLR_NM,
+        CORRECTED_DT,
+        None,
+    )
     assert db.observe(run, impostor, NOW) == "conflict"
     assert db.receipt(run.run_id).conflict_count == 1
     db.close()
@@ -212,7 +277,8 @@ def test_stock_code_drift_is_still_a_conflict(tmp_path):
     ),
 )
 def test_non_identity_field_correction_is_a_revision_and_settles(
-        tmp_path, field, replacement):
+    tmp_path, field, replacement
+):
     db = store(tmp_path)
     run = db.claim("incremental", "20260806", "20260807", NOW)
     original = drifting(CORRECTED_DT)
@@ -239,13 +305,17 @@ def test_non_identity_field_correction_is_a_revision_and_settles(
 
     columns = db.connection.execute(
         "select corp_cls,report_nm,flr_nm,canonical_json from disclosures "
-        "where rcept_no=?", (DRIFT_NO,)).fetchone()
+        "where rcept_no=?",
+        (DRIFT_NO,),
+    ).fetchone()
     indices = {"corp_cls": 0, "report_nm": 1, "flr_nm": 2}
     assert columns[indices[field]] == replacement
     assert f'"{field}":"{replacement}"' in columns[3]
     evidence = db.connection.execute(
         "select previous_canonical_json,observed_canonical_json,changed_fields "
-        "from dart_revisions where rcept_no=?", (DRIFT_NO,)).fetchone()
+        "from dart_revisions where rcept_no=?",
+        (DRIFT_NO,),
+    ).fetchone()
     assert evidence == (original.canonical_json(), corrected.canonical_json(), field)
     db.close()
 
@@ -253,12 +323,28 @@ def test_non_identity_field_correction_is_a_revision_and_settles(
 def test_report_name_incident_is_revision_not_conflict(tmp_path):
     db = store(tmp_path)
     run = db.claim("incremental", "20260813", "20260813", NOW)
-    original = Disclosure("00689143", "아하", "102950", "K",
-                          "주주명부폐쇄기간또는기준일설정",
-                          "20260813601444", "아하", "20260813", None)
-    corrected = Disclosure("00689143", "아하", "102950", "K",
-                           "[첨부추가]주주명부폐쇄기간또는기준일설정",
-                           "20260813601444", "아하", "20260813", None)
+    original = Disclosure(
+        "00689143",
+        "아하",
+        "102950",
+        "K",
+        "주주명부폐쇄기간또는기준일설정",
+        "20260813601444",
+        "아하",
+        "20260813",
+        None,
+    )
+    corrected = Disclosure(
+        "00689143",
+        "아하",
+        "102950",
+        "K",
+        "[첨부추가]주주명부폐쇄기간또는기준일설정",
+        "20260813601444",
+        "아하",
+        "20260813",
+        None,
+    )
 
     assert db.observe(run, original, NOW) == "new"
     assert db.observe(run, corrected, NOW) == "revision"
@@ -268,18 +354,21 @@ def test_report_name_incident_is_revision_not_conflict(tmp_path):
     assert receipt.revision_count == 1
     report_name, canonical = db.connection.execute(
         "select report_nm,canonical_json from disclosures where rcept_no=?",
-        ("20260813601444",)).fetchone()
+        ("20260813601444",),
+    ).fetchone()
     assert report_name == corrected.report_nm
     assert f'"report_nm":"{corrected.report_nm}"' in canonical
     assert db.connection.execute(
         "select changed_fields from dart_revisions where rcept_no=?",
-        ("20260813601444",)).fetchone() == ("report_nm",)
+        ("20260813601444",),
+    ).fetchone() == ("report_nm",)
     db.close()
 
 
 # ---------------------------------------------------------------------------
 # 3. A conflict no longer discards the remaining pages
 # ---------------------------------------------------------------------------
+
 
 def conflicting_pages(db):
     """Three pages where page 2 carries a genuine identity conflict.
@@ -292,11 +381,9 @@ def conflicting_pages(db):
     impostor = dict(wire_row(DRIFT_NO, CORRECTED_DT), corp_code="99999999")
     return [
         envelope(filler(100, 100), page=1, total_count=201, total_page=3),
-        envelope(filler(200, 99) + [impostor],
-                 page=2, total_count=201, total_page=3),
+        envelope(filler(200, 99) + [impostor], page=2, total_count=201, total_page=3),
         # Page 3 is where the genuinely new disclosures live under ascending sort.
-        envelope([wire_row("20260807000999")],
-                 page=3, total_count=201, total_page=3),
+        envelope([wire_row("20260807000999")], page=3, total_count=201, total_page=3),
     ]
 
 
@@ -311,8 +398,8 @@ def test_conflict_no_longer_aborts_the_remaining_pages(tmp_path):
     # Every page was requested, and the new disclosure on the last page landed.
     assert len(tx.calls) == 3
     assert db.connection.execute(
-        "select count(*) from disclosures where rcept_no=?",
-        ("20260807000999",)).fetchone() == (1,)
+        "select count(*) from disclosures where rcept_no=?", ("20260807000999",)
+    ).fetchone() == (1,)
 
     # The conflict is still reported — it is downgraded, not silenced.
     assert receipt.status == "incomplete"
@@ -331,7 +418,8 @@ def test_page_counter_matches_successful_attempts(tmp_path):
 
     successes = db.connection.execute(
         "select count(*) from attempts where run_id=? and outcome='success'",
-        (receipt.run_id,)).fetchone()
+        (receipt.run_id,),
+    ).fetchone()
     assert successes == (receipt.fetched_pages,) == ((3,))
     db.close()
 
@@ -361,8 +449,12 @@ def test_preflight_with_a_conflict_does_not_report_complete(tmp_path):
     impostor = dict(wire_row(DRIFT_NO, CORRECTED_DT), corp_code="99999999")
 
     receipt = run_preflight(
-        db, fixed_cutoff=date(2026, 8, 6), api_key="x",
-        transport=Transport([envelope([impostor], page=1)]), now=NOW)
+        db,
+        fixed_cutoff=date(2026, 8, 6),
+        api_key="x",
+        transport=Transport([envelope([impostor], page=1)]),
+        now=NOW,
+    )
 
     assert receipt.status == "incomplete"
     assert receipt.conflict_count == 1
@@ -374,6 +466,7 @@ def test_preflight_with_a_conflict_does_not_report_complete(tmp_path):
 # 4. Revision evidence keeps the superseded values, not just hashes
 # ---------------------------------------------------------------------------
 
+
 def _legacy_revision_schema_db(tmp_path):
     """A DB whose dart_revisions predates the evidence columns."""
     db_path = tmp_path / "private" / "bulk.sqlite3"
@@ -381,7 +474,9 @@ def _legacy_revision_schema_db(tmp_path):
     legacy = SCHEMA.replace(
         " previous_canonical_json TEXT,\n"
         " observed_canonical_json TEXT,\n"
-        " changed_fields TEXT,\n", "")
+        " changed_fields TEXT,\n",
+        "",
+    )
     assert "previous_canonical_json" not in legacy
     connection = sqlite3.connect(str(db_path))
     connection.executescript(legacy)
@@ -397,12 +492,17 @@ def test_migrated_dart_revisions_schema_matches_a_freshly_created_one(tmp_path):
     fresh = DisclosureStore.open(tmp_path / "fresh" / "private" / "bulk.sqlite3")
 
     def columns(db):
-        return [(row[1], row[2]) for row in
-                db.connection.execute("pragma table_info(dart_revisions)")]
+        return [
+            (row[1], row[2])
+            for row in db.connection.execute("pragma table_info(dart_revisions)")
+        ]
 
     assert columns(migrated) == columns(fresh)
     assert [name for name, _type in columns(fresh)][-3:] == [
-        "previous_canonical_json", "observed_canonical_json", "changed_fields"]
+        "previous_canonical_json",
+        "observed_canonical_json",
+        "changed_fields",
+    ]
 
     # Idempotent: reopening does not re-add or reorder.
     migrated.close()
@@ -420,7 +520,9 @@ def test_revision_records_the_superseded_value_not_only_a_hash(tmp_path):
 
     previous, observed, changed = db.connection.execute(
         "select previous_canonical_json,observed_canonical_json,changed_fields "
-        "from dart_revisions where rcept_no=?", (DRIFT_NO,)).fetchone()
+        "from dart_revisions where rcept_no=?",
+        (DRIFT_NO,),
+    ).fetchone()
 
     assert changed == "rcept_dt"
     assert f'"rcept_dt":"{FIRST_SEEN_DT}"' in previous
@@ -434,19 +536,30 @@ def test_legacy_revision_rows_keep_null_evidence(tmp_path):
     connection = sqlite3.connect(str(legacy_path))
     connection.execute(
         "insert into runs(run_id,kind,bgn_de,end_de,status,started_at) "
-        "values('old','incremental','20260803','20260803','complete','2026-08-03T00:00:00+00:00')")
+        "values('old','incremental','20260803','20260803','complete','2026-08-03T00:00:00+00:00')"
+    )
     connection.execute(
         "insert into dart_revisions(rcept_no,previous_rm,observed_rm,"
         "previous_payload_hash,observed_payload_hash,observed_at,run_id,"
         "evidence_fingerprint) values(?,?,?,?,?,?,?,?)",
-        (DRIFT_NO, None, "정", "hash_a", "hash_b",
-         "2026-08-03T00:00:00+00:00", "old", "fingerprint_a"))
+        (
+            DRIFT_NO,
+            None,
+            "정",
+            "hash_a",
+            "hash_b",
+            "2026-08-03T00:00:00+00:00",
+            "old",
+            "fingerprint_a",
+        ),
+    )
     connection.commit()
     connection.close()
 
     db = DisclosureStore.open(legacy_path)
     assert db.connection.execute(
         "select previous_canonical_json,observed_canonical_json,changed_fields "
-        "from dart_revisions where rcept_no=?", (DRIFT_NO,)).fetchone() == (
-            None, None, None)
+        "from dart_revisions where rcept_no=?",
+        (DRIFT_NO,),
+    ).fetchone() == (None, None, None)
     db.close()

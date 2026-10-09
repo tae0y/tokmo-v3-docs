@@ -8,16 +8,18 @@ Events are restricted to the contract field schema so that URLs, payloads,
 and secrets cannot enter any log artifact through an ad-hoc field.
 """
 
+import json
+import os
 from collections import deque
 from collections.abc import Callable
 from datetime import datetime
-import json
-import os
 from pathlib import Path
 
 Clock = Callable[[], datetime]
 
-EVENT_FIELDS = frozenset({"run_id", "stage", "action", "reason", "source", "decision_id"})
+EVENT_FIELDS = frozenset(
+    {"run_id", "stage", "action", "reason", "source", "decision_id"}
+)
 DEFAULT_FLIGHT_RECORDER_CAPACITY = 200
 
 # Conservative deterministic secrecy policy: any field value containing one of
@@ -25,15 +27,32 @@ DEFAULT_FLIGHT_RECORDER_CAPACITY = 200
 # vocabulary) is rejected before it can reach buffer or disk. Rejection never
 # echoes the value itself.
 PROHIBITED_VALUE_MARKERS = (
-    "://", "http", "www.", "?", "&", "=", "%",
-    "api_key", "apikey", "token", "secret", "passw",
-    "bearer", "credential", "authorization",
+    "://",
+    "http",
+    "www.",
+    "?",
+    "&",
+    "=",
+    "%",
+    "api_key",
+    "apikey",
+    "token",
+    "secret",
+    "passw",
+    "bearer",
+    "credential",
+    "authorization",
 )
 
 
 class TracerLogger:
-    def __init__(self, root: Path, *, clock: Clock,
-                 capacity: int = DEFAULT_FLIGHT_RECORDER_CAPACITY) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        clock: Clock,
+        capacity: int = DEFAULT_FLIGHT_RECORDER_CAPACITY,
+    ) -> None:
         self.root = root
         self.clock = clock
         self.buffer: deque[dict] = deque(maxlen=capacity)
@@ -50,17 +69,26 @@ class TracerLogger:
         self._flush("incident.jsonl", trigger=event)
 
     def flush_rca(self, run_id: str) -> None:
-        trigger = self._event("INFO", {
-            "run_id": run_id, "stage": "rca", "action": "FLUSH",
-            "reason": "explicit_rca", "source": "tracer", "decision_id": None,
-        })
+        trigger = self._event(
+            "INFO",
+            {
+                "run_id": run_id,
+                "stage": "rca",
+                "action": "FLUSH",
+                "reason": "explicit_rca",
+                "source": "tracer",
+                "decision_id": None,
+            },
+        )
         self._flush("rca.jsonl", trigger=trigger)
 
     def _event(self, level: str, fields: dict) -> dict:
         if set(fields) != EVENT_FIELDS:
             missing = sorted(EVENT_FIELDS - set(fields))
             unexpected = sorted(set(fields) - EVENT_FIELDS)
-            raise ValueError(f"log_fields_outside_contract:missing={missing}:unexpected={unexpected}")
+            raise ValueError(
+                f"log_fields_outside_contract:missing={missing}:unexpected={unexpected}"
+            )
         for name, value in fields.items():
             _reject_prohibited_value(name, value)
         return {"timestamp": self.clock().isoformat(), "level": level, **fields}

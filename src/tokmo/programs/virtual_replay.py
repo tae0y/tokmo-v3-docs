@@ -22,15 +22,15 @@ explicit shadow-only paths; the production canonical data root is refused.
 import argparse
 import copy
 import dataclasses
-from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
 import fcntl
 import json
 import os
-from pathlib import Path
 import sys
 import time
-from typing import Callable, Mapping
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
+from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 
 from tokmo.programs.cadence_fixture_deps import build_fixture_cadence_deps
 from tokmo.programs.production_cadence import run_production_cadence_once
@@ -41,21 +41,29 @@ from tokmo.records.ops_kernel import OpsKernelStore
 from tokmo.records.order_scan_state import OrderScanStateStore
 from tokmo.records.regular_session_history import RegularSessionHistoryStore
 from tokmo.values import cadence_policy as _policy_values
-from tokmo.values.calendar_refresh import market_local_date
 from tokmo.values.cadence_policy import CALENDAR_ATTEMPT_MAX, GROUP_LIMIT_FIELDS
+from tokmo.values.calendar_refresh import market_local_date
 from tokmo.values.session_gate import Market
 
 REPLAY_REPORT_SCHEMA = "tokmo-virtual-replay-report-v1"
 
-DEFAULT_48H_START = datetime(2026, 8, 2, 14, 30, tzinfo=timezone.utc)
+DEFAULT_48H_START = datetime(2026, 8, 2, 14, 30, tzinfo=UTC)
 
-FAULT_TOKENS = frozenset({
-    "corrupt_cache", "duplicate_after", "overlap", "excess_lag",
-    "crash_quotes",
-})
+FAULT_TOKENS = frozenset(
+    {
+        "corrupt_cache",
+        "duplicate_after",
+        "overlap",
+        "excess_lag",
+        "crash_quotes",
+    }
+)
 
 _DOWNSTREAM_OPERATIONS = (
-    "ACCOUNTS", "ACCOUNT_HOLDINGS", "PRICE_BATCH", "ORDERS_PAGE",
+    "ACCOUNTS",
+    "ACCOUNT_HOLDINGS",
+    "PRICE_BATCH",
+    "ORDERS_PAGE",
     "ORDER_DETAIL",
 )
 
@@ -102,8 +110,12 @@ class VirtualReplayScenarioV1:
 
     def __post_init__(self):
         slot = self.start_slot_utc
-        if (not isinstance(slot, datetime) or slot.tzinfo is None
-                or slot.utcoffset() != timedelta(0) or slot.microsecond != 0):
+        if (
+            not isinstance(slot, datetime)
+            or slot.tzinfo is None
+            or slot.utcoffset() != timedelta(0)
+            or slot.microsecond != 0
+        ):
             raise ValueError("scenario start must be aware UTC")
         if int(slot.timestamp()) % self.cadence_seconds != 0:
             raise ValueError("scenario start is not on the policy cadence grid")
@@ -119,7 +131,8 @@ class VirtualReplayScenarioV1:
                 raise ValueError("unknown calendar failure market")
             date.fromisoformat(config["local_date"])
             if type(config["fail_attempts"]) is not int or not (
-                    1 <= config["fail_attempts"] < CALENDAR_ATTEMPT_MAX):
+                1 <= config["fail_attempts"] < CALENDAR_ATTEMPT_MAX
+            ):
                 raise ValueError("invalid calendar failure attempt count")
 
     @property
@@ -181,15 +194,28 @@ def _base_fixture() -> dict:
             "KR": {"days": _official_days(Market.KR)},
             "US": {"days": _official_days(Market.US)},
         },
-        "accounts": [{
-            "seed": "42", "label": "brokerage",
-            "holdings": [
-                {"symbol": "005930", "quantity": "5", "avg_price": "70000",
-                 "currency": "KRW", "market_raw": "KR"},
-                {"symbol": "AAPL", "quantity": "2", "avg_price": "180",
-                 "currency": "USD", "market_raw": "US"},
-            ],
-        }],
+        "accounts": [
+            {
+                "seed": "42",
+                "label": "brokerage",
+                "holdings": [
+                    {
+                        "symbol": "005930",
+                        "quantity": "5",
+                        "avg_price": "70000",
+                        "currency": "KRW",
+                        "market_raw": "KR",
+                    },
+                    {
+                        "symbol": "AAPL",
+                        "quantity": "2",
+                        "avg_price": "180",
+                        "currency": "USD",
+                        "market_raw": "US",
+                    },
+                ],
+            }
+        ],
         "quotes": {
             "005930": {"price": "70100", "currency": "KRW"},
             "AAPL": {"price": "181.25", "currency": "USD"},
@@ -203,19 +229,39 @@ def build_default_48h_scenario() -> VirtualReplayScenarioV1:
     """The canonical prelaunch 48-hour replay: 576 policy-derived ticks."""
     policy = _registry()["cadence-300s-v1"]
     fixture = _base_fixture()
-    fixture["orders"] = {"42": [
-        {"order_id": "KR-ORD-1", "symbol": "005930", "side": "SELL",
-         "status": "FILLED", "quantity": "1", "currency": "KRW",
-         "filled_price": "70100", "filled_amount": "70100"},
-        # Unsupported exact currency must remain durably market-pending and
-        # never fall back to KR (SDS §3.6).
-        {"order_id": "MYST-ORD-1", "symbol": "MYST01", "side": "SELL",
-         "status": "FILLED", "quantity": "1", "currency": "EUR"},
-    ]}
+    fixture["orders"] = {
+        "42": [
+            {
+                "order_id": "KR-ORD-1",
+                "symbol": "005930",
+                "side": "SELL",
+                "status": "FILLED",
+                "quantity": "1",
+                "currency": "KRW",
+                "filled_price": "70100",
+                "filled_amount": "70100",
+            },
+            # Unsupported exact currency must remain durably market-pending and
+            # never fall back to KR (SDS §3.6).
+            {
+                "order_id": "MYST-ORD-1",
+                "symbol": "MYST01",
+                "side": "SELL",
+                "status": "FILLED",
+                "quantity": "1",
+                "currency": "EUR",
+            },
+        ]
+    }
     fixture["order_details"] = {
-        "KR-ORD-1": {"order_id": "KR-ORD-1", "symbol": "005930",
-                     "side": "SELL", "status": "FILLED", "quantity": "1",
-                     "currency": "KRW"},
+        "KR-ORD-1": {
+            "order_id": "KR-ORD-1",
+            "symbol": "005930",
+            "side": "SELL",
+            "status": "FILLED",
+            "quantity": "1",
+            "currency": "KRW",
+        },
     }
     return VirtualReplayScenarioV1(
         name="default-48h",
@@ -235,8 +281,7 @@ def build_default_48h_scenario() -> VirtualReplayScenarioV1:
             "KR": {"local_date": "2026-08-04", "fail_attempts": 2},
         },
         expect={
-            "outcomes": {"MISSED": 1, "DUPLICATE": 1, "OVERLAP": 1,
-                         "CRASHED": 1},
+            "outcomes": {"MISSED": 1, "DUPLICATE": 1, "OVERLAP": 1, "CRASHED": 1},
             "max_lag_seconds": 120.0,
             "quarantined_order_ids": ["MYST-ORD-1"],
             "history_min_sessions": 20,
@@ -246,7 +291,8 @@ def build_default_48h_scenario() -> VirtualReplayScenarioV1:
 
 
 def build_smoke_scenario(
-    *, policy_version: str = "cadence-300s-v1",
+    *,
+    policy_version: str = "cadence-300s-v1",
     open_kr_symbols: int | None = None,
 ) -> VirtualReplayScenarioV1:
     """A fast 12-tick scenario: closed Sunday morning by default, or an open
@@ -255,14 +301,20 @@ def build_smoke_scenario(
     policy = _registry()[policy_version]
     fixture = _base_fixture()
     if open_kr_symbols is None:
-        start = datetime(2026, 8, 2, 5, 0, tzinfo=timezone.utc)
+        start = datetime(2026, 8, 2, 5, 0, tzinfo=UTC)
         expect = {"outcomes": {"SKIPPED_CLOSED": 12}}
     else:
-        start = datetime(2026, 8, 3, 5, 0, tzinfo=timezone.utc)
+        start = datetime(2026, 8, 3, 5, 0, tzinfo=UTC)
         symbols = [f"9{index:05d}" for index in range(open_kr_symbols)]
         fixture["accounts"][0]["holdings"] = [
-            {"symbol": symbol, "quantity": "1", "avg_price": "1000",
-             "currency": "KRW", "market_raw": "KR"} for symbol in symbols
+            {
+                "symbol": symbol,
+                "quantity": "1",
+                "avg_price": "1000",
+                "currency": "KRW",
+                "market_raw": "KR",
+            }
+            for symbol in symbols
         ]
         fixture["quotes"] = {
             symbol: {"price": "1001", "currency": "KRW"} for symbol in symbols
@@ -301,43 +353,52 @@ class _TickClock:
         return self._now
 
 
-def _wrap_recording_deps(deps, index, recorders, *, crash_quotes: bool,
-                         calendar_failures: Mapping):
+def _wrap_recording_deps(
+    deps, index, recorders, *, crash_quotes: bool, calendar_failures: Mapping
+):
     calendar_fetch = deps.calendar_fetch
     detail_fetch = deps.order_detail_fetch
 
     def recording_calendar(*, market, local_trade_date, receipt, bearer):
         # the attempt is recorded before the provider outcome so failed
         # wire attempts remain visible evidence
-        recorders["calendar"].append({
-            "market": market.value,
-            "local_date": local_trade_date.isoformat(),
-            "slot_index": index,
-        })
+        recorders["calendar"].append(
+            {
+                "market": market.value,
+                "local_date": local_trade_date.isoformat(),
+                "slot_index": index,
+            }
+        )
         config = calendar_failures.get(market.value)
-        if (config is not None
-                and config["local_date"] == local_trade_date.isoformat()):
+        if config is not None and config["local_date"] == local_trade_date.isoformat():
             key = (market.value, config["local_date"])
             attempt = recorders["fail_counts"].get(key, 0)
             recorders["fail_counts"][key] = attempt + 1
             if attempt < config["fail_attempts"]:
                 raise RuntimeError("injected calendar provider failure")
         response = calendar_fetch(
-            market=market, local_trade_date=local_trade_date,
-            receipt=receipt, bearer=bearer,
+            market=market,
+            local_trade_date=local_trade_date,
+            receipt=receipt,
+            bearer=bearer,
         )
         # G2.5: calendar_fetch now returns the full CalendarResponse.
         # The refresh program expects a day object — extract .today.
         return response.today if hasattr(response, "today") else response
 
-    def recording_detail(*, claim, bearer, account_scope, native_ref,
-                         order_id):
-        recorders["details"].append({
-            "order_id": str(order_id), "slot_index": index,
-        })
+    def recording_detail(*, claim, bearer, account_scope, native_ref, order_id):
+        recorders["details"].append(
+            {
+                "order_id": str(order_id),
+                "slot_index": index,
+            }
+        )
         return detail_fetch(
-            claim=claim, bearer=bearer, account_scope=account_scope,
-            native_ref=native_ref, order_id=order_id,
+            claim=claim,
+            bearer=bearer,
+            account_scope=account_scope,
+            native_ref=native_ref,
+            order_id=order_id,
         )
 
     replacements = {
@@ -345,6 +406,7 @@ def _wrap_recording_deps(deps, index, recorders, *, crash_quotes: bool,
         "order_detail_fetch": recording_detail,
     }
     if crash_quotes:
+
         def crashing_quotes(*, claim, bearer, symbols):
             del claim, bearer, symbols
             raise _InjectedCrash("injected mid-tick crash")
@@ -365,8 +427,12 @@ def _kernel_wire(root: Path, policy_version: str, slot: datetime) -> dict:
         root / "ops" / "ops_kernel.sqlite3"
     ).read_cadence_tick_report(policy_version, slot)
     if report is None:
-        return {"total_started": 0, "group_started": {},
-                "operation_started": {}, "state_counts": {}}
+        return {
+            "total_started": 0,
+            "group_started": {},
+            "operation_started": {},
+            "state_counts": {},
+        }
     return {
         "total_started": report["total_started"],
         "group_started": dict(report["group_started"]),
@@ -376,11 +442,15 @@ def _kernel_wire(root: Path, policy_version: str, slot: datetime) -> dict:
 
 
 def _slot_iso(slot: datetime) -> str:
-    return slot.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return slot.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
-def run_virtual_replay(root: Path, scenario: VirtualReplayScenarioV1,
-                       *, progress: Callable[[str], None] | None = None) -> dict:
+def run_virtual_replay(
+    root: Path,
+    scenario: VirtualReplayScenarioV1,
+    *,
+    progress: Callable[[str], None] | None = None,
+) -> dict:
     """Replay the scenario through the exact production tick function and
     return the machine-readable report with evaluated invariant assertions."""
     started_wall = time.monotonic()
@@ -398,15 +468,22 @@ def run_virtual_replay(root: Path, scenario: VirtualReplayScenarioV1,
 
     def invoke(index, slot, observed, *, crash_quotes=False):
         deps, probe = build_fixture_cadence_deps(
-            fixture=fixture, clock=_TickClock(observed),
+            fixture=fixture,
+            clock=_TickClock(observed),
         )
         deps = _wrap_recording_deps(
-            deps, index, recorders, crash_quotes=crash_quotes,
+            deps,
+            index,
+            recorders,
+            crash_quotes=crash_quotes,
             calendar_failures=scenario.calendar_failures,
         )
         result = run_production_cadence_once(
-            root=root, policy_version=scenario.policy_version,
-            scheduled_for_utc=slot, observed_now_utc=observed, deps=deps,
+            root=root,
+            policy_version=scenario.policy_version,
+            scheduled_for_utc=slot,
+            observed_now_utc=observed,
+            deps=deps,
         )
         return result, probe
 
@@ -427,7 +504,9 @@ def run_virtual_replay(root: Path, scenario: VirtualReplayScenarioV1,
             runtime = root / "runtime"
             runtime.mkdir(mode=0o700, parents=True, exist_ok=True)
             overlap_descriptor = os.open(
-                runtime / "cadence.lock", os.O_RDWR | os.O_CREAT, 0o600,
+                runtime / "cadence.lock",
+                os.O_RDWR | os.O_CREAT,
+                0o600,
             )
             fcntl.flock(overlap_descriptor, fcntl.LOCK_EX)
 
@@ -438,17 +517,24 @@ def run_virtual_replay(root: Path, scenario: VirtualReplayScenarioV1,
                     invoke(index, slot, observed, crash_quotes=True)
                 except _InjectedCrash:
                     record.update(
-                        outcome="CRASHED", reason="injected_crash",
-                        lag=1.0, wire=None, stages=(), open_markets=(),
+                        outcome="CRASHED",
+                        reason="injected_crash",
+                        lag=1.0,
+                        wire=None,
+                        stages=(),
+                        open_markets=(),
                     )
                 else:  # pragma: no cover - the injected crash must escape
                     raise AssertionError("injected crash did not propagate")
             else:
                 result, probe = invoke(index, slot, observed)
                 record.update(
-                    outcome=result.outcome.value, reason=result.reason,
-                    lag=result.lag_seconds, wire=_plain_wire(result.wire),
-                    stages=result.stages, open_markets=result.open_markets,
+                    outcome=result.outcome.value,
+                    reason=result.reason,
+                    lag=result.lag_seconds,
+                    wire=_plain_wire(result.wire),
+                    stages=result.stages,
+                    open_markets=result.open_markets,
                 )
                 if probe.quote_batches:
                     quote_batches[index] = list(probe.quote_batches)
@@ -463,25 +549,34 @@ def run_virtual_replay(root: Path, scenario: VirtualReplayScenarioV1,
         if fault == "duplicate_after":
             before = _kernel_wire(root, scenario.policy_version, slot)
             duplicate_result, _probe = invoke(
-                index, slot, slot + timedelta(seconds=2),
+                index,
+                slot,
+                slot + timedelta(seconds=2),
             )
             after = _kernel_wire(root, scenario.policy_version, slot)
             duplicate_wire_deltas.append(
                 after["total_started"] - before["total_started"],
             )
-            extra_invocations.append({
-                "index": index, "slot_iso": _slot_iso(slot),
-                "outcome": duplicate_result.outcome.value,
-                "reason": duplicate_result.reason,
-            })
+            extra_invocations.append(
+                {
+                    "index": index,
+                    "slot_iso": _slot_iso(slot),
+                    "outcome": duplicate_result.outcome.value,
+                    "reason": duplicate_result.reason,
+                }
+            )
         if progress is not None and index % 96 == 0:
             progress(f"replay {scenario.name} tick {index}/{scenario.tick_count}")
 
     report = _aggregate(
-        root=root, scenario=scenario, policy=policy, ticks=ticks,
+        root=root,
+        scenario=scenario,
+        policy=policy,
+        ticks=ticks,
         extra_invocations=extra_invocations,
         duplicate_wire_deltas=duplicate_wire_deltas,
-        quote_batches=quote_batches, recorders=recorders,
+        quote_batches=quote_batches,
+        recorders=recorders,
         runtime_seconds=time.monotonic() - started_wall,
     )
     return report
@@ -507,9 +602,7 @@ def _batch_samples(ticks, quote_batches) -> dict:
         batches = quote_batches.get(record["index"])
         if key is None or key in samples or not batches:
             continue
-        samples[key] = sorted({
-            symbol for batch in batches for symbol in batch
-        })
+        samples[key] = sorted({symbol for batch in batches for symbol in batch})
     return samples
 
 
@@ -519,7 +612,8 @@ def _history_counts(root: Path, fixture: Mapping) -> dict:
     if not path.exists():
         return counts
     store = RegularSessionHistoryStore(
-        path, clock=lambda: datetime(2026, 1, 1, tzinfo=timezone.utc),
+        path,
+        clock=lambda: datetime(2026, 1, 1, tzinfo=UTC),
     )
     for market in Market:
         days = fixture["calendar"][market.value].get("days", {})
@@ -535,7 +629,8 @@ def _market_pending_rows(root: Path):
     if not path.exists():
         return ()
     store = OrderScanStateStore(
-        path, clock=lambda: datetime(2026, 1, 1, tzinfo=timezone.utc),
+        path,
+        clock=lambda: datetime(2026, 1, 1, tzinfo=UTC),
     )
     return tuple(store.read_all_market_pending())
 
@@ -545,24 +640,39 @@ def _canonical_snapshot_markets(root: Path, symbol_markets: Mapping) -> set:
     if not path.exists():
         return set()
     state = CurrentHoldingsStore(
-        path, clock=lambda: datetime(2026, 1, 1, tzinfo=timezone.utc),
+        path,
+        clock=lambda: datetime(2026, 1, 1, tzinfo=UTC),
     ).read()
     if state is None:
         return set()
     return {
         symbol_markets.get(item.symbol)
-        for account in state.accounts for item in account.holdings
+        for account in state.accounts
+        for item in account.holdings
     }
 
 
-def _aggregate(*, root, scenario, policy, ticks, extra_invocations,
-               duplicate_wire_deltas, quote_batches, recorders,
-               runtime_seconds) -> dict:
+def _aggregate(
+    *,
+    root,
+    scenario,
+    policy,
+    ticks,
+    extra_invocations,
+    duplicate_wire_deltas,
+    quote_batches,
+    recorders,
+    runtime_seconds,
+) -> dict:
     outcomes: dict[str, int] = {}
     per_stage: dict[str, dict[str, int]] = {}
     stage_latency: dict[str, int] = {}
-    wire_totals = {"total_started": 0, "group_started": {},
-                   "operation_started": {}, "state_counts": {}}
+    wire_totals = {
+        "total_started": 0,
+        "group_started": {},
+        "operation_started": {},
+        "state_counts": {},
+    }
     max_lag = 0.0
     failures = []
     crash_slots = []
@@ -578,7 +688,8 @@ def _aggregate(*, root, scenario, policy, ticks, extra_invocations,
         if outcome == "CRASHED":
             crash_slots.append(record)
             record["wire"] = _kernel_wire(
-                root, scenario.policy_version,
+                root,
+                scenario.policy_version,
                 datetime.fromisoformat(record["slot_iso"].replace("Z", "+00:00")),
             )
         wire = record.get("wire")
@@ -586,7 +697,8 @@ def _aggregate(*, root, scenario, policy, ticks, extra_invocations,
             wire_totals["total_started"] += wire["total_started"]
             add_counts(wire_totals["group_started"], wire["group_started"])
             add_counts(
-                wire_totals["operation_started"], wire["operation_started"],
+                wire_totals["operation_started"],
+                wire["operation_started"],
             )
             add_counts(wire_totals["state_counts"], wire["state_counts"])
         for status in record.get("stages") or ():
@@ -595,13 +707,17 @@ def _aggregate(*, root, scenario, policy, ticks, extra_invocations,
                 per_stage[status.stage].get(status.status, 0) + 1
             )
             stage_latency[status.stage] = max(
-                stage_latency.get(status.stage, 0), status.latency_ms,
+                stage_latency.get(status.stage, 0),
+                status.latency_ms,
             )
         if outcome in ("FAILED", "PARTIAL", "CRASHED", "UNKNOWN"):
-            failures.append({
-                "slot_utc": record["slot_iso"], "outcome": outcome,
-                "reason": record["reason"],
-            })
+            failures.append(
+                {
+                    "slot_utc": record["slot_iso"],
+                    "outcome": outcome,
+                    "reason": record["reason"],
+                }
+            )
     for extra in extra_invocations:
         outcomes[extra["outcome"]] = outcomes.get(extra["outcome"], 0) + 1
 
@@ -615,7 +731,8 @@ def _aggregate(*, root, scenario, policy, ticks, extra_invocations,
     slot_of = {
         record["index"]: datetime.fromisoformat(
             record["slot_iso"].replace("Z", "+00:00"),
-        ) for record in ticks
+        )
+        for record in ticks
     }
     for fetch in recorders["calendar"]:
         market = Market(fetch["market"])
@@ -626,7 +743,7 @@ def _aggregate(*, root, scenario, policy, ticks, extra_invocations,
     # receipts and events, slot by slot
     receipts_store = CadenceTickReceiptStore(
         root / "ops" / "cadence_ticks.sqlite3",
-        clock=lambda: datetime(2026, 1, 1, tzinfo=timezone.utc),
+        clock=lambda: datetime(2026, 1, 1, tzinfo=UTC),
     )
     terminal_by_status: dict[str, int] = {}
     event_counts = {"MISSED": 0, "DUPLICATE": 0, "OVERLAP": 0}
@@ -639,8 +756,10 @@ def _aggregate(*, root, scenario, policy, ticks, extra_invocations,
             terminal_by_status[row["status"]] = (
                 terminal_by_status.get(row["status"], 0) + 1
             )
-            if (row["status"] == "UNKNOWN"
-                    and row["reason"] == "reconciled_stale_started"):
+            if (
+                row["status"] == "UNKNOWN"
+                and row["reason"] == "reconciled_stale_started"
+            ):
                 reconciled_unknown.append(record["slot_iso"])
         events = ()
         if row is None or record["index"] in scenario.faults:
@@ -654,8 +773,7 @@ def _aggregate(*, root, scenario, policy, ticks, extra_invocations,
     pending_rows = _market_pending_rows(root)
     pending_ids = {row.order_id for row in pending_rows}
     quarantined_detail_starts = sum(
-        1 for detail in recorders["details"]
-        if detail["order_id"] in pending_ids
+        1 for detail in recorders["details"] if detail["order_id"] in pending_ids
     )
 
     # per-tick provider-zero and admission proofs
@@ -696,22 +814,23 @@ def _aggregate(*, root, scenario, policy, ticks, extra_invocations,
     outcome_by_index = {record["index"]: record["outcome"] for record in ticks}
     for market_value, config in sorted(scenario.calendar_failures.items()):
         attempt_indices = [
-            fetch["slot_index"] for fetch in current_fetches[market_value]
+            fetch["slot_index"]
+            for fetch in current_fetches[market_value]
             if fetch["local_date"] == config["local_date"]
         ]
         ladder_attempts[market_value] = attempt_indices
         if not attempt_indices:
             continue
         for index in range(min(attempt_indices), max(attempt_indices)):
-            if (index not in attempt_indices
-                    and outcome_by_index.get(index) == "FAILED"):
+            if index not in attempt_indices and outcome_by_index.get(index) == "FAILED":
                 backoff_blocked.append(index)
 
     # a crashed slot's rows must settle via the next invocation's reconcile
     no_started_left = True
     for record in crash_slots:
         final = _kernel_wire(
-            root, scenario.policy_version,
+            root,
+            scenario.policy_version,
             datetime.fromisoformat(record["slot_iso"].replace("Z", "+00:00")),
         )
         if final["state_counts"].get("STARTED", 0):
@@ -722,8 +841,7 @@ def _aggregate(*, root, scenario, policy, ticks, extra_invocations,
     snapshot_markets = _canonical_snapshot_markets(root, symbol_markets)
     open_ticks = [rec for rec in ticks if rec.get("open_markets")]
     canonical_all_markets = (
-        snapshot_markets >= set(symbol_markets.values())
-        if open_ticks else True
+        snapshot_markets >= set(symbol_markets.values()) if open_ticks else True
     )
 
     report = {
@@ -735,8 +853,7 @@ def _aggregate(*, root, scenario, policy, ticks, extra_invocations,
         "invoked": len(ticks) + len(extra_invocations),
         "started_slot_utc": _slot_iso(scenario.start_slot_utc),
         "ended_slot_utc": _slot_iso(
-            scenario.start_slot_utc
-            + timedelta(seconds=scenario.duration_seconds)
+            scenario.start_slot_utc + timedelta(seconds=scenario.duration_seconds)
         ),
         "runtime_seconds": round(runtime_seconds, 3),
         "outcomes": outcomes,
@@ -762,7 +879,8 @@ def _aggregate(*, root, scenario, policy, ticks, extra_invocations,
             "cached_closed_tick_token_starts_zero": cached_closed_zero_wire,
             "duplicate_wire_delta_zero": (
                 all(delta == 0 for delta in duplicate_wire_deltas)
-                if duplicate_wire_deltas else True
+                if duplicate_wire_deltas
+                else True
             ),
             "unknown_trades_quarantined": len(pending_rows),
             # Legacy report key retained as a pinned serialized shape. Its
@@ -799,8 +917,7 @@ def _evaluate_invariants(report: Mapping, scenario) -> list:
     )
     check(
         "no_replay_catch_up",
-        report["invoked"]
-        == report["planned_ticks"] + len(report["extra_invocations"]),
+        report["invoked"] == report["planned_ticks"] + len(report["extra_invocations"]),
         f"invoked={report['invoked']}",
     )
     check(
@@ -826,9 +943,12 @@ def _evaluate_invariants(report: Mapping, scenario) -> list:
         f"current_date_fetch_counts={sorted(fetch_counts.items())}",
     )
     for name in (
-        "closed_downstream_starts_zero", "quotes_open_market_only",
-        "holdings_single_scan_per_tick", "canonical_snapshot_all_markets",
-        "group_limits_respected", "duplicate_wire_delta_zero",
+        "closed_downstream_starts_zero",
+        "quotes_open_market_only",
+        "holdings_single_scan_per_tick",
+        "canonical_snapshot_all_markets",
+        "group_limits_respected",
+        "duplicate_wire_delta_zero",
         "no_started_wire_rows_at_end",
     ):
         check(name, proofs[name] is True, f"{name}={proofs[name]}")
@@ -864,13 +984,13 @@ def _evaluate_invariants(report: Mapping, scenario) -> list:
     ladder_window = set()
     for market_value, config in sorted(scenario.calendar_failures.items()):
         attempts = proofs["calendar_ladder_attempts"].get(market_value, [])
-        ladder_ok = (
-            len(attempts) == config["fail_attempts"] + 1
-            and attempts == sorted(set(attempts))
+        ladder_ok = len(attempts) == config["fail_attempts"] + 1 and attempts == sorted(
+            set(attempts)
         )
         for ordinal in range(1, len(attempts)):
             delay_slots = (
-                _policy_values.CALENDAR_RETRY_DELAY_MINUTES[ordinal - 1] * 60
+                _policy_values.CALENDAR_RETRY_DELAY_MINUTES[ordinal - 1]
+                * 60
                 // scenario.cadence_seconds
             )
             gap = attempts[ordinal] - attempts[ordinal - 1]
@@ -884,9 +1004,11 @@ def _evaluate_invariants(report: Mapping, scenario) -> list:
         if attempts:
             ladder_window.update(range(attempts[0], attempts[-1]))
     if scenario.calendar_failures or any(
-            token == "corrupt_cache" for token in scenario.faults.values()):
+        token == "corrupt_cache" for token in scenario.faults.values()
+    ):
         corrupt_slots = {
-            index for index, token in scenario.faults.items()
+            index
+            for index, token in scenario.faults.items()
             if token == "corrupt_cache"
         }
         failed_slots = slot_index_of.get("FAILED", set())
@@ -952,9 +1074,7 @@ def _ensure_safe_report_path(path: Path) -> Path:
     if path.exists():
         status = os.lstat(path)
         if status.st_nlink != 1:
-            raise ReplayReportPathError(
-                "replay report path may not be hardlinked"
-            )
+            raise ReplayReportPathError("replay report path may not be hardlinked")
     return path
 
 
@@ -1009,21 +1129,27 @@ def main(argv: list[str] | None = None) -> int:
     scenario = builder()
     try:
         report = run_virtual_replay(
-            Path(args.root), scenario,
+            Path(args.root),
+            scenario,
             progress=lambda line: print(line, file=sys.stderr),
         )
     except ProductionCadenceRefusal as error:
         return refuse(str(error).replace(" ", "_"))
     write_replay_report(report, report_path)
     failed = sum(1 for entry in report["assertions"] if not entry["passed"])
-    print(json.dumps({
-        "scenario": report["scenario"],
-        "planned_ticks": report["planned_ticks"],
-        "invoked": report["invoked"],
-        "outcomes": report["outcomes"],
-        "assertions_failed": failed,
-        "report_path": str(report_path),
-    }, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                "scenario": report["scenario"],
+                "planned_ticks": report["planned_ticks"],
+                "invoked": report["invoked"],
+                "outcomes": report["outcomes"],
+                "assertions_failed": failed,
+                "report_path": str(report_path),
+            },
+            sort_keys=True,
+        )
+    )
     return 0 if failed == 0 else 2
 
 

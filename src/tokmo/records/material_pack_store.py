@@ -1,20 +1,18 @@
 """Write-once MaterialPack publication and bounded retention."""
 
-from datetime import datetime
 import hashlib
 import os
-from pathlib import Path
 import re
 import stat
+from datetime import datetime
+from pathlib import Path
 
 from tokmo.records.durability import fsync_directory
 from tokmo.records.ops_paths import confine_to_parent
 from tokmo.values.material_pack import (
-    MATERIAL_PACK_SCHEMA_VERSION,
     PACK_MAX_BYTES,
     JobKind,
     MaterialPackV1,
-    build_material_pack_v1,
     canonical_decode,
     canonical_pack_file_bytes,
 )
@@ -51,10 +49,21 @@ def _parse_aware(value):
 def _pack_from_raw(raw: bytes) -> MaterialPackV1:
     value = canonical_decode(raw, max_bytes=PACK_MAX_BYTES)
     keys = {
-        "schema_version", "job", "tick_id", "market_partition", "payload",
-        "captured_at", "source_timestamps", "parser_version", "content_hash",
+        "schema_version",
+        "job",
+        "tick_id",
+        "market_partition",
+        "payload",
+        "captured_at",
+        "source_timestamps",
+        "parser_version",
+        "content_hash",
     }
-    if type(value) is not dict or not keys <= set(value) or not set(value) <= keys | {"mask_digest"}:
+    if (
+        type(value) is not dict
+        or not keys <= set(value)
+        or not set(value) <= keys | {"mask_digest"}
+    ):
         raise ValueError("material pack exact keys required")
     if type(value["market_partition"]) is not list:
         raise ValueError("market_partition must be a list")
@@ -122,7 +131,10 @@ class MaterialPackWriter:
         if not _regular(target):
             raise PackCorruptError("existing pack is not regular")
         existing = target.read_bytes()
-        if hashlib.sha256(existing).digest() == hashlib.sha256(data).digest() and existing == data:
+        if (
+            hashlib.sha256(existing).digest() == hashlib.sha256(data).digest()
+            and existing == data
+        ):
             return target
         raise PackIdentityConflictError("tick_id already has different final bytes")
 
@@ -137,7 +149,9 @@ class MaterialPackWriter:
             if hashlib.sha256(raw).hexdigest() != expected_sha256:
                 raise PackHashMismatchError("pack file hash mismatch")
             pack = _pack_from_raw(raw)
-            expected_path = (self._directory(pack.job) / f"{pack.tick_id}.json").resolve()
+            expected_path = (
+                self._directory(pack.job) / f"{pack.tick_id}.json"
+            ).resolve()
             if confined != expected_path:
                 raise PackCorruptError("pack path does not match typed identity")
             return pack
@@ -164,8 +178,9 @@ class MaterialPackWriter:
             result.append((int(match.group(1)), path, hashlib.sha256(raw).hexdigest()))
         return sorted(result, key=lambda item: item[0])
 
-    def reap_orphans(self, job: JobKind, keep_tick_ids: frozenset[int],
-                     external_refs: frozenset[int]) -> int:
+    def reap_orphans(
+        self, job: JobKind, keep_tick_ids: frozenset[int], external_refs: frozenset[int]
+    ) -> int:
         keep = keep_tick_ids | external_refs
         removed = 0
         for tick_id, path, _digest in self.list_packs(job):

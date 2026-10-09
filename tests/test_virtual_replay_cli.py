@@ -8,9 +8,9 @@ violation). No secret and no live transport is reachable from this seam.
 """
 
 import json
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
 
@@ -18,17 +18,28 @@ ROOT = Path(__file__).parents[1]
 def run_cli(args, home):
     return subprocess.run(
         [sys.executable, "-m", "tokmo.programs.virtual_replay", *args],
-        capture_output=True, text=True, cwd=ROOT,
-        env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(ROOT / "src"),
-             "HOME": str(home)},
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        env={
+            "PATH": "/usr/bin:/bin",
+            "PYTHONPATH": str(ROOT / "src"),
+            "HOME": str(home),
+        },
     )
 
 
 def test_smoke_replay_cli_writes_nonempty_report_and_exits_zero(tmp_path):
     report_path = tmp_path / "out" / "replay-report.json"
     completed = run_cli(
-        ["--scenario", "smoke-12", "--root", str(tmp_path / "shadow"),
-         "--report", str(report_path)],
+        [
+            "--scenario",
+            "smoke-12",
+            "--root",
+            str(tmp_path / "shadow"),
+            "--report",
+            str(report_path),
+        ],
         home=tmp_path,
     )
     assert completed.returncode == 0, completed.stderr
@@ -50,8 +61,14 @@ def test_smoke_replay_cli_writes_nonempty_report_and_exits_zero(tmp_path):
 
 def test_unknown_scenario_is_a_configuration_refusal(tmp_path):
     completed = run_cli(
-        ["--scenario", "nope", "--root", str(tmp_path / "shadow"),
-         "--report", str(tmp_path / "r.json")],
+        [
+            "--scenario",
+            "nope",
+            "--root",
+            str(tmp_path / "shadow"),
+            "--report",
+            str(tmp_path / "r.json"),
+        ],
         home=tmp_path,
     )
     assert completed.returncode == 1
@@ -61,8 +78,14 @@ def test_unknown_scenario_is_a_configuration_refusal(tmp_path):
 
 def test_production_canonical_report_path_is_refused(tmp_path):
     completed = run_cli(
-        ["--scenario", "smoke-12", "--root", str(tmp_path / "shadow"),
-         "--report", str(tmp_path / ".local/share/tokmo-v3/r.json")],
+        [
+            "--scenario",
+            "smoke-12",
+            "--root",
+            str(tmp_path / "shadow"),
+            "--report",
+            str(tmp_path / ".local/share/tokmo-v3/r.json"),
+        ],
         home=tmp_path,
     )
     assert completed.returncode == 1
@@ -71,12 +94,18 @@ def test_production_canonical_report_path_is_refused(tmp_path):
 
 def test_production_canonical_root_is_refused(tmp_path):
     completed = run_cli(
-        ["--scenario", "smoke-12",
-         "--root", str(tmp_path / ".local/share/tokmo-v3"),
-         "--report", str(tmp_path / "r.json")],
+        [
+            "--scenario",
+            "smoke-12",
+            "--root",
+            str(tmp_path / ".local/share/tokmo-v3"),
+            "--report",
+            str(tmp_path / "r.json"),
+        ],
         home=tmp_path,
     )
     assert completed.returncode == 1
+
 
 def test_missing_required_arguments_refuse(tmp_path):
     completed = run_cli(["--scenario", "smoke-12"], home=tmp_path)

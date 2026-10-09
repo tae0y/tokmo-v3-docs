@@ -7,7 +7,6 @@ deterministic brand-anchored span extraction with reference-side weighted
 coverage ≥ 0.8, numeric preservation, signal floor, and unique-candidate
 fail-closed adjudication. No Levenshtein, no raw substrings.
 """
-import pytest
 
 from tokmo.values.news_instrument_match import (
     COMPANY_LEGAL_SUFFIXES_V1,
@@ -29,12 +28,11 @@ OFFICIAL = "SOL AI반도체 TOP2"
 
 def test_company_normalization_strips_closed_legal_suffixes():
     assert "주식회사" in COMPANY_LEGAL_SUFFIXES_V1
-    assert normalize_company_name("주식회사 한화에어로스페이스") \
-        == normalize_company_name("한화에어로스페이스")
-    assert normalize_company_name("삼성전자(주)") \
-        == normalize_company_name("삼성전자")
-    assert normalize_company_name("㈜  카카오") \
-        == normalize_company_name("카카오")
+    assert normalize_company_name(
+        "주식회사 한화에어로스페이스"
+    ) == normalize_company_name("한화에어로스페이스")
+    assert normalize_company_name("삼성전자(주)") == normalize_company_name("삼성전자")
+    assert normalize_company_name("㈜  카카오") == normalize_company_name("카카오")
 
 
 def test_company_exact_match_is_whole_name_only():
@@ -113,8 +111,7 @@ def test_span_extraction_is_brand_anchored_and_bounded():
     assert not match_etf_reference("반도체 2 급등", OFFICIAL).matched
     # Tokens outside the anchored span never enter the denominator: the
     # trailing verb ends the span, so the reference still matches.
-    assert match_etf_reference("급등장서 솔 반도체 2 순매수했다",
-                               OFFICIAL).matched
+    assert match_etf_reference("급등장서 솔 반도체 2 순매수했다", OFFICIAL).matched
     assert ETF_REFERENCE_MAX_TOKENS == 6
     assert "top" in ETF_GENERIC_TOKENS_V1
 
@@ -123,12 +120,16 @@ def test_span_extraction_is_brand_anchored_and_bounded():
 
 
 def test_unique_candidate_admits_and_ambiguity_fails_closed():
-    universe = {"ent:kr:aaaaaa": "SOL AI반도체 TOP2",
-                "ent:kr:bbbbbb": "SOL 배당 성장 50"}
+    universe = {
+        "ent:kr:aaaaaa": "SOL AI반도체 TOP2",
+        "ent:kr:bbbbbb": "SOL 배당 성장 50",
+    }
     key, reason = resolve_etf_reference("솔 반도체 2 순매수", universe)
     assert key == "ent:kr:aaaaaa" and reason == "MATCHED"
-    ambiguous = {"ent:kr:aaaaaa": "SOL AI반도체 TOP2",
-                 "ent:kr:cccccc": "SOL 반도체 소부장 2"}
+    ambiguous = {
+        "ent:kr:aaaaaa": "SOL AI반도체 TOP2",
+        "ent:kr:cccccc": "SOL 반도체 소부장 2",
+    }
     key, reason = resolve_etf_reference("솔 반도체 2", ambiguous)
     assert key is None and reason == "ETF_MATCH_AMBIGUOUS"
     key, reason = resolve_etf_reference("코스피 마감 시황", universe)

@@ -37,8 +37,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import dataclass
 
 from tokmo.values.pension_holdings import PensionHoldingsRevisionV1
 
@@ -99,8 +98,12 @@ class BatchAdmissionReceiptV1:
     reason: str = ""
 
     def __post_init__(self):
-        if self.outcome not in (OUTCOME_APPENDED, OUTCOME_DUPLICATE_NOOP,
-                                OUTCOME_CONFLICT_REVIEW, OUTCOME_BLOCKED):
+        if self.outcome not in (
+            OUTCOME_APPENDED,
+            OUTCOME_DUPLICATE_NOOP,
+            OUTCOME_CONFLICT_REVIEW,
+            OUTCOME_BLOCKED,
+        ):
             raise ValueError("invalid outcome")
         if self.batch_class not in BATCH_CLASSES:
             raise ValueError("invalid batch_class")
@@ -183,19 +186,23 @@ def replace_current_holdings(
         outcome = snapshot_port.capture(current_revision)
         if not outcome.ok:
             return ReplaceCurrentReceiptV1(
-                OUTCOME_BLOCKED, reason=outcome.reason or BLOCKED_SNAPSHOT_FAILED)
+                OUTCOME_BLOCKED, reason=outcome.reason or BLOCKED_SNAPSHOT_FAILED
+            )
         current_snapshot_id = outcome.snapshot_id
 
     steps.append("capture_candidate")
     candidate_outcome = snapshot_port.capture(candidate_revision)
     if not candidate_outcome.ok:
         return ReplaceCurrentReceiptV1(
-            OUTCOME_BLOCKED, current_snapshot_id=current_snapshot_id,
-            reason=candidate_outcome.reason or BLOCKED_SNAPSHOT_FAILED)
+            OUTCOME_BLOCKED,
+            current_snapshot_id=current_snapshot_id,
+            reason=candidate_outcome.reason or BLOCKED_SNAPSHOT_FAILED,
+        )
 
     steps.append("replace_current")
     registry.replace_current_from_snapshot(
-        candidate_revision, approval_reason=approval_reason)
+        candidate_revision, approval_reason=approval_reason
+    )
     return ReplaceCurrentReceiptV1(
         OUTCOME_REPLACED,
         current_snapshot_id=current_snapshot_id,
@@ -216,7 +223,8 @@ def rollback_current_from_snapshot(
     resurrects a historical registry payload, because generation 2 keeps none.
     """
     registry.replace_current_from_snapshot(
-        reconstructed_revision, approval_reason=approval_reason)
+        reconstructed_revision, approval_reason=approval_reason
+    )
     return ReplaceCurrentReceiptV1(
-        OUTCOME_REPLACED,
-        active_revision_id=reconstructed_revision.revision_id)
+        OUTCOME_REPLACED, active_revision_id=reconstructed_revision.revision_id
+    )

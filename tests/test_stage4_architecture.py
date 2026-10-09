@@ -15,10 +15,10 @@ production tick function with claim-validated fixture deps.
 
 import ast
 import inspect
-from pathlib import Path
 import re
 import subprocess
 import sys
+from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
 SRC = ROOT / "src" / "tokmo"
@@ -31,22 +31,28 @@ STAGE4_MODULES = (
 )
 
 # Never reachable from the Stage 4 graph, directly or transitively.
-FORBIDDEN_GRAPH_MODULES = frozenset({
-    "tokmo.composition",
-    "tokmo.runtime.wallclock",
-    "tokmo.runtime.config",
-    "tokmo.facts.eia_live", "tokmo.facts.sec_live", "tokmo.facts.opendart_live",
-    "tokmo.facts.krx_live",
-    "tokmo.facts.toss_auth_live", "tokmo.facts.toss_live",
-    "tokmo.facts.toss_prices_live", "tokmo.facts.toss_reads_live",
-    "tokmo.programs.legacy_g2",
-    "tokmo.programs.g2a_shadow_runner", "tokmo.programs.g2b_canary_runner",
-    "tokmo.programs.g2c_analysis_shadow",
-    "tokmo.programs.g2d_full_session_runner",
-    "tokmo.programs.integrated_fake_cadence",
-    "tokmo.programs.analysis_pipeline",
-})
-
+FORBIDDEN_GRAPH_MODULES = frozenset(
+    {
+        "tokmo.composition",
+        "tokmo.runtime.wallclock",
+        "tokmo.runtime.config",
+        "tokmo.facts.eia_live",
+        "tokmo.facts.sec_live",
+        "tokmo.facts.opendart_live",
+        "tokmo.facts.krx_live",
+        "tokmo.facts.toss_auth_live",
+        "tokmo.facts.toss_live",
+        "tokmo.facts.toss_prices_live",
+        "tokmo.facts.toss_reads_live",
+        "tokmo.programs.legacy_g2",
+        "tokmo.programs.g2a_shadow_runner",
+        "tokmo.programs.g2b_canary_runner",
+        "tokmo.programs.g2c_analysis_shadow",
+        "tokmo.programs.g2d_full_session_runner",
+        "tokmo.programs.integrated_fake_cadence",
+        "tokmo.programs.analysis_pipeline",
+    }
+)
 
 
 def _module_name(relative: str) -> str:
@@ -61,8 +67,7 @@ def _top_level_tokmo_imports(path: Path) -> set:
                 names.add(node.module)
         elif isinstance(node, ast.Import):
             names.update(
-                alias.name for alias in node.names
-                if alias.name.startswith("tokmo")
+                alias.name for alias in node.names if alias.name.startswith("tokmo")
             )
     return names
 
@@ -75,8 +80,7 @@ def _all_tokmo_imports(path: Path) -> set:
                 names.add(node.module)
         elif isinstance(node, ast.Import):
             names.update(
-                alias.name for alias in node.names
-                if alias.name.startswith("tokmo")
+                alias.name for alias in node.names if alias.name.startswith("tokmo")
             )
     return names
 
@@ -127,14 +131,21 @@ def test_the_ambient_edge_tool_owns_the_production_seam():
 def test_stage4_modules_carry_no_order_write_or_model_vocabulary():
     # the lifecycle sender is the single POSTing module and is checked
     # separately below
-    for relative in ("programs/virtual_replay.py",
-                     "programs/shadow_48h_runner.py",
-                     "records/prelaunch_markers.py"):
+    for relative in (
+        "programs/virtual_replay.py",
+        "programs/shadow_48h_runner.py",
+        "records/prelaunch_markers.py",
+    ):
         text = (SRC / relative).read_text()
         for method in ("POST", "PUT", "PATCH", "DELETE"):
             assert not re.search(rf"\b{method}\b", text), (relative, method)
-        for token in ("api.telegram.org", "sendMessage", "glm", "GLM",
-                      "run_analysis_pipeline"):
+        for token in (
+            "api.telegram.org",
+            "sendMessage",
+            "glm",
+            "GLM",
+            "run_analysis_pipeline",
+        ):
             assert token not in text, (relative, token)
 
 
@@ -167,13 +178,13 @@ def test_replay_drives_the_exact_production_tick_with_claimed_fixtures():
     assert "tokmo.programs.cadence_fixture_deps" in imports
     tree = ast.parse(path.read_text())
     called = {
-        node.func.id for node in ast.walk(tree)
+        node.func.id
+        for node in ast.walk(tree)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
     }
     assert "run_production_cadence_once" in called
     # no duplicate orchestrator: the sealed runners stay unreachable
-    for name in ("run_d_full_session", "run_integrated_fake_day",
-                 "run_b_canary"):
+    for name in ("run_d_full_session", "run_integrated_fake_day", "run_b_canary"):
         assert name not in path.read_text()
 
 
@@ -181,29 +192,48 @@ def test_runner_records_only_allowlisted_tick_fields():
     from tokmo.programs.shadow_48h_runner import _TICK_RECORD_ALLOWLIST
 
     assert set(_TICK_RECORD_ALLOWLIST) == {
-        "outcome", "reason", "exit_code", "lag_seconds", "mask_digest",
+        "outcome",
+        "reason",
+        "exit_code",
+        "lag_seconds",
+        "mask_digest",
         "open_markets",
     }
 
 
 def test_marker_tool_creates_verifiable_markers(tmp_path):
     completed = subprocess.run(
-        [sys.executable, str(ROOT / "tools" / "make_stage4_pass_markers.py"),
-         "--kind", "full-suite",
-         "--commit", "55b65f63359f0d3a97920ea794b9d5b60bc8003e",
-         "--command", ".venv/bin/python -m pytest -q",
-         "--test-count", "2466",
-         "--provenance", "hermes/full-suite",
-         "--out", str(tmp_path / "full_suite_pass.json")],
-        capture_output=True, text=True, cwd=ROOT,
-        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path),
-             "PYTHONPATH": str(ROOT / "src")},
+        [
+            sys.executable,
+            str(ROOT / "tools" / "make_stage4_pass_markers.py"),
+            "--kind",
+            "full-suite",
+            "--commit",
+            "55b65f63359f0d3a97920ea794b9d5b60bc8003e",
+            "--command",
+            ".venv/bin/python -m pytest -q",
+            "--test-count",
+            "2466",
+            "--provenance",
+            "hermes/full-suite",
+            "--out",
+            str(tmp_path / "full_suite_pass.json"),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        env={
+            "PATH": "/usr/bin:/bin",
+            "HOME": str(tmp_path),
+            "PYTHONPATH": str(ROOT / "src"),
+        },
     )
     assert completed.returncode == 0, completed.stderr
     from tokmo.records.prelaunch_markers import verify_pass_marker
 
     payload = verify_pass_marker(
-        tmp_path / "full_suite_pass.json", kind="full-suite",
+        tmp_path / "full_suite_pass.json",
+        kind="full-suite",
         expected_commit="55b65f63359f0d3a97920ea794b9d5b60bc8003e",
     )
     assert payload["test_count"] == 2466
@@ -212,32 +242,50 @@ def test_marker_tool_creates_verifiable_markers(tmp_path):
 
 def test_marker_tool_signs_with_env_key(tmp_path):
     completed = subprocess.run(
-        [sys.executable, str(ROOT / "tools" / "make_stage4_pass_markers.py"),
-         "--kind", "pilot-acceptance",
-         "--commit", "55b65f63359f0d3a97920ea794b9d5b60bc8003e",
-         "--command", "direct glm reclosure",
-         "--test-count", "1",
-         "--provenance", "direct-zai/glm-5.2",
-         "--out", str(tmp_path / "review.json"),
-         "--hmac-key-env", "TOKMO_MARKER_KEY"],
-        capture_output=True, text=True, cwd=ROOT,
-        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path),
-             "PYTHONPATH": str(ROOT / "src"),
-             "TOKMO_MARKER_KEY": "stage4-signing-key"},
+        [
+            sys.executable,
+            str(ROOT / "tools" / "make_stage4_pass_markers.py"),
+            "--kind",
+            "pilot-acceptance",
+            "--commit",
+            "55b65f63359f0d3a97920ea794b9d5b60bc8003e",
+            "--command",
+            "direct glm reclosure",
+            "--test-count",
+            "1",
+            "--provenance",
+            "direct-zai/glm-5.2",
+            "--out",
+            str(tmp_path / "review.json"),
+            "--hmac-key-env",
+            "TOKMO_MARKER_KEY",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        env={
+            "PATH": "/usr/bin:/bin",
+            "HOME": str(tmp_path),
+            "PYTHONPATH": str(ROOT / "src"),
+            "TOKMO_MARKER_KEY": "stage4-signing-key",
+        },
     )
     assert completed.returncode == 0, completed.stderr
-    from tokmo.records.prelaunch_markers import MarkerError, verify_pass_marker
     import pytest
 
+    from tokmo.records.prelaunch_markers import MarkerError, verify_pass_marker
+
     payload = verify_pass_marker(
-        tmp_path / "review.json", kind="pilot-acceptance",
+        tmp_path / "review.json",
+        kind="pilot-acceptance",
         expected_commit="55b65f63359f0d3a97920ea794b9d5b60bc8003e",
         hmac_key=b"stage4-signing-key",
     )
     assert payload["provenance"] == "direct-zai/glm-5.2"
     with pytest.raises(MarkerError):
         verify_pass_marker(
-            tmp_path / "review.json", kind="pilot-acceptance",
+            tmp_path / "review.json",
+            kind="pilot-acceptance",
             expected_commit="55b65f63359f0d3a97920ea794b9d5b60bc8003e",
             hmac_key=b"wrong",
         )
@@ -248,16 +296,32 @@ def test_marker_tool_signs_with_env_key(tmp_path):
 
 def test_marker_tool_refuses_missing_key_env(tmp_path):
     completed = subprocess.run(
-        [sys.executable, str(ROOT / "tools" / "make_stage4_pass_markers.py"),
-         "--kind", "full-suite",
-         "--commit", "55b65f63359f0d3a97920ea794b9d5b60bc8003e",
-         "--command", "pytest -q", "--test-count", "1",
-         "--provenance", "hermes",
-         "--out", str(tmp_path / "m.json"),
-         "--hmac-key-env", "TOKMO_MARKER_KEY"],
-        capture_output=True, text=True, cwd=ROOT,
-        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path),
-             "PYTHONPATH": str(ROOT / "src")},
+        [
+            sys.executable,
+            str(ROOT / "tools" / "make_stage4_pass_markers.py"),
+            "--kind",
+            "full-suite",
+            "--commit",
+            "55b65f63359f0d3a97920ea794b9d5b60bc8003e",
+            "--command",
+            "pytest -q",
+            "--test-count",
+            "1",
+            "--provenance",
+            "hermes",
+            "--out",
+            str(tmp_path / "m.json"),
+            "--hmac-key-env",
+            "TOKMO_MARKER_KEY",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        env={
+            "PATH": "/usr/bin:/bin",
+            "HOME": str(tmp_path),
+            "PYTHONPATH": str(ROOT / "src"),
+        },
     )
     assert completed.returncode == 1
     assert not (tmp_path / "m.json").exists()

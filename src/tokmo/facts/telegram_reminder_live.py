@@ -9,6 +9,7 @@ This module is reachable ONLY from the production pension reminder worker
 behind production mode plus the separate reminder activation flag.
 It is NEVER used by shadow lifecycle, replay, or fixtures.
 """
+
 from __future__ import annotations
 
 import json
@@ -18,7 +19,10 @@ import urllib.request
 
 
 def send_pension_reminder(
-    *, body_text: str, bot_token: str, chat_id: str,
+    *,
+    body_text: str,
+    bot_token: str,
+    chat_id: str,
 ) -> str:
     """Send one pension-reminder message via Telegram Bot API.
 
@@ -30,10 +34,12 @@ def send_pension_reminder(
     if not body_text or not bot_token or not chat_id:
         raise ValueError("missing required parameters")
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    data = urllib.parse.urlencode({
-        "chat_id": chat_id,
-        "text": body_text,
-    }).encode("utf-8")
+    data = urllib.parse.urlencode(
+        {
+            "chat_id": chat_id,
+            "text": body_text,
+        }
+    ).encode("utf-8")
     context = ssl.create_default_context()
     req = urllib.request.Request(url, data=data, method="POST")
     req.add_header("Content-Type", "application/x-www-form-urlencoded")

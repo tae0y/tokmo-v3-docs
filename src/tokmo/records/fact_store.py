@@ -13,62 +13,165 @@ from pathlib import Path
 
 from tokmo.records.durability import fsync_directory
 from tokmo.values import (
-    KrxDailyTradeFact, OpenDartDisclosureFact, SaveResult, SaveStatus, SecFilingFact,
-    TossAccountHoldingsFact, WtiFact,
-    KRX_SOURCE, OPENDART_SOURCE, SEC_SOURCE, TOSS_SOURCE, WTI_SERIES, WTI_SOURCE, WTI_UNITS,
+    KRX_SOURCE,
+    OPENDART_SOURCE,
+    SEC_SOURCE,
+    TOSS_SOURCE,
+    WTI_SERIES,
+    WTI_SOURCE,
+    WTI_UNITS,
+    KrxDailyTradeFact,
+    OpenDartDisclosureFact,
+    SaveResult,
+    SaveStatus,
+    SecFilingFact,
+    TossAccountHoldingsFact,
+    WtiFact,
     canonical_decimal,
 )
 
 Clock = Callable[[], datetime]
 IdFactory = Callable[[], str]
 
-RECORD_FIELDS = frozenset({
-    "record_id", "source", "series", "period",
-    "value", "units", "observed_at", "stored_at", "policy_version",
-})
+RECORD_FIELDS = frozenset(
+    {
+        "record_id",
+        "source",
+        "series",
+        "period",
+        "value",
+        "units",
+        "observed_at",
+        "stored_at",
+        "policy_version",
+    }
+)
 # SEC Tracer 1a record schema; report_date and is_xbrl are nullable.
-SEC_RECORD_FIELDS = frozenset({
-    "record_id", "source", "ticker", "cik", "company_name",
-    "accession_number", "form", "filing_date", "report_date",
-    "primary_document", "is_xbrl", "observed_at", "stored_at", "policy_version",
-})
+SEC_RECORD_FIELDS = frozenset(
+    {
+        "record_id",
+        "source",
+        "ticker",
+        "cik",
+        "company_name",
+        "accession_number",
+        "form",
+        "filing_date",
+        "report_date",
+        "primary_document",
+        "is_xbrl",
+        "observed_at",
+        "stored_at",
+        "policy_version",
+    }
+)
 _SEC_STRING_FIELDS = (
-    "record_id", "source", "ticker", "cik", "company_name",
-    "accession_number", "form", "filing_date", "primary_document",
-    "observed_at", "stored_at", "policy_version",
+    "record_id",
+    "source",
+    "ticker",
+    "cik",
+    "company_name",
+    "accession_number",
+    "form",
+    "filing_date",
+    "primary_document",
+    "observed_at",
+    "stored_at",
+    "policy_version",
 )
 # OpenDART Tracer 1a record schema; remark is nullable.
-OPENDART_RECORD_FIELDS = frozenset({
-    "record_id", "source", "stock_code", "corp_code", "corp_name",
-    "corp_cls", "report_name", "receipt_number", "filer_name",
-    "receipt_date", "remark", "observed_at", "stored_at", "policy_version",
-})
-_OPENDART_STRING_FIELDS = (
-    "record_id", "source", "stock_code", "corp_code", "corp_name",
-    "corp_cls", "report_name", "receipt_number", "filer_name",
-    "receipt_date", "observed_at", "stored_at", "policy_version",
+OPENDART_RECORD_FIELDS = frozenset(
+    {
+        "record_id",
+        "source",
+        "stock_code",
+        "corp_code",
+        "corp_name",
+        "corp_cls",
+        "report_name",
+        "receipt_number",
+        "filer_name",
+        "receipt_date",
+        "remark",
+        "observed_at",
+        "stored_at",
+        "policy_version",
+    }
 )
-KRX_RECORD_FIELDS = frozenset({
-    "record_id", "source", "base_date", "issue_code", "issue_name",
-    "market_name", "sector_type_name", "close_price", "change_from_previous",
-    "fluctuation_rate", "open_price", "high_price", "low_price",
-    "accumulated_volume", "accumulated_value", "market_cap", "listed_shares",
-    "observed_at", "stored_at", "policy_version",
-})
+_OPENDART_STRING_FIELDS = (
+    "record_id",
+    "source",
+    "stock_code",
+    "corp_code",
+    "corp_name",
+    "corp_cls",
+    "report_name",
+    "receipt_number",
+    "filer_name",
+    "receipt_date",
+    "observed_at",
+    "stored_at",
+    "policy_version",
+)
+KRX_RECORD_FIELDS = frozenset(
+    {
+        "record_id",
+        "source",
+        "base_date",
+        "issue_code",
+        "issue_name",
+        "market_name",
+        "sector_type_name",
+        "close_price",
+        "change_from_previous",
+        "fluctuation_rate",
+        "open_price",
+        "high_price",
+        "low_price",
+        "accumulated_volume",
+        "accumulated_value",
+        "market_cap",
+        "listed_shares",
+        "observed_at",
+        "stored_at",
+        "policy_version",
+    }
+)
 
 # Toss account-current snapshot schema. Identity is the capture instant plus
 # the account's position in that capture; no account identifier is ever
 # stored, so the ordinal denotes a position and never a durable account key.
-TOSS_RECORD_FIELDS = frozenset({
-    "record_id", "source", "captured_at", "account_ordinal", "account_count",
-    "holdings", "stored_at", "policy_version",
-})
-TOSS_HOLDING_FIELDS = frozenset({
-    "symbol", "quantity", "avg_price", "avg_price_field", "currency",
-    "market_raw", "market_field", "name", "asset_type",
-})
+TOSS_RECORD_FIELDS = frozenset(
+    {
+        "record_id",
+        "source",
+        "captured_at",
+        "account_ordinal",
+        "account_count",
+        "holdings",
+        "stored_at",
+        "policy_version",
+    }
+)
+TOSS_HOLDING_FIELDS = frozenset(
+    {
+        "symbol",
+        "quantity",
+        "avg_price",
+        "avg_price_field",
+        "currency",
+        "market_raw",
+        "market_field",
+        "name",
+        "asset_type",
+    }
+)
 _TOSS_STRING_FIELDS = (
-    "record_id", "source", "captured_at", "stored_at", "policy_version",
+    "record_id",
+    "source",
+    "captured_at",
+    "stored_at",
+    "policy_version",
 )
 
 # WTI records hold strings only; SEC records may carry None (report_date)
@@ -77,7 +180,12 @@ _TOSS_STRING_FIELDS = (
 FactRecord = dict[str, str | bool | int | list | None]
 
 StorableFact = (
-    WtiFact | SecFilingFact | OpenDartDisclosureFact | KrxDailyTradeFact | TossAccountHoldingsFact)
+    WtiFact
+    | SecFilingFact
+    | OpenDartDisclosureFact
+    | KrxDailyTradeFact
+    | TossAccountHoldingsFact
+)
 
 MAX_SNAPSHOT_BYTES = 16 * 1024 * 1024
 
@@ -101,7 +209,9 @@ class FactStore:
             raise StoreCorruptError("store_corrupt")
         raw = self.path.read_bytes()
         payload = json.loads(raw)
-        if not isinstance(payload, dict) or not isinstance(payload.get("records"), list):
+        if not isinstance(payload, dict) or not isinstance(
+            payload.get("records"), list
+        ):
             raise StoreCorruptError("store_corrupt")
         for record in payload["records"]:
             if not isinstance(record, dict):
@@ -133,8 +243,12 @@ class FactStore:
         existing = self._find_same_identity(records, fact)
         if existing is not None:
             if _same_content(existing, fact):
-                return SaveResult(SaveStatus.DUPLICATE, existing["record_id"], "duplicate", now)
-            return SaveResult(SaveStatus.CONFLICT, existing["record_id"], "identity_conflict", now)
+                return SaveResult(
+                    SaveStatus.DUPLICATE, existing["record_id"], "duplicate", now
+                )
+            return SaveResult(
+                SaveStatus.CONFLICT, existing["record_id"], "identity_conflict", now
+            )
 
         record_id = self.id_factory()
         records.append(as_record(fact, record_id, now, policy_version))
@@ -163,20 +277,25 @@ class FactStore:
             records = self.records()
         except (ValueError, OSError):
             self._write_diagnostic(now)
-            return tuple(SaveResult(SaveStatus.FAILED, None, "store_corrupt", now)
-                         for _fact in facts)
+            return tuple(
+                SaveResult(SaveStatus.FAILED, None, "store_corrupt", now)
+                for _fact in facts
+            )
 
         if len({_identity_of(fact) for fact in facts}) != len(facts):
             return tuple(
                 SaveResult(SaveStatus.FAILED, None, "batch_identity_conflict", now)
-                for _fact in facts)
+                for _fact in facts
+            )
 
         decisions = [self._decide(records, fact, now) for fact in facts]
         if any(decision is not None for decision in decisions):
             return tuple(
-                decision if decision is not None
+                decision
+                if decision is not None
                 else SaveResult(SaveStatus.FAILED, None, "batch_not_applied", now)
-                for decision in decisions)
+                for decision in decisions
+            )
 
         appended = list(records)
         record_ids = []
@@ -187,29 +306,39 @@ class FactStore:
         try:
             self._replace_snapshot({"records": appended})
         except OSError:
-            return tuple(SaveResult(SaveStatus.FAILED, record_id, "store_write_failed", now)
-                         for record_id in record_ids)
-        return tuple(SaveResult(SaveStatus.SAVED, record_id, "saved", now)
-                     for record_id in record_ids)
+            return tuple(
+                SaveResult(SaveStatus.FAILED, record_id, "store_write_failed", now)
+                for record_id in record_ids
+            )
+        return tuple(
+            SaveResult(SaveStatus.SAVED, record_id, "saved", now)
+            for record_id in record_ids
+        )
 
-    def _decide(self, records: list[FactRecord], fact: StorableFact,
-                now: datetime) -> SaveResult | None:
+    def _decide(
+        self, records: list[FactRecord], fact: StorableFact, now: datetime
+    ) -> SaveResult | None:
         """``None`` means this fact is free to be appended."""
         existing = self._find_same_identity(records, fact)
         if existing is None:
             return None
         if _same_content(existing, fact):
-            return SaveResult(SaveStatus.DUPLICATE, existing["record_id"],
-                              "duplicate", now)
-        return SaveResult(SaveStatus.CONFLICT, existing["record_id"],
-                          "identity_conflict", now)
+            return SaveResult(
+                SaveStatus.DUPLICATE, existing["record_id"], "duplicate", now
+            )
+        return SaveResult(
+            SaveStatus.CONFLICT, existing["record_id"], "identity_conflict", now
+        )
 
-    def _find_same_identity(self, records: list[FactRecord],
-                            fact: StorableFact) -> FactRecord | None:
+    def _find_same_identity(
+        self, records: list[FactRecord], fact: StorableFact
+    ) -> FactRecord | None:
         keys, identity = _identity_of(fact)
         for record in records:
-            if (all(key in record for key in keys)
-                    and tuple(record[key] for key in keys) == identity):
+            if (
+                all(key in record for key in keys)
+                and tuple(record[key] for key in keys) == identity
+            ):
                 return record
         return None
 
@@ -236,7 +365,9 @@ class FactStore:
         try:
             fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             with os.fdopen(fd, "w") as handle:
-                json.dump({"reason": "store_corrupt", "detected_at": now.isoformat()}, handle)
+                json.dump(
+                    {"reason": "store_corrupt", "detected_at": now.isoformat()}, handle
+                )
                 handle.flush()
                 os.fsync(handle.fileno())
         except OSError:
@@ -250,7 +381,10 @@ def _validate_record_semantics(record: FactRecord) -> None:
     if not record["record_id"] or not record["policy_version"]:
         raise StoreCorruptError("store_corrupt")
     if (record["source"], record["series"], record["units"]) != (
-            WTI_SOURCE, WTI_SERIES, WTI_UNITS):
+        WTI_SOURCE,
+        WTI_SERIES,
+        WTI_UNITS,
+    ):
         raise StoreCorruptError("store_corrupt")
     try:
         date.fromisoformat(record["period"])
@@ -266,27 +400,38 @@ def _validate_record_semantics(record: FactRecord) -> None:
 def _identity_of(fact: StorableFact) -> tuple[tuple[str, ...], tuple]:
     """The stored key that decides DUPLICATE/CONFLICT for one fact."""
     if isinstance(fact, WtiFact):
-        return (("source", "series", "period"),
-                (fact.source, fact.series, fact.period.isoformat()))
+        return (
+            ("source", "series", "period"),
+            (fact.source, fact.series, fact.period.isoformat()),
+        )
     if isinstance(fact, SecFilingFact):
-        return (("source", "cik", "accession_number"),
-                (fact.source, fact.cik, fact.accession_number))
+        return (
+            ("source", "cik", "accession_number"),
+            (fact.source, fact.cik, fact.accession_number),
+        )
     if isinstance(fact, TossAccountHoldingsFact):
-        return (("source", "captured_at", "account_ordinal"),
-                (fact.source, fact.captured_at.isoformat(), fact.account_ordinal))
+        return (
+            ("source", "captured_at", "account_ordinal"),
+            (fact.source, fact.captured_at.isoformat(), fact.account_ordinal),
+        )
     if isinstance(fact, KrxDailyTradeFact):
-        return (("source", "issue_code", "base_date"),
-                (fact.source, fact.issue_code, fact.base_date.isoformat()))
-    return (("source", "corp_code", "receipt_number"),
-            (fact.source, fact.corp_code, fact.receipt_number))
+        return (
+            ("source", "issue_code", "base_date"),
+            (fact.source, fact.issue_code, fact.base_date.isoformat()),
+        )
+    return (
+        ("source", "corp_code", "receipt_number"),
+        (fact.source, fact.corp_code, fact.receipt_number),
+    )
 
 
 def _same_content(record: FactRecord, fact: StorableFact) -> bool:
     """Semantic content match: numerically equal value and identical units,
     or for filings/disclosures identical non-identity fields."""
     if isinstance(fact, TossAccountHoldingsFact):
-        return (record["account_count"] == fact.account_count
-                and record["holdings"] == _holding_records(fact))
+        return record["account_count"] == fact.account_count and record[
+            "holdings"
+        ] == _holding_records(fact)
     if isinstance(fact, OpenDartDisclosureFact):
         return (
             record["stock_code"] == fact.stock_code
@@ -298,12 +443,18 @@ def _same_content(record: FactRecord, fact: StorableFact) -> bool:
             and record["remark"] == fact.remark
         )
     if isinstance(fact, KrxDailyTradeFact):
-        expected = as_record(fact, record["record_id"],
-                             datetime.fromisoformat(record["stored_at"]),
-                             record["policy_version"])
+        expected = as_record(
+            fact,
+            record["record_id"],
+            datetime.fromisoformat(record["stored_at"]),
+            record["policy_version"],
+        )
         ignored = {"record_id", "observed_at", "stored_at", "policy_version"}
-        return all(record[name] == value for name, value in expected.items()
-                   if name not in ignored)
+        return all(
+            record[name] == value
+            for name, value in expected.items()
+            if name not in ignored
+        )
     if isinstance(fact, SecFilingFact):
         report_date = fact.report_date.isoformat() if fact.report_date else None
         return (
@@ -322,8 +473,9 @@ def _same_content(record: FactRecord, fact: StorableFact) -> bool:
     return stored_value == fact.value and record["units"] == fact.units
 
 
-def as_record(fact: StorableFact, record_id: str,
-              now: datetime, policy_version: str) -> FactRecord:
+def as_record(
+    fact: StorableFact, record_id: str, now: datetime, policy_version: str
+) -> FactRecord:
     if isinstance(fact, TossAccountHoldingsFact):
         return {
             "record_id": record_id,
@@ -344,9 +496,12 @@ def as_record(fact: StorableFact, record_id: str,
     }
     if isinstance(fact, KrxDailyTradeFact):
         return {
-            **common, "base_date": fact.base_date.isoformat(),
-            "issue_code": fact.issue_code, "issue_name": fact.issue_name,
-            "market_name": fact.market_name, "sector_type_name": fact.sector_type_name,
+            **common,
+            "base_date": fact.base_date.isoformat(),
+            "issue_code": fact.issue_code,
+            "issue_name": fact.issue_name,
+            "market_name": fact.market_name,
+            "sector_type_name": fact.sector_type_name,
             "close_price": canonical_decimal(fact.close_price),
             "change_from_previous": canonical_decimal(fact.change_from_previous),
             "fluctuation_rate": canonical_decimal(fact.fluctuation_rate),
@@ -355,7 +510,8 @@ def as_record(fact: StorableFact, record_id: str,
             "low_price": canonical_decimal(fact.low_price),
             "accumulated_volume": fact.accumulated_volume,
             "accumulated_value": fact.accumulated_value,
-            "market_cap": fact.market_cap, "listed_shares": fact.listed_shares,
+            "market_cap": fact.market_cap,
+            "listed_shares": fact.listed_shares,
         }
     if isinstance(fact, WtiFact):
         return {
@@ -435,27 +591,59 @@ def _validate_toss_record_semantics(record: dict) -> None:
 
 
 def _validate_krx_record(record: dict) -> None:
-    strings = ("record_id", "source", "base_date", "issue_code", "issue_name",
-               "market_name", "sector_type_name", "close_price",
-               "change_from_previous", "fluctuation_rate", "open_price",
-               "high_price", "low_price", "observed_at", "stored_at", "policy_version")
-    if any(not isinstance(record[name], str) or (not record[name] and name != "sector_type_name")
-           for name in strings):
+    strings = (
+        "record_id",
+        "source",
+        "base_date",
+        "issue_code",
+        "issue_name",
+        "market_name",
+        "sector_type_name",
+        "close_price",
+        "change_from_previous",
+        "fluctuation_rate",
+        "open_price",
+        "high_price",
+        "low_price",
+        "observed_at",
+        "stored_at",
+        "policy_version",
+    )
+    if any(
+        not isinstance(record[name], str)
+        or (not record[name] and name != "sector_type_name")
+        for name in strings
+    ):
         raise StoreCorruptError("store_corrupt")
-    if record["source"] != KRX_SOURCE or record["issue_code"] != "000660" or record["market_name"] != "KOSPI":
+    if (
+        record["source"] != KRX_SOURCE
+        or record["issue_code"] != "000660"
+        or record["market_name"] != "KOSPI"
+    ):
         raise StoreCorruptError("store_corrupt")
     try:
         date.fromisoformat(record["base_date"])
         datetime.fromisoformat(record["observed_at"])
         datetime.fromisoformat(record["stored_at"])
-        for name in ("close_price", "change_from_previous", "fluctuation_rate",
-                     "open_price", "high_price", "low_price"):
+        for name in (
+            "close_price",
+            "change_from_previous",
+            "fluctuation_rate",
+            "open_price",
+            "high_price",
+            "low_price",
+        ):
             value = Decimal(record[name])
             if not value.is_finite() or canonical_decimal(value) != record[name]:
                 raise ValueError
     except (ValueError, InvalidOperation):
         raise StoreCorruptError("store_corrupt") from None
-    for name in ("accumulated_volume", "accumulated_value", "market_cap", "listed_shares"):
+    for name in (
+        "accumulated_volume",
+        "accumulated_value",
+        "market_cap",
+        "listed_shares",
+    ):
         if type(record[name]) is not int:
             raise StoreCorruptError("store_corrupt")
 
@@ -477,8 +665,11 @@ def _validate_toss_holding(holding) -> None:
             amount = Decimal(holding[field])
         except InvalidOperation:
             raise StoreCorruptError("store_corrupt") from None
-        if (not amount.is_finite() or amount < 0
-                or canonical_decimal(amount) != holding[field]):
+        if (
+            not amount.is_finite()
+            or amount < 0
+            or canonical_decimal(amount) != holding[field]
+        ):
             raise StoreCorruptError("store_corrupt")
 
 

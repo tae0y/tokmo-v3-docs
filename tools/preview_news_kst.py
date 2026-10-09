@@ -3,21 +3,45 @@
 No UPDATE/apply mode. Does not traverse raw API JSON, model requests/responses or date-only fields.
 This is a cutover assessment, not a migration or authorization to mix old/new storage formats.
 """
+
 import argparse
-from datetime import datetime
 import hashlib
 import json
-from pathlib import Path
 import sqlite3
+from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 TABLES = {
-    "news_documents", "source_families", "sources", "source_connectors", "intake_requests", "intake_receipts",
-    "disclosures", "dart_revisions", "news_decision_inputs", "news_decision_cursors",
+    "news_documents",
+    "source_families",
+    "sources",
+    "source_connectors",
+    "intake_requests",
+    "intake_receipts",
+    "disclosures",
+    "dart_revisions",
+    "news_decision_inputs",
+    "news_decision_cursors",
 }
-FIELDS = {"published_at", "updated_at", "first_seen_at", "last_seen_at", "created_at", "retired_at", "registered_at",
-          "disabled_at", "requested_at", "expires_at", "started_at", "finished_at", "compacted_at",
-          "first_observed_at", "last_observed_at", "observed_at"}
+FIELDS = {
+    "published_at",
+    "updated_at",
+    "first_seen_at",
+    "last_seen_at",
+    "created_at",
+    "retired_at",
+    "registered_at",
+    "disabled_at",
+    "requested_at",
+    "expires_at",
+    "started_at",
+    "finished_at",
+    "compacted_at",
+    "first_observed_at",
+    "last_observed_at",
+    "observed_at",
+}
 
 
 def project(value):
@@ -27,7 +51,9 @@ def project(value):
     if instant.tzinfo is None or instant.utcoffset() is None:
         raise ValueError("not an aware timestamp")
     # Keep strict source-store width (32) where used. No invented time for date-only values.
-    return instant.astimezone(ZoneInfo("Asia/Seoul")).isoformat(timespec="microseconds" if len(value) == 32 else "auto")
+    return instant.astimezone(ZoneInfo("Asia/Seoul")).isoformat(
+        timespec="microseconds" if len(value) == 32 else "auto"
+    )
 
 
 def preview(path):
@@ -35,12 +61,26 @@ def preview(path):
     connection = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
     connection.execute("PRAGMA query_only=ON")
     connection.execute("BEGIN")
-    report = {"mode": "READ_ONLY_PREVIEW", "tables": {}, "invalid_fields": 0,
-              "writes": 0, "raw_json_and_model_audits": "excluded", "source_writer_cutover_required": True}
+    report = {
+        "mode": "READ_ONLY_PREVIEW",
+        "tables": {},
+        "invalid_fields": 0,
+        "writes": 0,
+        "raw_json_and_model_audits": "excluded",
+        "source_writer_cutover_required": True,
+    }
     try:
-        present = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        present = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
         for table in sorted(TABLES & present):
-            columns = [row[1] for row in connection.execute('PRAGMA table_info("' + table + '")')]
+            columns = [
+                row[1]
+                for row in connection.execute('PRAGMA table_info("' + table + '")')
+            ]
             fields = [field for field in columns if field in FIELDS]
             rows = list(connection.execute('SELECT * FROM "' + table + '"'))
             projected_rows = [list(row) for row in rows]
@@ -49,7 +89,9 @@ def preview(path):
             converted_identity = hashlib.sha256()
             # Hash all non-time values, including IDs/hashes/raw JSON, in the same row order.
             for row in rows:
-                stable = [value for name, value in zip(columns, row) if name not in fields]
+                stable = [
+                    value for name, value in zip(columns, row) if name not in fields
+                ]
                 data = json.dumps(stable, ensure_ascii=False, default=str).encode()
                 identity.update(data)
             for field in fields:
@@ -66,15 +108,29 @@ def preview(path):
                     values.append((row[index], ordinal))
                     projected.append((value, ordinal))
                     projected_rows[ordinal][index] = value
-                byfield[field] = {"nonnull_valid": len(values), "would_change": sum(a[0] != b[0] for a, b in zip(values, projected)),
+                byfield[field] = {
+                    "nonnull_valid": len(values),
+                    "would_change": sum(
+                        a[0] != b[0] for a, b in zip(values, projected)
+                    ),
                     "invalid": invalid,
-                    "lexical_order_would_change": [row[1] for row in sorted(values)] != [row[1] for row in sorted(projected)]}
+                    "lexical_order_would_change": [row[1] for row in sorted(values)]
+                    != [row[1] for row in sorted(projected)],
+                }
                 report["invalid_fields"] += invalid
             for row in projected_rows:
-                stable = [value for name, value in zip(columns, row) if name not in fields]
-                converted_identity.update(json.dumps(stable, ensure_ascii=False, default=str).encode())
-            report["tables"][table] = {"rows": len(rows), "fields": byfield,
-                "non_time_values_sha256": identity.hexdigest(), "projected_non_time_values_sha256": converted_identity.hexdigest()}
+                stable = [
+                    value for name, value in zip(columns, row) if name not in fields
+                ]
+                converted_identity.update(
+                    json.dumps(stable, ensure_ascii=False, default=str).encode()
+                )
+            report["tables"][table] = {
+                "rows": len(rows),
+                "fields": byfield,
+                "non_time_values_sha256": identity.hexdigest(),
+                "projected_non_time_values_sha256": converted_identity.hexdigest(),
+            }
     finally:
         connection.rollback()
         connection.close()

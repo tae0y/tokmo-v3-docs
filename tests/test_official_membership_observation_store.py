@@ -1,8 +1,8 @@
-from dataclasses import replace
-from datetime import date, datetime, timezone
-from pathlib import Path
 import sqlite3
 import stat
+from dataclasses import replace
+from datetime import UTC, date, datetime
+from pathlib import Path
 
 import pytest
 
@@ -27,8 +27,7 @@ from tokmo.values.official_membership_observation import (
     SecurityClassV1,
 )
 
-
-NOW = datetime(2026, 8, 13, 1, 30, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 13, 1, 30, tzinfo=UTC)
 
 
 def request_identity(path_template="/directory/{family}.txt"):
@@ -196,7 +195,9 @@ def test_registered_family_append_read_and_second_consumer_round_trip(tmp_path):
     assert tuple(
         item.symbol for item in second_consumer.read_materials("acq-20260813-0001")
     ) == ("AAPL",)
-    assert not any(Path(f"{path}{suffix}").exists() for suffix in ("-journal", "-wal", "-shm"))
+    assert not any(
+        Path(f"{path}{suffix}").exists() for suffix in ("-journal", "-wal", "-shm")
+    )
 
 
 def test_unregistered_family_refuses_construction(tmp_path):

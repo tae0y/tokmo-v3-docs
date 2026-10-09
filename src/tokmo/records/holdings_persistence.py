@@ -32,9 +32,11 @@ class PurposeKind(Enum):
 NAMED_PROGRAM_ALLOWLIST_V1: frozenset[str] = frozenset()
 
 # N4: pension named-program allowlist (separate from v1 allowlist).
-PENSION_NAMED_PROGRAM_ALLOWLIST: frozenset[str] = frozenset({
-    "tokmo-v3-pension-import-v1",
-})
+PENSION_NAMED_PROGRAM_ALLOWLIST: frozenset[str] = frozenset(
+    {
+        "tokmo-v3-pension-import-v1",
+    }
+)
 
 MIGRATION_PROGRAM_TOKEN = "legacy-factstore-import-v1"
 USER_REQUEST_PROGRAM_NAME = "user-requested-capture"
@@ -56,11 +58,7 @@ def is_valid_uuid4_hex(value: str) -> bool:
         parsed = UUID(hex=value, version=4)
     except ValueError:
         return False
-    return (
-        parsed.hex == value
-        and parsed.version == 4
-        and parsed.variant == RFC_4122
-    )
+    return parsed.hex == value and parsed.version == 4 and parsed.variant == RFC_4122
 
 
 def is_valid_legacy_digest(value: str) -> bool:
@@ -84,9 +82,11 @@ class HoldingsPersistencePermitV1:
     authorized_at: datetime = field(repr=False)
 
     def __post_init__(self) -> None:
-        if self.criteria_version not in {CRITERIA_VERSION_V1,
-                                         MIGRATION_CRITERIA_VERSION,
-                                         PENSION_CRITERIA_VERSION}:
+        if self.criteria_version not in {
+            CRITERIA_VERSION_V1,
+            MIGRATION_CRITERIA_VERSION,
+            PENSION_CRITERIA_VERSION,
+        }:
             raise ValueError("criteria_version_outside_contract")
         if not isinstance(self.purpose_kind, PurposeKind):
             raise ValueError("purpose_kind_outside_contract")
@@ -109,20 +109,28 @@ class DenialToken:
 # pairings that may persist, each with its closed program-name set. Changing
 # an entry is a reviewed policy change, never a runtime decision.
 HOLDINGS_PERSISTENCE_CRITERIA_V1 = {
-    (CRITERIA_VERSION_V1, PurposeKind.USER_REQUESTED_CAPTURE):
-        frozenset({USER_REQUEST_PROGRAM_NAME}),
-    (CRITERIA_VERSION_V1, PurposeKind.APPROVED_NAMED_PROGRAM):
-        NAMED_PROGRAM_ALLOWLIST_V1,
-    (MIGRATION_CRITERIA_VERSION, PurposeKind.APPROVED_MIGRATION):
-        frozenset({MIGRATION_PROGRAM_TOKEN}),
+    (CRITERIA_VERSION_V1, PurposeKind.USER_REQUESTED_CAPTURE): frozenset(
+        {USER_REQUEST_PROGRAM_NAME}
+    ),
+    (
+        CRITERIA_VERSION_V1,
+        PurposeKind.APPROVED_NAMED_PROGRAM,
+    ): NAMED_PROGRAM_ALLOWLIST_V1,
+    (MIGRATION_CRITERIA_VERSION, PurposeKind.APPROVED_MIGRATION): frozenset(
+        {MIGRATION_PROGRAM_TOKEN}
+    ),
     # N4: pension import criteria.
-    (PENSION_CRITERIA_VERSION, PurposeKind.APPROVED_NAMED_PROGRAM):
-        PENSION_NAMED_PROGRAM_ALLOWLIST,
+    (
+        PENSION_CRITERIA_VERSION,
+        PurposeKind.APPROVED_NAMED_PROGRAM,
+    ): PENSION_NAMED_PROGRAM_ALLOWLIST,
 }
 
 
 def validate_permit(
-    permit: HoldingsPersistencePermitV1, *, snapshot_id: str,
+    permit: HoldingsPersistencePermitV1,
+    *,
+    snapshot_id: str,
 ) -> bool:
     """Field validation of a permit against the snapshot it must bind to.
 
@@ -135,7 +143,8 @@ def validate_permit(
     if permit.snapshot_id != snapshot_id:
         return False
     allowed_programs = HOLDINGS_PERSISTENCE_CRITERIA_V1.get(
-        (permit.criteria_version, permit.purpose_kind))
+        (permit.criteria_version, permit.purpose_kind)
+    )
     if allowed_programs is None or permit.program_name not in allowed_programs:
         return False
     if permit.criteria_version == CRITERIA_VERSION_V1:
@@ -146,7 +155,9 @@ def validate_permit(
 
 
 def authorize_user_request(
-    *, snapshot_id: str, clock: Callable[[], datetime],
+    *,
+    snapshot_id: str,
+    clock: Callable[[], datetime],
 ) -> HoldingsPersistencePermitV1 | DenialToken:
     """Mint a v1 permit for one explicit user-requested capture."""
     if not is_valid_uuid4_hex(snapshot_id):
@@ -161,7 +172,10 @@ def authorize_user_request(
 
 
 def authorize_named_program(
-    *, snapshot_id: str, program_name: str, clock: Callable[[], datetime],
+    *,
+    snapshot_id: str,
+    program_name: str,
+    clock: Callable[[], datetime],
 ) -> HoldingsPersistencePermitV1 | DenialToken:
     """Mint a v1 permit for an allowlisted named program.
 
@@ -182,7 +196,9 @@ def authorize_named_program(
 
 
 def authorize_legacy_migration(
-    *, snapshot_id: str, canonical_bytes: bytes,
+    *,
+    snapshot_id: str,
+    canonical_bytes: bytes,
     clock: Callable[[], datetime],
 ) -> HoldingsPersistencePermitV1 | DenialToken:
     """Mint the migration-only permit for exactly one legacy capture.
@@ -192,8 +208,7 @@ def authorize_legacy_migration(
     equality check, so a permit can never bind a capture to a foreign ID.
     Callable only from the offline migration tool, never from composition.
     """
-    recomputed = hashlib.sha256(
-        _LEGACY_ID_DOMAIN + canonical_bytes).hexdigest()
+    recomputed = hashlib.sha256(_LEGACY_ID_DOMAIN + canonical_bytes).hexdigest()
     if snapshot_id != recomputed:
         return DenialToken(reason="invalid_snapshot_id")
     return HoldingsPersistencePermitV1(
@@ -206,7 +221,10 @@ def authorize_legacy_migration(
 
 
 def authorize_pension_import(
-    *, snapshot_id: str, program_name: str, clock: Callable[[], datetime],
+    *,
+    snapshot_id: str,
+    program_name: str,
+    clock: Callable[[], datetime],
 ) -> HoldingsPersistencePermitV1 | DenialToken:
     """Mint a pension-import permit. Only callable from pension_ingestion.py."""
     if not is_valid_uuid4_hex(snapshot_id):

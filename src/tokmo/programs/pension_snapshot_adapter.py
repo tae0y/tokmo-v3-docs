@@ -57,21 +57,21 @@ from tokmo.programs.pension_trade_ingestion import (
 from tokmo.records.holdings_persistence import authorize_pension_import
 from tokmo.records.holdings_snapshots import (
     PENSION_SNAPSHOT_SOURCE,
-    canonical_utc_isoformat,
     HoldingsSnapshotReadError,
     HoldingsSnapshotStore,
+    canonical_utc_isoformat,
     snapshot_content_hash,
 )
 from tokmo.records.trade_ledger_canonical import (
     canonical_payload_bytes,
     payload_hash_hex,
 )
+from tokmo.values.current_holdings import HoldingItemV1
 from tokmo.values.holdings import (
     CompleteHoldingsSnapshot,
     HoldingsSnapshotAccount,
     TossHoldingFact,
 )
-from tokmo.values.current_holdings import HoldingItemV1
 from tokmo.values.pension_holdings import (
     PensionHoldingsRevisionV1,
     pension_semantic_digest,
@@ -108,48 +108,70 @@ def deterministic_snapshot_id(*, binding: str, content_hash: str) -> str:
 
 
 def build_pension_snapshot(
-    revision: PensionHoldingsRevisionV1, *, binding: str,
+    revision: PensionHoldingsRevisionV1,
+    *,
+    binding: str,
 ) -> CompleteHoldingsSnapshot:
     """The pension holdings of *revision* as an official snapshot capture.
 
     The content hash is computed first (it deliberately excludes the snapshot
     id), the id is derived from it, and the final value carries both.
     """
-    holdings = tuple(sorted((
-        TossHoldingFact(
-            symbol=item.symbol, quantity=item.quantity,
-            avg_price=item.avg_price, avg_price_field="average_cost",
-            currency=item.currency, market_raw=item.market_raw,
-            market_field=item.market_field, name=None, asset_type=None)
-        for item in revision.holdings
-    ), key=lambda item: item.symbol))
+    holdings = tuple(
+        sorted(
+            (
+                TossHoldingFact(
+                    symbol=item.symbol,
+                    quantity=item.quantity,
+                    avg_price=item.avg_price,
+                    avg_price_field="average_cost",
+                    currency=item.currency,
+                    market_raw=item.market_raw,
+                    market_field=item.market_field,
+                    name=None,
+                    asset_type=None,
+                )
+                for item in revision.holdings
+            ),
+            key=lambda item: item.symbol,
+        )
+    )
     accounts = (HoldingsSnapshotAccount(1, holdings),)
     draft = CompleteHoldingsSnapshot(
-        "0" * 32, PENSION_SNAPSHOT_SOURCE, revision.source_as_of,
-        1, accounts, "0" * 64)
+        "0" * 32, PENSION_SNAPSHOT_SOURCE, revision.source_as_of, 1, accounts, "0" * 64
+    )
     content_hash = snapshot_content_hash(draft)
-    snapshot_id = deterministic_snapshot_id(
-        binding=binding, content_hash=content_hash)
+    snapshot_id = deterministic_snapshot_id(binding=binding, content_hash=content_hash)
     return CompleteHoldingsSnapshot(
-        snapshot_id, PENSION_SNAPSHOT_SOURCE, revision.source_as_of,
-        1, accounts, content_hash)
+        snapshot_id,
+        PENSION_SNAPSHOT_SOURCE,
+        revision.source_as_of,
+        1,
+        accounts,
+        content_hash,
+    )
 
 
 def pension_snapshot_identity(
-    revision: PensionHoldingsRevisionV1, *, binding: str,
+    revision: PensionHoldingsRevisionV1,
+    *,
+    binding: str,
 ) -> str:
     """The id this capture will have, without touching any store."""
     return build_pension_snapshot(revision, binding=binding).snapshot_id
 
 
 def pension_snapshot_port(
-    store: HoldingsSnapshotStore, *, binding: str,
+    store: HoldingsSnapshotStore,
+    *,
+    binding: str,
 ) -> PensionSnapshotPortV1:
     """Capture into the official store and read the capture back exactly.
 
     ``DUPLICATE`` is a success: it means this exact capture is already durable,
     which is precisely the state a retry after a crash finds.
     """
+
     def capture(revision: PensionHoldingsRevisionV1) -> SnapshotOutcomeV1:
         value = build_pension_snapshot(revision, binding=binding)
         # The official store treats a re-append as DUPLICATE only when the
@@ -161,21 +183,23 @@ def pension_snapshot_port(
         permit = authorize_pension_import(
             snapshot_id=value.snapshot_id,
             program_name=PENSION_IMPORT_PROGRAM,
-            clock=lambda: value.captured_at)
+            clock=lambda: value.captured_at,
+        )
         receipt = store.append(value, permit)
         if receipt.status not in ("SAVED", "DUPLICATE"):
             return SnapshotOutcomeV1(
-                False, value.snapshot_id,
-                receipt.reason or BLOCKED_SNAPSHOT_FAILED)
+                False, value.snapshot_id, receipt.reason or BLOCKED_SNAPSHOT_FAILED
+            )
         try:
             loaded = store.read_snapshot(value.snapshot_id)
         except HoldingsSnapshotReadError as error:
-            return SnapshotOutcomeV1(
-                False, value.snapshot_id, error.reason)
+            return SnapshotOutcomeV1(False, value.snapshot_id, error.reason)
         if loaded != value:
             return SnapshotOutcomeV1(
-                False, value.snapshot_id, BLOCKED_READBACK_MISMATCH)
+                False, value.snapshot_id, BLOCKED_READBACK_MISMATCH
+            )
         return SnapshotOutcomeV1(True, value.snapshot_id)
+
     return PensionSnapshotPortV1(capture=capture)
 
 
@@ -189,19 +213,29 @@ def pension_snapshot_port(
 # ---------------------------------------------------------------------------
 
 TRANSACTION_DETAIL_PLAN_VERSION = "pension-transaction-detail-plan-v1"
-APPROVED_DETAIL_SOURCE = PENSION_TRADE_SOURCE          # retirement_excel_v1
-APPROVED_DETAIL_ACCOUNT_SCOPE = PENSION_TRADE_SCOPE    # retirement_pension_1
+APPROVED_DETAIL_SOURCE = PENSION_TRADE_SOURCE  # retirement_excel_v1
+APPROVED_DETAIL_ACCOUNT_SCOPE = PENSION_TRADE_SCOPE  # retirement_pension_1
 APPROVED_DETAIL_IMPORTER_VERSION = "pension-transaction-detail-v1"
 # Exactly the two kinds the ledger schema admits; no wildcard.
 APPROVED_DETAIL_EVENT_KINDS = frozenset({"EXECUTION", "CORRECTION"})
 APPROVED_DETAIL_RECORD_KIND = "TRANSACTION_DETAIL"
-REJECTED_AGGREGATE_RECORD_KINDS = frozenset({
-    "AGGREGATE_SUMMARY", "PERIOD_SUMMARY", "AGGREGATE",
-})
+REJECTED_AGGREGATE_RECORD_KINDS = frozenset(
+    {
+        "AGGREGATE_SUMMARY",
+        "PERIOD_SUMMARY",
+        "AGGREGATE",
+    }
+)
 # Every per-execution field a detail row must carry. An aggregate row cannot.
 REQUIRED_DETAIL_FIELDS = (
-    "source_record_key", "trade_date", "transaction_type_raw",
-    "instrument_raw", "quantity", "unit_price", "amount", "medium_raw",
+    "source_record_key",
+    "trade_date",
+    "transaction_type_raw",
+    "instrument_raw",
+    "quantity",
+    "unit_price",
+    "amount",
+    "medium_raw",
 )
 
 
@@ -232,8 +266,11 @@ def authorize_transaction_detail_plan(plan) -> None:
     if not isinstance(count, int) or isinstance(count, bool) or count < 1:
         raise TransactionDetailUnauthorized("invalid_expected_record_count")
     digest = plan.get("source_sha256")
-    if not isinstance(digest, str) or len(digest) != 64 or any(
-            character not in "0123456789abcdef" for character in digest):
+    if (
+        not isinstance(digest, str)
+        or len(digest) != 64
+        or any(character not in "0123456789abcdef" for character in digest)
+    ):
         raise TransactionDetailUnauthorized("invalid_source_sha256")
 
 
@@ -256,8 +293,7 @@ def authorize_transaction_detail_document(document, plan) -> None:
             raise TransactionDetailUnauthorized("detail_row_not_an_object")
         for field_name in REQUIRED_DETAIL_FIELDS:
             if field_name not in row:
-                raise TransactionDetailUnauthorized(
-                    f"detail_row_missing:{field_name}")
+                raise TransactionDetailUnauthorized(f"detail_row_missing:{field_name}")
         if row.get("event_kind", "EXECUTION") not in APPROVED_DETAIL_EVENT_KINDS:
             raise TransactionDetailUnauthorized("unauthorized_event_kind")
 
@@ -271,7 +307,10 @@ BLOCKED_LINK_UNVERIFIED = "LINK_UNVERIFIED"
 
 
 def verify_linked_pre_snapshot(
-    snapshot_store: HoldingsSnapshotStore, link: dict, *, binding: str,
+    snapshot_store: HoldingsSnapshotStore,
+    link: dict,
+    *,
+    binding: str,
 ) -> str | None:
     """Prove a linked pre-snapshot exactly, or return a typed reason.
 
@@ -322,9 +361,13 @@ def verify_linked_pre_snapshot(
     try:
         rebuilt = tuple(
             HoldingItemV1(
-                symbol=item.symbol, quantity=item.quantity,
-                avg_price=item.avg_price, currency=item.currency,
-                market_raw=item.market_raw, market_field=item.market_field)
+                symbol=item.symbol,
+                quantity=item.quantity,
+                avg_price=item.avg_price,
+                currency=item.currency,
+                market_raw=item.market_raw,
+                market_field=item.market_field,
+            )
             for item in account.holdings
         )
     except (TypeError, ValueError):
@@ -333,7 +376,8 @@ def verify_linked_pre_snapshot(
         return "holdings_digest_mismatch"
 
     expected_id = deterministic_snapshot_id(
-        binding=binding, content_hash=loaded.content_hash)
+        binding=binding, content_hash=loaded.content_hash
+    )
     if expected_id != link["snapshot_id"]:
         return "identity_mismatch"
 
@@ -343,7 +387,10 @@ def verify_linked_pre_snapshot(
 
 
 def classify_pension_batch(
-    ledger_path: Path, events: Sequence[object], *, source: str,
+    ledger_path: Path,
+    events: Sequence[object],
+    *,
+    source: str,
     account_scope: str,
 ) -> str:
     """Classify a submitted batch against the ledger, read-only.
@@ -364,15 +411,15 @@ def classify_pension_batch(
     # An unreadable or non-database ledger is a conflict, not an exception:
     # the caller must write nothing rather than crash mid-protocol.
     try:
-        connection = sqlite3.connect(
-            f"file:{resolved.resolve()}?mode=ro", uri=True)
+        connection = sqlite3.connect(f"file:{resolved.resolve()}?mode=ro", uri=True)
     except (sqlite3.Error, OSError):
         return BATCH_CONFLICT
     try:
         rows = connection.execute(
             "SELECT source_record_key, payload_hash FROM trade_ledger_events "
             "WHERE source = ? AND account_scope = ?",
-            (source, account_scope)).fetchall()
+            (source, account_scope),
+        ).fetchall()
         stored = {row[0]: row[1] for row in rows}
     except (sqlite3.Error, OSError):
         return BATCH_CONFLICT
@@ -429,12 +476,14 @@ def run_transaction_detail_batch(
 
     steps.append("classify")
     batch_class = classify_pension_batch(
-        ledger_path, events, source=source, account_scope=account_scope)
+        ledger_path, events, source=source, account_scope=account_scope
+    )
 
     if batch_class == BATCH_CONFLICT:
         # A conflict never finalizes a link and never writes anything.
         return BatchAdmissionReceiptV1(
-            OUTCOME_CONFLICT_REVIEW, BATCH_CONFLICT, reason="conflict_review")
+            OUTCOME_CONFLICT_REVIEW, BATCH_CONFLICT, reason="conflict_review"
+        )
 
     if batch_class == BATCH_DUPLICATE:
         steps.append("read_link")
@@ -442,12 +491,13 @@ def run_transaction_detail_batch(
         if link is None:
             # RI-02: an ordinary pre-existing duplicate. No link, no snapshot,
             # nothing created.
-            return BatchAdmissionReceiptV1(
-                OUTCOME_DUPLICATE_NOOP, BATCH_DUPLICATE)
+            return BatchAdmissionReceiptV1(OUTCOME_DUPLICATE_NOOP, BATCH_DUPLICATE)
         if link["link_state"] == "APPENDED":
             return BatchAdmissionReceiptV1(
-                OUTCOME_DUPLICATE_NOOP, BATCH_DUPLICATE,
-                pre_snapshot_id=link["snapshot_id"])
+                OUTCOME_DUPLICATE_NOOP,
+                BATCH_DUPLICATE,
+                pre_snapshot_id=link["snapshot_id"],
+            )
         # RI-02: the ledger committed and the process died before the link was
         # finalized. The classification already proved the ledger holds this
         # exact complete batch; now prove the linked capture EXACTLY before
@@ -458,50 +508,64 @@ def run_transaction_detail_batch(
         # since the crash.
         steps.append("verify_link")
         problem = verify_linked_pre_snapshot(
-            snapshot_store, link, binding=f"{BINDING_BATCH_PRE}:{identity}")
+            snapshot_store, link, binding=f"{BINDING_BATCH_PRE}:{identity}"
+        )
         if problem is not None:
             return BatchAdmissionReceiptV1(
-                OUTCOME_BLOCKED, BATCH_DUPLICATE,
+                OUTCOME_BLOCKED,
+                BATCH_DUPLICATE,
                 pre_snapshot_id=link["snapshot_id"],
-                reason=f"{BLOCKED_LINK_UNVERIFIED}:{problem}")
+                reason=f"{BLOCKED_LINK_UNVERIFIED}:{problem}",
+            )
         steps.append("finalize_link")
         registry.advance_batch_pre_snapshot(identity, "APPENDED")
         return BatchAdmissionReceiptV1(
-            OUTCOME_DUPLICATE_NOOP, BATCH_DUPLICATE,
-            pre_snapshot_id=link["snapshot_id"])
+            OUTCOME_DUPLICATE_NOOP, BATCH_DUPLICATE, pre_snapshot_id=link["snapshot_id"]
+        )
 
     current = registry.read_active_revision()
     if current is None:
         return BatchAdmissionReceiptV1(
-            OUTCOME_BLOCKED, BATCH_NEW, reason=BLOCKED_SNAPSHOT_FAILED)
+            OUTCOME_BLOCKED, BATCH_NEW, reason=BLOCKED_SNAPSHOT_FAILED
+        )
 
     steps.append("reserve_link")
     binding = f"{BINDING_BATCH_PRE}:{identity}"
     reserved_id = pension_snapshot_identity(current, binding=binding)
     link = registry.reserve_batch_pre_snapshot(
-        identity, reserved_id, current.semantic_digest, current.source_as_of)
+        identity, reserved_id, current.semantic_digest, current.source_as_of
+    )
 
     steps.append("pre_snapshot")
     port = pension_snapshot_port(snapshot_store, binding=binding)
     outcome = port.capture(current)
     if not outcome.ok:
         return BatchAdmissionReceiptV1(
-            OUTCOME_BLOCKED, BATCH_NEW, pre_snapshot_id=link["snapshot_id"],
-            reason=outcome.reason or BLOCKED_SNAPSHOT_FAILED)
+            OUTCOME_BLOCKED,
+            BATCH_NEW,
+            pre_snapshot_id=link["snapshot_id"],
+            reason=outcome.reason or BLOCKED_SNAPSHOT_FAILED,
+        )
 
     steps.append("mark_captured")
     registry.advance_batch_pre_snapshot(identity, "CAPTURED")
 
     steps.append("ledger_append")
     receipt = ledger_store.append_batch(
-        tuple(events),
-        import_audit=ImportAuditMeta(file_sha256, importer_version))
+        tuple(events), import_audit=ImportAuditMeta(file_sha256, importer_version)
+    )
     if receipt.status != "SAVED" or receipt.inserted_count != len(events):
         return BatchAdmissionReceiptV1(
-            OUTCOME_BLOCKED, BATCH_NEW, pre_snapshot_id=outcome.snapshot_id,
-            reason=f"LEDGER_FAILED:{receipt.status}")
+            OUTCOME_BLOCKED,
+            BATCH_NEW,
+            pre_snapshot_id=outcome.snapshot_id,
+            reason=f"LEDGER_FAILED:{receipt.status}",
+        )
 
     registry.advance_batch_pre_snapshot(identity, "APPENDED")
     return BatchAdmissionReceiptV1(
-        OUTCOME_APPENDED, BATCH_NEW, pre_snapshot_id=outcome.snapshot_id,
-        appended_count=receipt.inserted_count)
+        OUTCOME_APPENDED,
+        BATCH_NEW,
+        pre_snapshot_id=outcome.snapshot_id,
+        appended_count=receipt.inserted_count,
+    )

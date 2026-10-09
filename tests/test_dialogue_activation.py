@@ -8,7 +8,7 @@ advancing scheduled slot, so a row unsent in its own tick keeps eligibility.
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -82,9 +82,10 @@ def test_gate_absent_resolves_disabled(tmp_path):
 
 
 def test_gate_enabled_false_resolves_disabled(tmp_path):
-    path = _write_gate(tmp_path, {
-        "enabled": False, "cutoff": "2026-08-18T00:00:00Z",
-        "approved_by": "woong"})
+    path = _write_gate(
+        tmp_path,
+        {"enabled": False, "cutoff": "2026-08-18T00:00:00Z", "approved_by": "woong"},
+    )
     assert read_dialogue_activation(path).enabled is False
 
 
@@ -94,39 +95,44 @@ def test_gate_malformed_json_resolves_disabled(tmp_path):
 
 
 def test_gate_naive_cutoff_resolves_disabled(tmp_path):
-    path = _write_gate(tmp_path, {
-        "enabled": True, "cutoff": "2026-08-18T00:00:00",
-        "approved_by": "woong"})
+    path = _write_gate(
+        tmp_path,
+        {"enabled": True, "cutoff": "2026-08-18T00:00:00", "approved_by": "woong"},
+    )
     assert read_dialogue_activation(path).enabled is False
 
 
 def test_gate_non_bool_enabled_or_missing_fields_resolve_disabled(tmp_path):
     for payload in (
-            {"enabled": "true", "cutoff": "2026-08-18T00:00:00Z",
-             "approved_by": "woong"},
-            {"enabled": True, "approved_by": "woong"},
-            {"enabled": True, "cutoff": "2026-08-18T00:00:00Z"},
-            {"enabled": True, "cutoff": "2026-08-18T00:00:00Z",
-             "approved_by": ""},
-            [],
+        {"enabled": "true", "cutoff": "2026-08-18T00:00:00Z", "approved_by": "woong"},
+        {"enabled": True, "approved_by": "woong"},
+        {"enabled": True, "cutoff": "2026-08-18T00:00:00Z"},
+        {"enabled": True, "cutoff": "2026-08-18T00:00:00Z", "approved_by": ""},
+        [],
     ):
         path = _write_gate(tmp_path, payload)
         assert read_dialogue_activation(path).enabled is False
 
 
 def test_gate_symlink_resolves_disabled(tmp_path):
-    real = _write_gate(tmp_path, {
-        "enabled": True, "cutoff": "2026-08-18T00:00:00Z",
-        "approved_by": "woong"})
+    real = _write_gate(
+        tmp_path,
+        {"enabled": True, "cutoff": "2026-08-18T00:00:00Z", "approved_by": "woong"},
+    )
     link = tmp_path / "link.json"
     link.symlink_to(real)
     assert read_dialogue_activation(link).enabled is False
 
 
 def test_gate_valid_resolves_enabled_with_fixed_utc_cutoff(tmp_path):
-    path = _write_gate(tmp_path, {
-        "enabled": True, "cutoff": "2026-08-18T09:00:00+09:00",
-        "approved_by": "woong"})
+    path = _write_gate(
+        tmp_path,
+        {
+            "enabled": True,
+            "cutoff": "2026-08-18T09:00:00+09:00",
+            "approved_by": "woong",
+        },
+    )
     gate = read_dialogue_activation(path)
     assert gate.enabled is True
     assert gate.cutoff == _utc("2026-08-18T00:00:00Z")
@@ -139,6 +145,7 @@ def test_gate_valid_resolves_enabled_with_fixed_utc_cutoff(tmp_path):
 
 def test_resolver_gate_absent_falls_back_to_scheduled_disabled(tmp_path):
     from tokmo.programs.integrated_pulse import resolve_production_dialogue
+
     resolved = resolve_production_dialogue(tmp_path, SLOT)
     assert resolved.enabled is False
     assert resolved.cutoff == SLOT
@@ -146,11 +153,13 @@ def test_resolver_gate_absent_falls_back_to_scheduled_disabled(tmp_path):
 
 def test_resolver_enabled_gate_returns_the_gates_fixed_cutoff(tmp_path):
     from tokmo.programs.integrated_pulse import resolve_production_dialogue
+
     runtime = tmp_path / "runtime"
     runtime.mkdir(parents=True)
-    _write_gate(runtime, {
-        "enabled": True, "cutoff": "2026-08-17T23:00:00Z",
-        "approved_by": "woong"})
+    _write_gate(
+        runtime,
+        {"enabled": True, "cutoff": "2026-08-17T23:00:00Z", "approved_by": "woong"},
+    )
     resolved = resolve_production_dialogue(tmp_path, SLOT)
     assert resolved.enabled is True
     assert resolved.cutoff == _utc("2026-08-17T23:00:00Z")
@@ -161,8 +170,9 @@ def test_pulse_main_wires_gate_resolution_not_scheduled(tmp_path):
     # pulse_main production mode refuses any non-canonical root, so the
     # wiring of the three change sites is asserted at source level: the
     # per-tick advancing ``dialogue_cutoff=scheduled`` injection is gone.
-    source = (Path(__file__).parents[1] / "src" / "tokmo" / "programs"
-              / "integrated_pulse.py").read_text()
+    source = (
+        Path(__file__).parents[1] / "src" / "tokmo" / "programs" / "integrated_pulse.py"
+    ).read_text()
     assert "dialogue_cutoff=scheduled" not in source
     assert "resolve_production_dialogue" in source
     assert "dialogue_activation_enabled=activation.enabled" in source
@@ -180,17 +190,21 @@ def _project_root(tmp_path):
     validator.write_text(
         "def validate_tree(root):\n"
         "    return ['invalid'] if (root / 'personal/US/BROKEN.md').exists() else []\n",
-        encoding="utf-8")
+        encoding="utf-8",
+    )
     (project / ".env.toss").write_text(
-        "TOSS_CLIENT_ID=test-client-id\nTOSS_CLIENT_SECRET=test-secret\n")
+        "TOSS_CLIENT_ID=test-client-id\nTOSS_CLIENT_SECRET=test-secret\n"
+    )
     for market in ("KR", "US"):
-        (project / "watchlists" / f"{market}.json").write_text(json.dumps({
-            "schema_version": 1, "market": market, "entries": []}))
+        (project / "watchlists" / f"{market}.json").write_text(
+            json.dumps({"schema_version": 1, "market": market, "entries": []})
+        )
     return project
 
 
 def _live_deps(tmp_path, *, enabled, environ):
     from tokmo.composition import build_pulse_production_live_deps
+
     return build_pulse_production_live_deps(
         project_root=_project_root(tmp_path),
         clock=lambda: NOW,
@@ -210,21 +224,48 @@ _ENV = {
 def test_live_telegram_updates_filters_to_authorized_private_chat():
     from tokmo.facts import telegram_dialogue_live as live
 
-    payload = {"ok": True, "result": [
-        {"update_id": 10, "message": {"message_id": 20,
-         "from": {"id": 777},
-         "chat": {"id": 777, "type": "private"}, "text": "추가: 이유",
-         "reply_to_message": {"message_id": 101}}},
-        {"update_id": 11, "message": {"message_id": 21,
-         "from": {"id": 999},
-         "chat": {"id": 999, "type": "private"}, "text": "unauthorized"}},
-        {"update_id": 12, "message": {"message_id": 22,
-         "from": {"id": 777},
-         "chat": {"id": 777, "type": "group"}, "text": "group"}},
-        {"update_id": 13, "message": {"message_id": 23,
-         "from": {"id": 777},
-         "chat": {"id": 777, "type": "private"}, "photo": []}},
-    ]}
+    payload = {
+        "ok": True,
+        "result": [
+            {
+                "update_id": 10,
+                "message": {
+                    "message_id": 20,
+                    "from": {"id": 777},
+                    "chat": {"id": 777, "type": "private"},
+                    "text": "추가: 이유",
+                    "reply_to_message": {"message_id": 101},
+                },
+            },
+            {
+                "update_id": 11,
+                "message": {
+                    "message_id": 21,
+                    "from": {"id": 999},
+                    "chat": {"id": 999, "type": "private"},
+                    "text": "unauthorized",
+                },
+            },
+            {
+                "update_id": 12,
+                "message": {
+                    "message_id": 22,
+                    "from": {"id": 777},
+                    "chat": {"id": 777, "type": "group"},
+                    "text": "group",
+                },
+            },
+            {
+                "update_id": 13,
+                "message": {
+                    "message_id": 23,
+                    "from": {"id": 777},
+                    "chat": {"id": 777, "type": "private"},
+                    "photo": [],
+                },
+            },
+        ],
+    }
     seen = []
 
     def opener(url, timeout):
@@ -232,11 +273,14 @@ def test_live_telegram_updates_filters_to_authorized_private_chat():
         return json.dumps(payload).encode()
 
     updates = live.fetch_dialogue_updates(
-        offset=10, bot_token="123456:test-token", chat_id="777",
-        opener=opener)
-    assert updates[0] == {"update_id": 10, "message_id": 20,
-                          "reply_to_message_id": 101,
-                          "text": "추가: 이유"}
+        offset=10, bot_token="123456:test-token", chat_id="777", opener=opener
+    )
+    assert updates[0] == {
+        "update_id": 10,
+        "message_id": 20,
+        "reply_to_message_id": 101,
+        "text": "추가: 이유",
+    }
     assert updates[1:] == (
         {"update_id": 11, "ignored": True},
         {"update_id": 12, "ignored": True},
@@ -255,20 +299,44 @@ def test_live_telegram_updates_requires_exact_sender_identity():
     from tokmo.facts import telegram_dialogue_live as live
 
     malicious = "추가: 공격자가 주입한 매매 사유"
-    payload = {"ok": True, "result": [
-        {"update_id": 30, "message": {"message_id": 40,
-         "from": {"id": 424242},
-         "chat": {"id": 777, "type": "private"}, "text": malicious,
-         "reply_to_message_id": 101}},
-        {"update_id": 31, "message": {"message_id": 41,
-         "chat": {"id": 777, "type": "private"}, "text": malicious}},
-        {"update_id": 32, "message": {"message_id": 42,
-         "from": {},
-         "chat": {"id": 777, "type": "private"}, "text": malicious}},
-    ]}
+    payload = {
+        "ok": True,
+        "result": [
+            {
+                "update_id": 30,
+                "message": {
+                    "message_id": 40,
+                    "from": {"id": 424242},
+                    "chat": {"id": 777, "type": "private"},
+                    "text": malicious,
+                    "reply_to_message_id": 101,
+                },
+            },
+            {
+                "update_id": 31,
+                "message": {
+                    "message_id": 41,
+                    "chat": {"id": 777, "type": "private"},
+                    "text": malicious,
+                },
+            },
+            {
+                "update_id": 32,
+                "message": {
+                    "message_id": 42,
+                    "from": {},
+                    "chat": {"id": 777, "type": "private"},
+                    "text": malicious,
+                },
+            },
+        ],
+    }
     updates = live.fetch_dialogue_updates(
-        offset=30, bot_token="123456:test-token", chat_id="777",
-        opener=lambda url, timeout: json.dumps(payload).encode())
+        offset=30,
+        bot_token="123456:test-token",
+        chat_id="777",
+        opener=lambda url, timeout: json.dumps(payload).encode(),
+    )
     # content-free ignored envelopes: cursor identity only, zero retained
     # text, message id, or reply binding from the unauthorized sender.
     assert updates == (
@@ -286,8 +354,11 @@ def test_live_telegram_updates_rejects_malformed_provider_response():
 
     with pytest.raises(live.DialogueUpdatesRejected):
         live.fetch_dialogue_updates(
-            offset=0, bot_token="token", chat_id="777",
-            opener=lambda url, timeout: b'{"ok":false}')
+            offset=0,
+            bot_token="token",
+            chat_id="777",
+            opener=lambda url, timeout: b'{"ok":false}',
+        )
 
 
 def test_matrix_gate_absent_env_absent_is_legacy(tmp_path):
@@ -305,8 +376,11 @@ def test_matrix_gate_true_env_absent_yields_activation_without_sender(tmp_path):
     deps = _live_deps(tmp_path, enabled=True, environ={})
     assert deps.dialogue_activation_enabled is True
     assert deps.telegram_sender is None
-    partial = _live_deps(tmp_path, enabled=True, environ={
-        "TELEGRAM_STOCK_BOT_TOKEN": "123456:test-token"})
+    partial = _live_deps(
+        tmp_path,
+        enabled=True,
+        environ={"TELEGRAM_STOCK_BOT_TOKEN": "123456:test-token"},
+    )
     assert partial.telegram_sender is None
 
 
@@ -322,8 +396,7 @@ def test_composed_sender_supports_markup_and_callback_ack(tmp_path):
 
     deps = _live_deps(tmp_path, enabled=True, environ=dict(_ENV))
     # The outbox flush passes reply_markup for question/preview bubbles.
-    assert "reply_markup" in inspect.signature(
-        deps.telegram_sender).parameters
+    assert "reply_markup" in inspect.signature(deps.telegram_sender).parameters
     # Same stock-bot token acks callback queries so the spinner clears.
     assert callable(deps.callback_ack)
     no_env = _live_deps(tmp_path, enabled=True, environ={})
@@ -331,13 +404,15 @@ def test_composed_sender_supports_markup_and_callback_ack(tmp_path):
 
 
 def test_inbound_stage_wires_callback_ack():
-    source = (Path(__file__).parents[1] / "src" / "tokmo" / "programs"
-              / "integrated_pulse.py").read_text()
+    source = (
+        Path(__file__).parents[1] / "src" / "tokmo" / "programs" / "integrated_pulse.py"
+    ).read_text()
     assert "callback_ack=deps.callback_ack" in source
 
 
 def test_default_composition_keeps_activation_false(tmp_path):
     from tokmo.composition import build_pulse_production_live_deps
+
     deps = build_pulse_production_live_deps(
         project_root=_project_root(tmp_path),
         clock=lambda: NOW,
@@ -355,7 +430,8 @@ def test_live_composition_wires_canonical_playbook_root_and_validator(tmp_path):
     playbooks = project / "playbooks"
     (playbooks / "personal" / "US").mkdir(parents=True)
     (playbooks / "personal" / "US" / "BROKEN.md").write_text(
-        'playbook_id: "personal:US:BROKEN"\n', encoding="utf-8")
+        'playbook_id: "personal:US:BROKEN"\n', encoding="utf-8"
+    )
 
     deps = build_pulse_production_live_deps(
         project_root=project,
@@ -378,14 +454,16 @@ def _cutover_registry():
     for operation in sorted(LANE_GOVERNED_OPERATIONS):
         if operation == "CONDITIONAL_ORDERS":
             entries[operation] = OperationLaneV1(
-                operation, OperationLane.PULSE_60S, None, None)
+                operation, OperationLane.PULSE_60S, None, None
+            )
         elif operation in ("PRICE_BATCH", "ORDERS_PAGE", "ORDER_DETAIL"):
             entries[operation] = OperationLaneV1(
-                operation, OperationLane.PULSE_60S,
-                OperationLane.CADENCE_300S, 0)
+                operation, OperationLane.PULSE_60S, OperationLane.CADENCE_300S, 0
+            )
         else:
             entries[operation] = OperationLaneV1(
-                operation, OperationLane.CADENCE_300S, None, None)
+                operation, OperationLane.CADENCE_300S, None, None
+            )
     return OperationLaneRegistryV1(entries=entries)
 
 
@@ -394,22 +472,33 @@ def _kr_day():
         LookaheadDayV1,
         LookaheadSessionV1,
     )
+
     return LookaheadDayV1(
-        Market.KR, "2026-08-18", "2026-08-18",
-        (LookaheadSessionV1("regularMarket", _utc("2026-08-18T00:00:00Z"),
-                            _utc("2026-08-18T06:30:00Z")),),
-        NOW, "calendar:KR:2026-08-18:0",
+        Market.KR,
+        "2026-08-18",
+        "2026-08-18",
+        (
+            LookaheadSessionV1(
+                "regularMarket",
+                _utc("2026-08-18T00:00:00Z"),
+                _utc("2026-08-18T06:30:00Z"),
+            ),
+        ),
+        NOW,
+        "calendar:KR:2026-08-18:0",
     )
 
 
 def _holdings():
-    identity = {TOSS_SCOPE: AccountScopeIdentityV1(
-        TOSS_SCOPE, "personal", 1, None)}
-    accounts = (AccountHoldingsV1(TOSS_SCOPE, 1, (
-        HoldingItemV1("005930", "10", "60000", "KRW", "KR", "market"),
-    )),)
-    return CurrentHoldingsV1(
-        1, accounts, True, _utc("2026-08-18T00:55:00Z"), identity)
+    identity = {TOSS_SCOPE: AccountScopeIdentityV1(TOSS_SCOPE, "personal", 1, None)}
+    accounts = (
+        AccountHoldingsV1(
+            TOSS_SCOPE,
+            1,
+            (HoldingItemV1("005930", "10", "60000", "KRW", "KR", "market"),),
+        ),
+    )
+    return CurrentHoldingsV1(1, accounts, True, _utc("2026-08-18T00:55:00Z"), identity)
 
 
 class _Refs:
@@ -432,24 +521,44 @@ class _Providers:
 
     def quotes(self, market, symbols):
         self.quote_calls += 1
-        facts = tuple(TossCurrentPriceFact(
-            source="toss-current-price-v1", symbol=symbol, last_price="70000",
-            currency_raw="KRW", timestamp=_utc("2026-08-18T01:00:00Z"),
-            fetched_at=NOW) for symbol in symbols)
+        facts = tuple(
+            TossCurrentPriceFact(
+                source="toss-current-price-v1",
+                symbol=symbol,
+                last_price="70000",
+                currency_raw="KRW",
+                timestamp=_utc("2026-08-18T01:00:00Z"),
+                fetched_at=NOW,
+            )
+            for symbol in symbols
+        )
         return PulseQuoteBatchOutcomeV1("success", facts, ())
 
-    def orders(self, *, account_scope, native_ref, status, from_date,
-               to_date, cursor, limit):
+    def orders(
+        self, *, account_scope, native_ref, status, from_date, to_date, cursor, limit
+    ):
         self.page_calls += 1
         execution = OrderExecution(
-            filled_quantity="3", average_filled_price="70000",
-            filled_amount="210000", commission=None, tax=None,
-            filled_at=_utc("2026-08-18T00:59:00Z"), settlement_date=None)
+            filled_quantity="3",
+            average_filled_price="70000",
+            filled_amount="210000",
+            commission=None,
+            tax=None,
+            filled_at=_utc("2026-08-18T00:59:00Z"),
+            settlement_date=None,
+        )
         order = Order(
-            order_id="ord-001", symbol="005930", side="SELL",
-            order_type="LIMIT", time_in_force="DAY", status="FILLED",
-            quantity="3", currency="KRW",
-            ordered_at=_utc("2026-08-18T00:58:00Z"), execution=execution)
+            order_id="ord-001",
+            symbol="005930",
+            side="SELL",
+            order_type="LIMIT",
+            time_in_force="DAY",
+            status="FILLED",
+            quantity="3",
+            currency="KRW",
+            ordered_at=_utc("2026-08-18T00:58:00Z"),
+            execution=execution,
+        )
         return PulseOrdersPageOutcomeV1("success", (order,), None, False)
 
     def detail(self, *, account_scope, native_ref, order_id):
@@ -459,8 +568,7 @@ class _Providers:
 def _deps(tmp_path, providers, *, activation, sender, cutoff=None):
     return PulseDepsV1(
         clock=lambda: NOW,
-        lookahead_reader=lambda market: (
-            (_kr_day(),) if market is Market.KR else ()),
+        lookahead_reader=lambda market: (_kr_day(),) if market is Market.KR else (),
         holdings_reader=lambda: _holdings(),
         native_refs_reader=lambda: _Refs(),
         watchlist_symbols={Market.KR: frozenset(), Market.US: frozenset()},
@@ -469,16 +577,19 @@ def _deps(tmp_path, providers, *, activation, sender, cutoff=None):
         orders_page_fetch=providers.orders,
         order_detail_fetch=providers.detail,
         quote_store=LatestQuoteStore(
-            tmp_path / "stores" / "latest_quotes.sqlite3", clock=lambda: NOW),
+            tmp_path / "stores" / "latest_quotes.sqlite3", clock=lambda: NOW
+        ),
         ledger_store=TradeLedgerStore(
-            tmp_path / "stores" / "trade_ledger.sqlite3", clock=lambda: NOW,
-            id_factory=lambda: f"batch-{next(_COUNTER):06d}"),
+            tmp_path / "stores" / "trade_ledger.sqlite3",
+            clock=lambda: NOW,
+            id_factory=lambda: f"batch-{next(_COUNTER):06d}",
+        ),
         scan_state_store=OrderScanStateStore(
-            tmp_path / "stores" / "order_scan_state.sqlite3",
-            clock=lambda: NOW),
+            tmp_path / "stores" / "order_scan_state.sqlite3", clock=lambda: NOW
+        ),
         dialogue_store=ExecutionDialogueStore(
-            tmp_path / "stores" / "execution_dialogue.sqlite3",
-            clock=lambda: NOW),
+            tmp_path / "stores" / "execution_dialogue.sqlite3", clock=lambda: NOW
+        ),
         dialogue_quote_reader=lambda symbol: None,
         playbook_validator=lambda root: [],
         dialogue_cutoff=cutoff or SLOT,
@@ -492,21 +603,26 @@ def _deps(tmp_path, providers, *, activation, sender, cutoff=None):
 
 def _dialogue_store(tmp_path):
     return ExecutionDialogueStore(
-        tmp_path / "stores" / "execution_dialogue.sqlite3", clock=lambda: NOW)
+        tmp_path / "stores" / "execution_dialogue.sqlite3", clock=lambda: NOW
+    )
 
 
 def _question_key():
     event_id = trade_event_id("toss-orders-v1", TOSS_SCOPE, "ord-001")
     return event_id, dialogue_dedupe_key(
-        event_id, "trade_reason_question", PROMPT_VERSION)
+        event_id, "trade_reason_question", PROMPT_VERSION
+    )
 
 
 def test_gate_true_env_missing_fails_send_step_only_with_signal(tmp_path):
     providers = _Providers()
     result = run_pulse_once(
-        root=tmp_path, policy_version="pulse-60s-v1",
-        scheduled_for_utc=SLOT, observed_now_utc=NOW,
-        deps=_deps(tmp_path, providers, activation=True, sender=None))
+        root=tmp_path,
+        policy_version="pulse-60s-v1",
+        scheduled_for_utc=SLOT,
+        observed_now_utc=NOW,
+        deps=_deps(tmp_path, providers, activation=True, sender=None),
+    )
     stages = {stage["stage"]: stage for stage in result.stages}
     # send step failure is a durable health signal on the dialogue stage only
     assert stages["dialogue"]["status"] == "failed"
@@ -527,9 +643,12 @@ def test_gate_true_env_missing_fails_send_step_only_with_signal(tmp_path):
 def test_gate_absent_is_legacy_saved_tick_no_signal(tmp_path):
     providers = _Providers()
     result = run_pulse_once(
-        root=tmp_path, policy_version="pulse-60s-v1",
-        scheduled_for_utc=SLOT, observed_now_utc=NOW,
-        deps=_deps(tmp_path, providers, activation=False, sender=None))
+        root=tmp_path,
+        policy_version="pulse-60s-v1",
+        scheduled_for_utc=SLOT,
+        observed_now_utc=NOW,
+        deps=_deps(tmp_path, providers, activation=False, sender=None),
+    )
     assert result.outcome == "SAVED"
     stages = {stage["stage"]: stage for stage in result.stages}
     assert stages["dialogue"]["status"] == "saved"
@@ -556,59 +675,107 @@ class _Sender:
 
 def _times(clock_now):
     return TradeEventTimesV1(
-        filled_at=clock_now, provider_observed_at=None,
-        discovered_at=clock_now, stored_at=clock_now, notified_at=None)
+        filled_at=clock_now,
+        provider_observed_at=None,
+        discovered_at=clock_now,
+        stored_at=clock_now,
+        notified_at=None,
+    )
 
 
 def _new_event(order_id, clock_now, symbol="TSLA"):
     event_id = trade_event_id("toss-orders-v1", TOSS_SCOPE, order_id)
     return NewTradeExecutionV1(
-        event_id, TOSS_SCOPE, order_id, symbol, "SELL", "USD", "3", "90.5",
-        "271.5", "US", _times(clock_now))
+        event_id,
+        TOSS_SCOPE,
+        order_id,
+        symbol,
+        "SELL",
+        "USD",
+        "3",
+        "90.5",
+        "271.5",
+        "US",
+        _times(clock_now),
+    )
 
 
 def _run(store, events, *, sender, activation, cutoff, now):
     return run_execution_dialogue(
-        new_events=tuple(events), dialogue_store=store,
-        quote_reader=lambda symbol: None, playbook_root=None,
-        ai_evaluator=None, sender=sender, activation_enabled=activation,
-        send_eligible_after=cutoff, clock=lambda: now, now=now)
+        new_events=tuple(events),
+        dialogue_store=store,
+        quote_reader=lambda symbol: None,
+        playbook_root=None,
+        ai_evaluator=None,
+        sender=sender,
+        activation_enabled=activation,
+        send_eligible_after=cutoff,
+        clock=lambda: now,
+        now=now,
+    )
 
 
 def test_backlog_before_cutoff_is_never_sent_only_new_rows_send(tmp_path):
     clock = {"now": _utc("2026-08-14T01:00:00Z")}
     store = ExecutionDialogueStore(
-        tmp_path / "execution_dialogue.sqlite3", clock=lambda: clock["now"])
-    backlog = [_new_event(f"backlog-{index}", clock["now"],
-                          symbol=("TSLA", "TSLA", "TSLA", "SPCX", "SPCX",
-                                  "MSFT")[index])
-               for index in range(6)]
-    _run(store, backlog, sender=None, activation=False,
-         cutoff=clock["now"], now=clock["now"])
+        tmp_path / "execution_dialogue.sqlite3", clock=lambda: clock["now"]
+    )
+    backlog = [
+        _new_event(
+            f"backlog-{index}",
+            clock["now"],
+            symbol=("TSLA", "TSLA", "TSLA", "SPCX", "SPCX", "MSFT")[index],
+        )
+        for index in range(6)
+    ]
+    _run(
+        store,
+        backlog,
+        sender=None,
+        activation=False,
+        cutoff=clock["now"],
+        now=clock["now"],
+    )
     assert len(store.list_outbox(status="PENDING")) == 6
 
     cutoff = _utc("2026-08-18T00:00:00Z")  # approved fixed cutoff
     clock["now"] = _utc("2026-08-18T01:00:00Z")
     sender = _Sender()
-    result = _run(store, [_new_event("fresh-1", clock["now"])],
-                  sender=sender, activation=True,
-                  cutoff=cutoff, now=clock["now"])
+    result = _run(
+        store,
+        [_new_event("fresh-1", clock["now"])],
+        sender=sender,
+        activation=True,
+        cutoff=cutoff,
+        now=clock["now"],
+    )
     assert result.send_calls == 1
     assert len(sender.sent) == 1
-    backlog_rows = [store.read_outbox(dialogue_dedupe_key(
-        event.trade_event_id, "trade_reason_question", PROMPT_VERSION))
-        for event in backlog]
+    backlog_rows = [
+        store.read_outbox(
+            dialogue_dedupe_key(
+                event.trade_event_id, "trade_reason_question", PROMPT_VERSION
+            )
+        )
+        for event in backlog
+    ]
     assert all(row["status"] == "PENDING" for row in backlog_rows)
 
 
 def test_malformed_gate_or_naive_cutoff_locks_no_send(tmp_path):
     clock_now = _utc("2026-08-18T01:00:00Z")
     store = ExecutionDialogueStore(
-        tmp_path / "execution_dialogue.sqlite3", clock=lambda: clock_now)
+        tmp_path / "execution_dialogue.sqlite3", clock=lambda: clock_now
+    )
     sender = _Sender()
-    result = _run(store, [_new_event("ord-x", clock_now)], sender=sender,
-                  activation=True, cutoff=datetime(2026, 8, 18),
-                  now=clock_now)
+    result = _run(
+        store,
+        [_new_event("ord-x", clock_now)],
+        sender=sender,
+        activation=True,
+        cutoff=datetime(2026, 8, 18),
+        now=clock_now,
+    )
     assert result.send_calls == 0
     assert sender.sent == []
 
@@ -621,51 +788,72 @@ def test_timeout_unknown_429_failed_normal_sent_with_message_id(tmp_path):
 
     def store_for(name):
         return ExecutionDialogueStore(
-            tmp_path / f"{name}.sqlite3", clock=lambda: clock_now)
+            tmp_path / f"{name}.sqlite3", clock=lambda: clock_now
+        )
 
     cutoff = _utc("2026-08-18T00:00:00Z")
     # timeout -> UNKNOWN, never resent
     store = store_for("timeout")
     sender = _Sender(error=TimeoutError("timed out"))
-    _run(store, [_new_event("ord-t", clock_now)], sender=sender,
-         activation=True, cutoff=cutoff, now=clock_now)
+    _run(
+        store,
+        [_new_event("ord-t", clock_now)],
+        sender=sender,
+        activation=True,
+        cutoff=cutoff,
+        now=clock_now,
+    )
     key = dialogue_dedupe_key(
         _new_event("ord-t", clock_now).trade_event_id,
-        "trade_reason_question", PROMPT_VERSION)
+        "trade_reason_question",
+        PROMPT_VERSION,
+    )
     assert store.read_outbox(key)["status"] == "UNKNOWN"
     retry = _Sender()
-    _run(store, [], sender=retry, activation=True, cutoff=cutoff,
-         now=clock_now)
+    _run(store, [], sender=retry, activation=True, cutoff=cutoff, now=clock_now)
     assert retry.sent == []
 
     # simulated 429 (non-timeout exception) -> FAILED terminal, no retry
     store = store_for("rate-limit")
     error = RuntimeError("telegram send rejected: 429 Too Many Requests")
-    _run(store, [_new_event("ord-r", clock_now)],
-         sender=_Sender(error=error), activation=True, cutoff=cutoff,
-         now=clock_now)
+    _run(
+        store,
+        [_new_event("ord-r", clock_now)],
+        sender=_Sender(error=error),
+        activation=True,
+        cutoff=cutoff,
+        now=clock_now,
+    )
     key = dialogue_dedupe_key(
         _new_event("ord-r", clock_now).trade_event_id,
-        "trade_reason_question", PROMPT_VERSION)
+        "trade_reason_question",
+        PROMPT_VERSION,
+    )
     assert store.read_outbox(key)["status"] == "FAILED"
     retry = _Sender()
-    _run(store, [], sender=retry, activation=True, cutoff=cutoff,
-         now=clock_now)
+    _run(store, [], sender=retry, activation=True, cutoff=cutoff, now=clock_now)
     assert retry.sent == []
 
     # normal -> SENT exactly once with the provider message id bound
     store = store_for("sent")
     sender = _Sender()
-    _run(store, [_new_event("ord-s", clock_now)], sender=sender,
-         activation=True, cutoff=cutoff, now=clock_now)
+    _run(
+        store,
+        [_new_event("ord-s", clock_now)],
+        sender=sender,
+        activation=True,
+        cutoff=cutoff,
+        now=clock_now,
+    )
     key = dialogue_dedupe_key(
         _new_event("ord-s", clock_now).trade_event_id,
-        "trade_reason_question", PROMPT_VERSION)
+        "trade_reason_question",
+        PROMPT_VERSION,
+    )
     row = store.read_outbox(key)
     assert row["status"] == "SENT"
     assert row["telegram_message_id"] == 101
-    _run(store, [], sender=sender, activation=True, cutoff=cutoff,
-         now=clock_now)
+    _run(store, [], sender=sender, activation=True, cutoff=cutoff, now=clock_now)
     assert len(sender.sent) == 1
 
 
@@ -674,6 +862,7 @@ def test_timeout_unknown_429_failed_normal_sent_with_message_id(tmp_path):
 
 def test_adapter_parses_message_id_from_response_body():
     from tokmo.facts.telegram_dialogue_live import send_dialogue_message
+
     calls = []
 
     def opener(url, body, timeout):
@@ -681,8 +870,11 @@ def test_adapter_parses_message_id_from_response_body():
         return b'{"ok": true, "result": {"message_id": 4242}}'
 
     message_id = send_dialogue_message(
-        body_text="[개인] TSLA 매도 체결", bot_token="123456:tok",
-        chat_id="777", opener=opener)
+        body_text="[개인] TSLA 매도 체결",
+        bot_token="123456:tok",
+        chat_id="777",
+        opener=opener,
+    )
     assert message_id == 4242
     url, body, timeout = calls[0]
     assert url == "https://api.telegram.org/bot123456:tok/sendMessage"
@@ -700,22 +892,25 @@ def test_adapter_never_swallows_failures_unlike_lifecycle_opener():
         raise TimeoutError("socket timeout")
 
     with pytest.raises(TimeoutError):
-        send_dialogue_message(body_text="x", bot_token="t", chat_id="c",
-                              opener=timeout_opener)
+        send_dialogue_message(
+            body_text="x", bot_token="t", chat_id="c", opener=timeout_opener
+        )
 
     def rejected_opener(url, body, timeout):
         return b'{"ok": false, "description": "chat not found"}'
 
     with pytest.raises(DialogueSendRejected):
-        send_dialogue_message(body_text="x", bot_token="t", chat_id="c",
-                              opener=rejected_opener)
+        send_dialogue_message(
+            body_text="x", bot_token="t", chat_id="c", opener=rejected_opener
+        )
 
     def garbage_opener(url, body, timeout):
         return b"<html>gateway error</html>"
 
     with pytest.raises(Exception):
-        send_dialogue_message(body_text="x", bot_token="t", chat_id="c",
-                              opener=garbage_opener)
+        send_dialogue_message(
+            body_text="x", bot_token="t", chat_id="c", opener=garbage_opener
+        )
 
 
 def test_dialogue_transport_is_a_registered_live_module():
@@ -737,11 +932,18 @@ def test_activation_has_zero_effect_on_collection_lanes(tmp_path):
         providers[label] = provider
         sender = _Sender() if label == "on" else None
         results[label] = run_pulse_once(
-            root=root, policy_version="pulse-60s-v1",
-            scheduled_for_utc=SLOT, observed_now_utc=NOW,
-            deps=_deps(root, provider, activation=(label == "on"),
-                       sender=sender,
-                       cutoff=_utc("2026-08-18T00:00:00Z")))
+            root=root,
+            policy_version="pulse-60s-v1",
+            scheduled_for_utc=SLOT,
+            observed_now_utc=NOW,
+            deps=_deps(
+                root,
+                provider,
+                activation=(label == "on"),
+                sender=sender,
+                cutoff=_utc("2026-08-18T00:00:00Z"),
+            ),
+        )
     assert results["off"].outcome == results["on"].outcome == "SAVED"
     assert dict(results["off"].wire_counts) == dict(results["on"].wire_counts)
     for label in ("off", "on"):
@@ -759,10 +961,17 @@ def test_fixed_cutoff_keeps_unsent_rows_eligible_across_ticks(tmp_path):
     tick_n1 = _utc("2026-08-18T01:01:00Z")
     clock = {"now": tick_n}
     store = ExecutionDialogueStore(
-        tmp_path / "execution_dialogue.sqlite3", clock=lambda: clock["now"])
+        tmp_path / "execution_dialogue.sqlite3", clock=lambda: clock["now"]
+    )
     # tick N: activation on but env missing -> row enqueued, unsent
-    result_n = _run(store, [_new_event("ord-n", tick_n)], sender=None,
-                    activation=True, cutoff=fixed_cutoff, now=tick_n)
+    result_n = _run(
+        store,
+        [_new_event("ord-n", tick_n)],
+        sender=None,
+        activation=True,
+        cutoff=fixed_cutoff,
+        now=tick_n,
+    )
     assert result_n.status == "send_unavailable"
     assert result_n.enqueued == 1
     # tick N+1 with the SAME fixed cutoff: the row is still eligible.
@@ -770,14 +979,16 @@ def test_fixed_cutoff_keeps_unsent_rows_eligible_across_ticks(tmp_path):
     # starve it: created_at(N) < scheduled(N+1).)
     clock["now"] = tick_n1
     sender = _Sender()
-    result_n1 = _run(store, [], sender=sender, activation=True,
-                     cutoff=fixed_cutoff, now=tick_n1)
+    result_n1 = _run(
+        store, [], sender=sender, activation=True, cutoff=fixed_cutoff, now=tick_n1
+    )
     assert result_n1.send_calls == 1
     assert len(sender.sent) == 1
     key = dialogue_dedupe_key(
         _new_event("ord-n", tick_n).trade_event_id,
-        "trade_reason_question", PROMPT_VERSION)
+        "trade_reason_question",
+        PROMPT_VERSION,
+    )
     assert store.read_outbox(key)["status"] == "SENT"
     # counter-proof: an advancing cutoff would have found zero rows
-    assert len(store.list_outbox(
-        status="PENDING", send_eligible_after=tick_n1)) == 0
+    assert len(store.list_outbox(status="PENDING", send_eligible_after=tick_n1)) == 0

@@ -21,12 +21,13 @@ transport/credential closures are constructed only in ``composition.py``
 (live-import guard) and are exercised lazily at lookup time — never at
 assembly time.
 """
-from dataclasses import dataclass
+
 import hashlib
 import json
 import os
 import sqlite3
 import tempfile
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
@@ -47,14 +48,22 @@ OFFICIAL_EVIDENCE_MAX_REFS = 8
 OFFICIAL_RECEIPT_MAX_FILES = 40
 OFFICIAL_RECEIPT_MAX_BYTES = 4096
 # §V5 closed typed failure classes (+ the §V3 promotion-gate refusal).
-OFFICIAL_LOOKUP_FAILURES = frozenset({
-    "AUTH_UNAVAILABLE", "PROVIDER_TRANSPORT", "PROVIDER_STATUS",
-    "SCHEMA_INVALID", "STORE_UNAVAILABLE", "RECEIPT_UNVERIFIED"})
+OFFICIAL_LOOKUP_FAILURES = frozenset(
+    {
+        "AUTH_UNAVAILABLE",
+        "PROVIDER_TRANSPORT",
+        "PROVIDER_STATUS",
+        "SCHEMA_INVALID",
+        "STORE_UNAVAILABLE",
+        "RECEIPT_UNVERIFIED",
+    }
+)
 
 
 @dataclass(frozen=True)
 class OfficialLookupOutcomeV1:
     """One logical lookup attempt's refs plus its §V10 counter deltas."""
+
     refs: tuple = ()
     local_reads: int = 0
     http_starts: int = 0
@@ -69,6 +78,7 @@ class OfficialLiveSeamV1:
     nothing here touches credentials or network until called, and the
     transport itself is CONSTRUCTED only inside the guarded lookup
     (§V5, SOL M2)."""
+
     credential_loader: object  # () -> api_key str; raises on any refusal
     transport_factory: object  # () -> (OpenDartRequest) -> transport union
 
@@ -103,13 +113,13 @@ def build_official_receipt_sink(root):
     def write_receipt(identity, payload):
         try:
             directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-            encoded = json.dumps(payload, ensure_ascii=False,
-                                 sort_keys=True).encode("utf-8")
+            encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode(
+                "utf-8"
+            )
             if len(encoded) > OFFICIAL_RECEIPT_MAX_BYTES:
                 return None
             name = f"official-{identity[:16]}.json"
-            fd, tmp_name = tempfile.mkstemp(prefix=".receipt.",
-                                            dir=directory)
+            fd, tmp_name = tempfile.mkstemp(prefix=".receipt.", dir=directory)
             try:
                 os.fchmod(fd, 0o600)
                 with os.fdopen(fd, "wb") as handle:
@@ -119,9 +129,13 @@ def build_official_receipt_sink(root):
                 if Path(tmp_name).exists():
                     os.unlink(tmp_name)
             receipts = sorted(
-                (path for path in directory.iterdir()
-                 if path.name.startswith("official-")),
-                key=lambda path: (path.stat().st_mtime_ns, path.name))
+                (
+                    path
+                    for path in directory.iterdir()
+                    if path.name.startswith("official-")
+                ),
+                key=lambda path: (path.stat().st_mtime_ns, path.name),
+            )
             for stale in receipts[:-OFFICIAL_RECEIPT_MAX_FILES]:
                 stale.unlink(missing_ok=True)
             read_back = json.loads((directory / name).read_text("utf-8"))
@@ -142,11 +156,22 @@ def build_official_evidence_reader(db_path, *, live=None, receipt_sink=None):
             return None
         return receipt_sink(identity, payload)
 
-    def read_official_evidence(stock_codes, date_from, date_to,
-                               allowed_families, *, candidate_id="",
-                               attempt_no=0, now=None, event_type=""):
-        codes = tuple(dict.fromkeys(
-            str(code).strip() for code in stock_codes if str(code).strip()))
+    def read_official_evidence(
+        stock_codes,
+        date_from,
+        date_to,
+        allowed_families,
+        *,
+        candidate_id="",
+        attempt_no=0,
+        now=None,
+        event_type="",
+    ):
+        codes = tuple(
+            dict.fromkeys(
+                str(code).strip() for code in stock_codes if str(code).strip()
+            )
+        )
         families = frozenset(allowed_families or ())
         if not codes or not families:
             return OfficialLookupOutcomeV1()
@@ -155,31 +180,44 @@ def build_official_evidence_reader(db_path, *, live=None, receipt_sink=None):
 
         def _identity(tier):
             # §V10: the receipt identity carries the ACTUAL tier.
-            return hashlib.sha256("\0".join(
-                (str(candidate_id), str(attempt_no), tier,
-                 ",".join(codes), *window)).encode()).hexdigest()
+            return hashlib.sha256(
+                "\0".join(
+                    (str(candidate_id), str(attempt_no), tier, ",".join(codes), *window)
+                ).encode()
+            ).hexdigest()
 
         def _counters(*, failures, refs_correlated):
             # Full six-counter snapshot (§V10): this call is exactly one
             # logical attempt.
-            return {"official_attempts": 1,
-                    "official_local_reads": local_reads,
-                    "official_http_starts": http_starts,
-                    "official_refs_returned": refs_returned,
-                    "official_refs_correlated": refs_correlated,
-                    "official_failures": failures}
+            return {
+                "official_attempts": 1,
+                "official_local_reads": local_reads,
+                "official_http_starts": http_starts,
+                "official_refs_returned": refs_returned,
+                "official_refs_correlated": refs_correlated,
+                "official_failures": failures,
+            }
 
         def failed(tier, code):
-            _receipt(_identity(tier), {
-                "receipt": "news-official-evidence-receipt-v1",
-                "typed": code, "tier": tier, "stock_codes": list(codes),
-                "window": list(window),
-                "allowed_families": sorted(families),
-                "event_type": str(event_type),
-                "counters": _counters(failures=1, refs_correlated=0)})
+            _receipt(
+                _identity(tier),
+                {
+                    "receipt": "news-official-evidence-receipt-v1",
+                    "typed": code,
+                    "tier": tier,
+                    "stock_codes": list(codes),
+                    "window": list(window),
+                    "allowed_families": sorted(families),
+                    "event_type": str(event_type),
+                    "counters": _counters(failures=1, refs_correlated=0),
+                },
+            )
             return OfficialLookupOutcomeV1(
-                local_reads=local_reads, http_starts=http_starts,
-                refs_returned=refs_returned, failure=code)
+                local_reads=local_reads,
+                http_starts=http_starts,
+                refs_returned=refs_returned,
+                failure=code,
+            )
 
         local_reads = 1
         http_starts = 0
@@ -199,11 +237,14 @@ def build_official_evidence_reader(db_path, *, live=None, receipt_sink=None):
                     f" where stock_code in ({placeholders})"
                     " and rcept_dt between ? and ?"
                     " order by rcept_dt desc,rcept_no desc",
-                    (*codes, *window)).fetchall()
+                    (*codes, *window),
+                ).fetchall()
                 corp_row = store.connection.execute(
                     "select corp_code from disclosures"
                     f" where stock_code in ({placeholders})"
-                    " order by rcept_dt desc limit 1", codes).fetchone()
+                    " order by rcept_dt desc limit 1",
+                    codes,
+                ).fetchone()
                 corp_code = corp_row[0] if corp_row else None
             except sqlite3.Error:
                 window_rows = None
@@ -221,23 +262,34 @@ def build_official_evidence_reader(db_path, *, live=None, receipt_sink=None):
             refs_returned += 1
             if action not in families:
                 continue
-            refs.append(OfficialEvidenceRefV1(
-                "opendart", str(rcept_no), str(report_nm), str(stock_code),
-                _iso_day(rcept_dt), action))
+            refs.append(
+                OfficialEvidenceRefV1(
+                    "opendart",
+                    str(rcept_no),
+                    str(report_nm),
+                    str(stock_code),
+                    _iso_day(rcept_dt),
+                    action,
+                )
+            )
             if len(refs) >= OFFICIAL_EVIDENCE_MAX_REFS:
                 break
         if refs or window_rows:
             # Window coverage exists locally: tier 2 never fires (§Z2);
             # incompatible-only coverage stays media-confirmed (JB-2).
             return OfficialLookupOutcomeV1(
-                refs=tuple(refs), local_reads=local_reads,
-                refs_returned=refs_returned, refs_correlated=len(refs))
+                refs=tuple(refs),
+                local_reads=local_reads,
+                refs_returned=refs_returned,
+                refs_correlated=len(refs),
+            )
         if live is None or corp_code is None or len(codes) != 1:
             # No live seam, or corp_code unresolvable locally (§Z2): the
             # bounded fallback is structurally unavailable — fail closed
             # without inventing identity.
             return OfficialLookupOutcomeV1(
-                local_reads=local_reads, refs_returned=refs_returned)
+                local_reads=local_reads, refs_returned=refs_returned
+            )
         # ---- tier 2: ONE bounded live list read, retry 0 (§V-2/§W-2) ----
         try:
             api_key = live.credential_loader()
@@ -250,8 +302,11 @@ def build_official_evidence_reader(db_path, *, live=None, receipt_sink=None):
             # guarded lookup — never at composition/assembly time.
             transport = live.transport_factory()
             request = build_list_request(
-                corp_code=str(corp_code), begin_date=window[0],
-                end_date=window[1], api_key=api_key)
+                corp_code=str(corp_code),
+                begin_date=window[0],
+                end_date=window[1],
+                api_key=api_key,
+            )
         except Exception:
             return failed("live", "PROVIDER_TRANSPORT")
         http_starts = 1  # counted immediately before the actual invocation
@@ -266,50 +321,75 @@ def build_official_evidence_reader(db_path, *, live=None, receipt_sink=None):
         if now is None:
             return failed("live", "SCHEMA_INVALID")
         parsed = parse_disclosure_list(
-            result.body, corp_code=str(corp_code), stock_code=codes[0],
-            observed_at=now)
+            result.body, corp_code=str(corp_code), stock_code=codes[0], observed_at=now
+        )
         if not isinstance(parsed, OpenDartDisclosureFact):
-            code = ("PROVIDER_STATUS"
-                    if type(parsed).__name__ == "_ProviderStatusFailure"
-                    else "SCHEMA_INVALID")
+            code = (
+                "PROVIDER_STATUS"
+                if type(parsed).__name__ == "_ProviderStatusFailure"
+                else "SCHEMA_INVALID"
+            )
             return failed("live", code)
-        receipt_day = parsed.receipt_date.strftime("%Y%m%d") \
-            if isinstance(parsed.receipt_date, date) \
+        receipt_day = (
+            parsed.receipt_date.strftime("%Y%m%d")
+            if isinstance(parsed.receipt_date, date)
             else _compact_day(parsed.receipt_date)
+        )
         action = _matched_action(str(parsed.report_name))
         # §V10 (SOL M3): a ref is "returned" only after BOTH the parser
         # and the report-name action pattern validated it.
         if action is not None:
             refs_returned += 1
-        if action is None or action not in families \
-                or not (window[0] <= receipt_day <= window[1]):
+        if (
+            action is None
+            or action not in families
+            or not (window[0] <= receipt_day <= window[1])
+        ):
             # latest-row-only false negative accepted (§V11, JB-13).
             return OfficialLookupOutcomeV1(
-                local_reads=local_reads, http_starts=http_starts,
-                refs_returned=refs_returned)
+                local_reads=local_reads,
+                http_starts=http_starts,
+                refs_returned=refs_returned,
+            )
         ref = OfficialEvidenceRefV1(
-            "opendart", str(parsed.receipt_number),
-            str(parsed.report_name), codes[0], _iso_day(receipt_day),
-            action)
+            "opendart",
+            str(parsed.receipt_number),
+            str(parsed.report_name),
+            codes[0],
+            _iso_day(receipt_day),
+            action,
+        )
         # §V3 (decision 19): the validated durable receipt IS the local
         # official evidence — no read-back, no promotion.
-        read_back = _receipt(_identity("live"), {
-            "receipt": "news-official-evidence-receipt-v1",
-            "typed": "OK", "tier": "live",
-            "stock_codes": list(codes), "window": list(window),
-            "allowed_families": sorted(families),
-            "event_type": str(event_type),
-            "ref": {"source": ref.source, "ref_id": ref.ref_id,
+        read_back = _receipt(
+            _identity("live"),
+            {
+                "receipt": "news-official-evidence-receipt-v1",
+                "typed": "OK",
+                "tier": "live",
+                "stock_codes": list(codes),
+                "window": list(window),
+                "allowed_families": sorted(families),
+                "event_type": str(event_type),
+                "ref": {
+                    "source": ref.source,
+                    "ref_id": ref.ref_id,
                     "report_name": ref.report_name,
                     "stock_code": ref.stock_code,
                     "receipt_date": ref.receipt_date,
-                    "matched_action": ref.matched_action},
-            "counters": _counters(failures=0, refs_correlated=1)})
-        if not read_back or read_back.get("ref", {}).get("ref_id") \
-                != ref.ref_id:
+                    "matched_action": ref.matched_action,
+                },
+                "counters": _counters(failures=0, refs_correlated=1),
+            },
+        )
+        if not read_back or read_back.get("ref", {}).get("ref_id") != ref.ref_id:
             return failed("live", "RECEIPT_UNVERIFIED")
         return OfficialLookupOutcomeV1(
-            refs=(ref,), local_reads=local_reads, http_starts=http_starts,
-            refs_returned=refs_returned, refs_correlated=1)
+            refs=(ref,),
+            local_reads=local_reads,
+            http_starts=http_starts,
+            refs_returned=refs_returned,
+            refs_correlated=1,
+        )
 
     return read_official_evidence

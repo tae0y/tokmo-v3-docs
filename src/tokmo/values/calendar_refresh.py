@@ -33,7 +33,11 @@ class CalendarBoundaryError(CalendarRefreshError):
 def market_local_date(market: Market, now_utc: datetime) -> date:
     if not isinstance(market, Market):
         raise ValueError("unknown market")
-    if not isinstance(now_utc, datetime) or now_utc.tzinfo is None or now_utc.utcoffset() is None:
+    if (
+        not isinstance(now_utc, datetime)
+        or now_utc.tzinfo is None
+        or now_utc.utcoffset() is None
+    ):
         raise ValueError("now must be an aware datetime")
     return now_utc.astimezone(ZoneInfo(MARKET_TIMEZONE[market])).date()
 
@@ -76,7 +80,10 @@ class CalendarFetchResult:
             raise CalendarIdentityError("returned market day type mismatch")
         if type(self.requested_local_date) is not date:
             raise CalendarDateError("requested local date must be a date")
-        if type(self.day.date) is not date or self.day.date != self.requested_local_date:
+        if (
+            type(self.day.date) is not date
+            or self.day.date != self.requested_local_date
+        ):
             raise CalendarDateError("returned trade date mismatch")
         if not isinstance(self.receipt, CalendarStartReceiptV1):
             raise CalendarIdentityError("missing STARTED calendar receipt")
@@ -90,8 +97,11 @@ class CalendarFetchResult:
         if session is None:
             return
         for boundary in (session.start_time, session.end_time):
-            if (not isinstance(boundary, datetime) or boundary.tzinfo is None
-                    or boundary.utcoffset() is None):
+            if (
+                not isinstance(boundary, datetime)
+                or boundary.tzinfo is None
+                or boundary.utcoffset() is None
+            ):
                 raise CalendarBoundaryError("regular session boundaries must be aware")
         if session.start_time >= session.end_time:
             raise CalendarBoundaryError("regular session must have positive duration")

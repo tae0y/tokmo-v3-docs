@@ -66,13 +66,15 @@ def us_membership_material(
         if listing is None:
             raise UsProfileRefusal("us_material_listing_absent")
         observed.append(listing.observed_at)
-        members.append({
-            "symbol": symbol,
-            "venue": listing.venue.value,
-            "security_type": listing.security_class.value,
-            "status": listing.financial_status_token,
-            "sec_ticker_form": sec_ticker_form(symbol),
-        })
+        members.append(
+            {
+                "symbol": symbol,
+                "venue": listing.venue.value,
+                "security_type": listing.security_class.value,
+                "status": listing.financial_status_token,
+                "sec_ticker_form": sec_ticker_form(symbol),
+            }
+        )
     return encode_membership_material(
         profile_id=profile_identity.profile_id,
         policy_version=profile_identity.policy_version,
@@ -105,12 +107,17 @@ class V1ReceiptBridgeV1:
 
     def acquire_identity_lease(self, identity_digest):
         del identity_digest
-        return self._store.acquire_identity_lease(
-            self._identity.identity_digest
-        )
+        return self._store.acquire_identity_lease(self._identity.identity_digest)
 
-    def claim(self, identity, *, owner_invocation_id, owner_lease_key,
-              claimed_at, identity_lease):
+    def claim(
+        self,
+        identity,
+        *,
+        owner_invocation_id,
+        owner_lease_key,
+        claimed_at,
+        identity_lease,
+    ):
         del identity
         return self._store.claim(
             self._identity,
@@ -124,8 +131,7 @@ class V1ReceiptBridgeV1:
         del identity_digest
         return self._store.read_due(self._identity.identity_digest)
 
-    def finish(self, identity_digest, *, state, reason_code, finished_at,
-               result=None):
+    def finish(self, identity_digest, *, state, reason_code, finished_at, result=None):
         del identity_digest
         profile_result = None
         if result is not None:
@@ -189,7 +195,14 @@ def _v1_context(context: QuantProfileDueContextV1, policy) -> QuantDueContextV1:
 
 
 def run_us_profile_membership(
-    *, root, deps, policy, tick, executor, context, receipts,
+    *,
+    root,
+    deps,
+    policy,
+    tick,
+    executor,
+    context,
+    receipts,
 ) -> UsProfileExecutionV1:
     if (
         context.decision is not QuantProfileDueDecisionV1.DUE
@@ -211,7 +224,13 @@ def run_us_profile_membership(
 
 
 def run_us_profile_shadow(
-    *, root, deps, policy, tick, executor, token,
+    *,
+    root,
+    deps,
+    policy,
+    tick,
+    executor,
+    token,
     execution: UsProfileExecutionV1,
 ) -> tuple[str, str]:
     return run_quant_recurring_shadow(

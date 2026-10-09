@@ -9,19 +9,18 @@ each probe on the shared ops kernel under CALENDAR (its own budget, never the
 ``session_dates_incomplete`` past the bound, and STOPs a redirect without retry.
 """
 
-from datetime import date, datetime, timedelta, timezone
-from email.message import Message
 import io
 import json
 import os
 import socket
 import sqlite3
-
-import pytest
-
 import urllib.parse
 import urllib.request
 import urllib.response
+from datetime import UTC, date, datetime, timedelta
+from email.message import Message
+
+import pytest
 
 from tokmo.composition import build_g2b_live_deps
 from tokmo.programs.g2a_shadow_runner import G2AStopError
@@ -29,16 +28,17 @@ from tokmo.programs.integrated_fake_cadence import RequestGateV1
 from tokmo.records.ops_kernel import OpsKernelStore
 from tokmo.values.session_gate import Market
 
-
 # ---------------------------------------------------------------------------
 # Scripted-HTTPS fixtures.
 # ---------------------------------------------------------------------------
 
+
 def _JsonResponse(body: bytes):
     headers = Message()
     response = urllib.response.addinfourl(
-        io.BytesIO(body), headers, "https://openapi.tossinvest.com/x", code=200)
-    setattr(response, "msg", "OK")
+        io.BytesIO(body), headers, "https://openapi.tossinvest.com/x", code=200
+    )
+    response.msg = "OK"
     return response
 
 
@@ -46,7 +46,7 @@ def _redirect(url: str):
     headers = Message()
     headers["Location"] = "https://openapi.tossinvest.com/elsewhere"
     response = urllib.response.addinfourl(io.BytesIO(b""), headers, url, code=302)
-    setattr(response, "msg", "Found")
+    response.msg = "Found"
     return response
 
 
@@ -63,22 +63,33 @@ def _handler_factory(responses, wire):
 
 
 def _token_body() -> bytes:
-    return json.dumps({
-        "access_token": "a" * 40, "expires_in": 3600, "token_type": "Bearer",
-    }).encode()
+    return json.dumps(
+        {
+            "access_token": "a" * 40,
+            "expires_in": 3600,
+            "token_type": "Bearer",
+        }
+    ).encode()
 
 
 def _kr_body(day: date, is_open: bool) -> bytes:
     today: dict = {"date": day.isoformat()}
     if is_open:
-        today["integrated"] = {"regularMarket": {
-            "startTime": f"{day.isoformat()}T00:00:00+00:00",
-            "endTime": f"{day.isoformat()}T06:30:00+00:00"}}
-    return json.dumps({"result": {
-        "today": today,
-        "previousBusinessDay": {"date": "2026-01-02"},
-        "nextBusinessDay": {"date": "2026-01-05"},
-    }}).encode()
+        today["integrated"] = {
+            "regularMarket": {
+                "startTime": f"{day.isoformat()}T00:00:00+00:00",
+                "endTime": f"{day.isoformat()}T06:30:00+00:00",
+            }
+        }
+    return json.dumps(
+        {
+            "result": {
+                "today": today,
+                "previousBusinessDay": {"date": "2026-01-02"},
+                "nextBusinessDay": {"date": "2026-01-05"},
+            }
+        }
+    ).encode()
 
 
 def _us_body(day: date, is_open: bool) -> bytes:
@@ -86,12 +97,17 @@ def _us_body(day: date, is_open: bool) -> bytes:
     if is_open:
         today["regularMarket"] = {
             "startTime": f"{day.isoformat()}T13:30:00+00:00",
-            "endTime": f"{day.isoformat()}T20:00:00+00:00"}
-    return json.dumps({"result": {
-        "today": today,
-        "previousBusinessDay": {"date": "2026-01-02"},
-        "nextBusinessDay": {"date": "2026-01-05"},
-    }}).encode()
+            "endTime": f"{day.isoformat()}T20:00:00+00:00",
+        }
+    return json.dumps(
+        {
+            "result": {
+                "today": today,
+                "previousBusinessDay": {"date": "2026-01-02"},
+                "nextBusinessDay": {"date": "2026-01-05"},
+            }
+        }
+    ).encode()
 
 
 def _credential(tmp_path):
@@ -102,7 +118,7 @@ def _credential(tmp_path):
 
 
 ANCHOR = date(2026, 7, 31)  # a Friday
-NOW = datetime(2026, 7, 31, 14, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 31, 14, 0, tzinfo=UTC)
 
 
 def _clock():
@@ -117,9 +133,14 @@ def _forbid_socket(monkeypatch, sink):
 def _weekday_bodies(builder, count_days: int):
     """One calendar body per descending calendar date; open on Mon-Fri."""
     return tuple(
-        _JsonResponse(builder(ANCHOR - timedelta(days=offset),
-                              (ANCHOR - timedelta(days=offset)).weekday() < 5))
-        for offset in range(count_days))
+        _JsonResponse(
+            builder(
+                ANCHOR - timedelta(days=offset),
+                (ANCHOR - timedelta(days=offset)).weekday() < 5,
+            )
+        )
+        for offset in range(count_days)
+    )
 
 
 def _kernel(tmp_path):
@@ -137,7 +158,8 @@ def _counter(kernel_path, day: date) -> int:
     try:
         row = connection.execute(
             "SELECT provider_started_count FROM request_day_counters WHERE utc_day=?",
-            (day.isoformat(),)).fetchone()
+            (day.isoformat(),),
+        ).fetchone()
     finally:
         connection.close()
     return 0 if row is None else row[0]
@@ -148,7 +170,8 @@ def _calendar_started(kernel_path) -> int:
     try:
         return connection.execute(
             "SELECT COUNT(*) FROM planned_requests WHERE started_at IS NOT NULL "
-            "AND operation IN ('CALENDAR_DAY_KR','CALENDAR_DAY_US')").fetchone()[0]
+            "AND operation IN ('CALENDAR_DAY_KR','CALENDAR_DAY_US')"
+        ).fetchone()[0]
     finally:
         connection.close()
 
@@ -164,6 +187,7 @@ def _restore_socket():
 # 1. Twenty KR session dates from a bounded descending walk; separate budget.
 # ---------------------------------------------------------------------------
 
+
 def test_kr_prefetch_collects_twenty_sessions_and_caches_them(tmp_path, monkeypatch):
     _credential(tmp_path)
     real_socket: list = []
@@ -172,18 +196,21 @@ def test_kr_prefetch_collects_twenty_sessions_and_caches_them(tmp_path, monkeypa
     store = _kernel(tmp_path)
     kernel_path = tmp_path / "ops" / "ops_kernel.sqlite3"
     deps = build_g2b_live_deps(
-        project_root=tmp_path, clock=_clock,
+        project_root=tmp_path,
+        clock=_clock,
         https_handler_factory=_handler_factory(
-            (_JsonResponse(_token_body()),) + _weekday_bodies(_kr_body, 30), wire))
+            (_JsonResponse(_token_body()),) + _weekday_bodies(_kr_body, 30), wire
+        ),
+    )
     _capture_gate(deps, store)
 
     dates = deps.regular_session_dates.regular_session_dates(Market.KR, ANCHOR, 20)
 
     assert len(dates) == 20
     assert all(isinstance(d, date) for d in dates)
-    assert all(d.weekday() < 5 for d in dates)        # every result is a weekday
+    assert all(d.weekday() < 5 for d in dates)  # every result is a weekday
     assert all(d <= ANCHOR for d in dates)
-    assert len(set(dates)) == 20                       # no duplicates
+    assert len(set(dates)) == 20  # no duplicates
     assert dates == tuple(sorted(dates, reverse=True))  # descending
     assert real_socket == []
 
@@ -216,15 +243,19 @@ def test_kr_prefetch_collects_twenty_sessions_and_caches_them(tmp_path, monkeypa
 # 2. The durable cache is reused with zero new calendar wire.
 # ---------------------------------------------------------------------------
 
+
 def test_second_call_reuses_cache_without_new_wire(tmp_path, monkeypatch):
     _credential(tmp_path)
     _forbid_socket(monkeypatch, [])
     wire: list = []
     store = _kernel(tmp_path)
     deps = build_g2b_live_deps(
-        project_root=tmp_path, clock=_clock,
+        project_root=tmp_path,
+        clock=_clock,
         https_handler_factory=_handler_factory(
-            (_JsonResponse(_token_body()),) + _weekday_bodies(_kr_body, 30), wire))
+            (_JsonResponse(_token_body()),) + _weekday_bodies(_kr_body, 30), wire
+        ),
+    )
     _capture_gate(deps, store)
 
     first = deps.regular_session_dates.regular_session_dates(Market.KR, ANCHOR, 20)
@@ -232,12 +263,13 @@ def test_second_call_reuses_cache_without_new_wire(tmp_path, monkeypatch):
     second = deps.regular_session_dates.regular_session_dates(Market.KR, ANCHOR, 20)
 
     assert first == second
-    assert wire == wire_after_first          # not one extra transport on reuse
+    assert wire == wire_after_first  # not one extra transport on reuse
 
 
 # ---------------------------------------------------------------------------
 # 3. US prefetch uses the top-level regularMarket shape.
 # ---------------------------------------------------------------------------
+
 
 def test_us_prefetch_collects_twenty_sessions(tmp_path, monkeypatch):
     _credential(tmp_path)
@@ -245,9 +277,12 @@ def test_us_prefetch_collects_twenty_sessions(tmp_path, monkeypatch):
     wire: list = []
     store = _kernel(tmp_path)
     deps = build_g2b_live_deps(
-        project_root=tmp_path, clock=_clock,
+        project_root=tmp_path,
+        clock=_clock,
         https_handler_factory=_handler_factory(
-            (_JsonResponse(_token_body()),) + _weekday_bodies(_us_body, 30), wire))
+            (_JsonResponse(_token_body()),) + _weekday_bodies(_us_body, 30), wire
+        ),
+    )
     _capture_gate(deps, store)
 
     dates = deps.regular_session_dates.regular_session_dates(Market.US, ANCHOR, 20)
@@ -261,30 +296,37 @@ def test_us_prefetch_collects_twenty_sessions(tmp_path, monkeypatch):
 # 4. Not enough sessions within the bound -> STOP session_dates_incomplete.
 # ---------------------------------------------------------------------------
 
+
 def test_incomplete_within_thirty_five_dates_stops(tmp_path, monkeypatch):
     _credential(tmp_path)
     _forbid_socket(monkeypatch, [])
     wire: list = []
     store = _kernel(tmp_path)
     # Every examined date is a closed day, so twenty sessions are never found.
-    closed = tuple(_JsonResponse(_kr_body(ANCHOR - timedelta(days=offset), False))
-                   for offset in range(40))
+    closed = tuple(
+        _JsonResponse(_kr_body(ANCHOR - timedelta(days=offset), False))
+        for offset in range(40)
+    )
     deps = build_g2b_live_deps(
-        project_root=tmp_path, clock=_clock,
+        project_root=tmp_path,
+        clock=_clock,
         https_handler_factory=_handler_factory(
-            (_JsonResponse(_token_body()),) + closed, wire))
+            (_JsonResponse(_token_body()),) + closed, wire
+        ),
+    )
     _capture_gate(deps, store)
 
     with pytest.raises(G2AStopError, match="session_dates_incomplete"):
         deps.regular_session_dates.regular_session_dates(Market.KR, ANCHOR, 20)
 
     gets = [entry for entry in wire if entry[1] == "/api/v1/market-calendar/KR"]
-    assert len(gets) == 35            # walked exactly the bound, then stopped
+    assert len(gets) == 35  # walked exactly the bound, then stopped
 
 
 # ---------------------------------------------------------------------------
 # 4b. A calendar that echoes an adjacent date STOPs before caching (M1).
 # ---------------------------------------------------------------------------
+
 
 def test_adjacent_date_echo_stops_before_cache(tmp_path, monkeypatch):
     _credential(tmp_path)
@@ -298,11 +340,16 @@ def test_adjacent_date_echo_stops_before_cache(tmp_path, monkeypatch):
     # silent off-by-one, so the walk STOPs before any cache put.
     echoed = ANCHOR - timedelta(days=1)
     deps = build_g2b_live_deps(
-        project_root=tmp_path, clock=_clock,
-        https_handler_factory=_handler_factory((
-            _JsonResponse(_token_body()),
-            _JsonResponse(_kr_body(echoed, True)),   # today.date != requested date
-        ), wire))
+        project_root=tmp_path,
+        clock=_clock,
+        https_handler_factory=_handler_factory(
+            (
+                _JsonResponse(_token_body()),
+                _JsonResponse(_kr_body(echoed, True)),  # today.date != requested date
+            ),
+            wire,
+        ),
+    )
     _capture_gate(deps, store)
 
     with pytest.raises(G2AStopError, match="calendar_date_mismatch"):
@@ -326,6 +373,7 @@ def test_adjacent_date_echo_stops_before_cache(tmp_path, monkeypatch):
 # 5. A redirect mid-prefetch STOPs without retry, its start consumed.
 # ---------------------------------------------------------------------------
 
+
 def test_redirect_mid_prefetch_stops_without_retry(tmp_path, monkeypatch):
     _credential(tmp_path)
     _forbid_socket(monkeypatch, [])
@@ -333,11 +381,16 @@ def test_redirect_mid_prefetch_stops_without_retry(tmp_path, monkeypatch):
     store = _kernel(tmp_path)
     kernel_path = tmp_path / "ops" / "ops_kernel.sqlite3"
     deps = build_g2b_live_deps(
-        project_root=tmp_path, clock=_clock,
-        https_handler_factory=_handler_factory((
-            _JsonResponse(_token_body()),
-            _redirect("https://openapi.tossinvest.com/api/v1/market-calendar/KR"),
-        ), wire))
+        project_root=tmp_path,
+        clock=_clock,
+        https_handler_factory=_handler_factory(
+            (
+                _JsonResponse(_token_body()),
+                _redirect("https://openapi.tossinvest.com/api/v1/market-calendar/KR"),
+            ),
+            wire,
+        ),
+    )
     _capture_gate(deps, store)
 
     with pytest.raises(G2AStopError, match="redirect"):
@@ -351,7 +404,8 @@ def test_redirect_mid_prefetch_stops_without_retry(tmp_path, monkeypatch):
     try:
         state = connection.execute(
             "SELECT state, exit FROM planned_requests WHERE job_scope='CALENDAR' "
-            "AND started_at IS NOT NULL").fetchone()
+            "AND started_at IS NOT NULL"
+        ).fetchone()
     finally:
         connection.close()
     assert state[0] == "SETTLED" and state[1] == "REDIRECT"

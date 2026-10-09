@@ -1,7 +1,5 @@
 """Single-call sealed HTTPS adapter for the five FRED operations."""
 
-from dataclasses import dataclass, field
-from pathlib import Path
 import json
 import os
 import re
@@ -9,6 +7,8 @@ import stat
 import urllib.error
 import urllib.parse
 import urllib.request
+from dataclasses import dataclass, field
+from pathlib import Path
 
 from tokmo.facts.fred import PATHS, build_query_pairs
 from tokmo.values.fred_macro import FredRequest
@@ -17,16 +17,28 @@ HOST = "api.stlouisfed.org"
 TIMEOUT_SECONDS = 10.0
 MAX_BODY_BYTES = 1_048_576
 MAX_CREDENTIAL_BYTES = 4096
-FAILURE_CODES = frozenset({
-    "timeout", "connection_failure", "redirect", "auth_rejection",
-    "bad_request", "http_429", "http_5xx", "body_too_large",
-    "unsupported_content_encoding", "protocol_failure",
-    "api_key_not_registered", "provider_bad_request_unknown",
-})
+FAILURE_CODES = frozenset(
+    {
+        "timeout",
+        "connection_failure",
+        "redirect",
+        "auth_rejection",
+        "bad_request",
+        "http_429",
+        "http_5xx",
+        "body_too_large",
+        "unsupported_content_encoding",
+        "protocol_failure",
+        "api_key_not_registered",
+        "provider_bad_request_unknown",
+    }
+)
 
-_UNREGISTERED_MESSAGE = ("Bad Request.  The value for variable api_key is not "
-                         "registered.  Read https://fred.stlouisfed.org/docs/api/"
-                         "api_key.html for more information.")
+_UNREGISTERED_MESSAGE = (
+    "Bad Request.  The value for variable api_key is not "
+    "registered.  Read https://fred.stlouisfed.org/docs/api/"
+    "api_key.html for more information."
+)
 
 
 @dataclass(frozen=True)
@@ -53,12 +65,17 @@ def build_live_opener():
 def load_fred_api_key(path: Path) -> str:
     try:
         info = os.lstat(path)
-    except OSError as error:
+    except OSError:
         raise ValueError("credential_unsafe") from None
     uid = os.getuid() if hasattr(os, "getuid") else None
-    if (not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode)
-            or stat.S_IMODE(info.st_mode) != 0o600
-            or uid is None or info.st_uid != uid or info.st_size > MAX_CREDENTIAL_BYTES):
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or stat.S_ISLNK(info.st_mode)
+        or stat.S_IMODE(info.st_mode) != 0o600
+        or uid is None
+        or info.st_uid != uid
+        or info.st_size > MAX_CREDENTIAL_BYTES
+    ):
         raise ValueError("credential_unsafe")
     try:
         descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
@@ -78,7 +95,10 @@ def load_fred_api_key(path: Path) -> str:
     except UnicodeDecodeError:
         raise ValueError("credential_grammar") from None
     assignments = [line for line in lines if line and not line.startswith("#")]
-    if len(assignments) != 1 or re.fullmatch(r"FRED_API_KEY=([a-z0-9]{32})", assignments[0]) is None:
+    if (
+        len(assignments) != 1
+        or re.fullmatch(r"FRED_API_KEY=([a-z0-9]{32})", assignments[0]) is None
+    ):
         raise ValueError("credential_grammar")
     return assignments[0].split("=", 1)[1]
 
@@ -92,30 +112,56 @@ class FredLiveTransport:
             if re.fullmatch(r"[a-z0-9]{32}", api_key) is None:
                 return FredTransportOutcome("protocol_failure")
             expected = (*build_query_pairs(request), ("api_key", api_key))
-            query = "&".join(f"{urllib.parse.quote(key, safe='')}={urllib.parse.quote(value, safe='')}"
-                             for key, value in expected)
+            query = "&".join(
+                f"{urllib.parse.quote(key, safe='')}={urllib.parse.quote(value, safe='')}"
+                for key, value in expected
+            )
             url = f"https://{HOST}{PATHS[request.operation]}?{query}"
             parts = urllib.parse.urlsplit(url)
-            parsed_pairs = tuple(urllib.parse.parse_qsl(parts.query, keep_blank_values=True))
-            if ((parts.scheme, parts.hostname, parts.port, parts.path) !=
-                    ("https", HOST, None, PATHS[request.operation]) or parsed_pairs != expected):
+            parsed_pairs = tuple(
+                urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+            )
+            if (parts.scheme, parts.hostname, parts.port, parts.path) != (
+                "https",
+                HOST,
+                None,
+                PATHS[request.operation],
+            ) or parsed_pairs != expected:
                 return FredTransportOutcome("protocol_failure")
-            wire = urllib.request.Request(url, data=None, method="GET", headers={
-                "User-Agent": "tokmo-fred-canonical/1",
-                "Accept": "application/json",
-                "Accept-Encoding": "identity",
-            })
+            wire = urllib.request.Request(
+                url,
+                data=None,
+                method="GET",
+                headers={
+                    "User-Agent": "tokmo-fred-canonical/1",
+                    "Accept": "application/json",
+                    "Accept-Encoding": "identity",
+                },
+            )
             wire_parts = urllib.parse.urlsplit(wire.full_url)
-            wire_pairs = tuple(urllib.parse.parse_qsl(wire_parts.query, keep_blank_values=True))
-            if ((wire_parts.scheme, wire_parts.hostname, wire_parts.port, wire_parts.path) !=
-                    ("https", HOST, None, PATHS[request.operation])
-                    or wire_pairs != expected or wire.method != "GET"):
+            wire_pairs = tuple(
+                urllib.parse.parse_qsl(wire_parts.query, keep_blank_values=True)
+            )
+            if (
+                (
+                    wire_parts.scheme,
+                    wire_parts.hostname,
+                    wire_parts.port,
+                    wire_parts.path,
+                )
+                != ("https", HOST, None, PATHS[request.operation])
+                or wire_pairs != expected
+                or wire.method != "GET"
+            ):
                 return FredTransportOutcome("protocol_failure")
             with self._opener.open(wire, timeout=TIMEOUT_SECONDS) as response:
                 return _read_response(response)
         except BaseException as error:
-            code = _http_400_code(error) if (isinstance(error, urllib.error.HTTPError)
-                                              and error.code == 400) else _failure_code(error)
+            code = (
+                _http_400_code(error)
+                if (isinstance(error, urllib.error.HTTPError) and error.code == 400)
+                else _failure_code(error)
+            )
             del error
             return FredTransportOutcome(code)
 
@@ -133,8 +179,13 @@ def _http_400_code(error: urllib.error.HTTPError) -> str:
             except Exception:
                 pass
         encoding = error.headers.get("Content-Encoding")
-        if (encoding is not None and encoding.strip().lower() != "identity") or type(body) is not bytes or len(body) > 4096:
+        if (
+            (encoding is not None and encoding.strip().lower() != "identity")
+            or type(body) is not bytes
+            or len(body) > 4096
+        ):
             return "provider_bad_request_unknown"
+
         def unique(pairs):
             result = {}
             for key, value in pairs:
@@ -142,11 +193,16 @@ def _http_400_code(error: urllib.error.HTTPError) -> str:
                     raise ValueError("duplicate")
                 result[key] = value
             return result
+
         value = json.loads(body.decode("utf-8"), object_pairs_hook=unique)
-        if (type(value) is dict and set(value) == {"error_code", "error_message"}
-                and type(value["error_code"]) is int and value["error_code"] == 400
-                and type(value["error_message"]) is str
-                and value["error_message"] == _UNREGISTERED_MESSAGE):
+        if (
+            type(value) is dict
+            and set(value) == {"error_code", "error_message"}
+            and type(value["error_code"]) is int
+            and value["error_code"] == 400
+            and type(value["error_message"]) is str
+            and value["error_message"] == _UNREGISTERED_MESSAGE
+        ):
             return "api_key_not_registered"
     except Exception:
         pass
@@ -174,14 +230,25 @@ def _read_response(response) -> FredTransportOutcome:
 
 def _failure_code(error: BaseException) -> str:
     if isinstance(error, urllib.error.HTTPError):
-        if error.code in (301, 302, 303, 307, 308): return "redirect"
-        if error.code in (401, 403): return "auth_rejection"
-        if error.code == 429: return "http_429"
-        if 400 <= error.code < 500: return "bad_request"
-        if 500 <= error.code < 600: return "http_5xx"
+        if error.code in (301, 302, 303, 307, 308):
+            return "redirect"
+        if error.code in (401, 403):
+            return "auth_rejection"
+        if error.code == 429:
+            return "http_429"
+        if 400 <= error.code < 500:
+            return "bad_request"
+        if 500 <= error.code < 600:
+            return "http_5xx"
         return "protocol_failure"
     if isinstance(error, urllib.error.URLError):
-        return "timeout" if isinstance(getattr(error, "reason", None), TimeoutError) else "connection_failure"
-    if isinstance(error, TimeoutError): return "timeout"
-    if isinstance(error, OSError): return "connection_failure"
+        return (
+            "timeout"
+            if isinstance(getattr(error, "reason", None), TimeoutError)
+            else "connection_failure"
+        )
+    if isinstance(error, TimeoutError):
+        return "timeout"
+    if isinstance(error, OSError):
+        return "connection_failure"
     return "protocol_failure"

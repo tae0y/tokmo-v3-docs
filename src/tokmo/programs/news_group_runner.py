@@ -1,13 +1,13 @@
 """One scheduled NEWS group execution with durable duplicate rejection."""
 
-from dataclasses import asdict, dataclass
 import fcntl
 import hashlib
 import json
 import math
 import os
-from pathlib import Path
 import time
+from dataclasses import asdict, dataclass
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from tokmo.programs.news_poll_manifest import plan_news_group
@@ -84,14 +84,29 @@ class GroupRunResult:
 
 
 def build_connector_argv(
-        invocation, *, runner: Path, db: Path, ledger: Path,
-        credentials: Path, campaign_id: str,
+    invocation,
+    *,
+    runner: Path,
+    db: Path,
+    ledger: Path,
+    credentials: Path,
+    campaign_id: str,
 ) -> list[str]:
     import sys
+
     argv = [
-        sys.executable, str(runner), "--source", invocation.source,
-        "--db", str(db), "--ledger", str(ledger),
-        "--campaign-id", campaign_id, "--ceiling", "1",
+        sys.executable,
+        str(runner),
+        "--source",
+        invocation.source,
+        "--db",
+        str(db),
+        "--ledger",
+        str(ledger),
+        "--campaign-id",
+        campaign_id,
+        "--ceiling",
+        "1",
     ]
     if invocation.source in {"naver", "finnhub-company", "finnhub-market"}:
         argv += ["--credentials", str(credentials)]
@@ -132,8 +147,17 @@ def _write_receipt(path: Path, payload: dict) -> None:
             temp.unlink()
 
 
-def _run_news_group_locked(group, scheduled_for, manifest, *, runtime_dir,
-                           executor, clock, sleeper, fast_primary=False):
+def _run_news_group_locked(
+    group,
+    scheduled_for,
+    manifest,
+    *,
+    runtime_dir,
+    executor,
+    clock,
+    sleeper,
+    fast_primary=False,
+):
     tick_id = news_tick_id(group, scheduled_for, fast_primary=fast_primary)
     runtime_dir = Path(runtime_dir)
     markers, receipts = runtime_dir / "ticks", runtime_dir / "receipts"
@@ -150,7 +174,11 @@ def _run_news_group_locked(group, scheduled_for, manifest, *, runtime_dir,
     pace_path = runtime_dir / _FINNHUB_PACE_NAME
     results = []
     for invocation in plan_news_group(group, manifest, on_date=day):
-        if fast_primary and invocation.source not in {"yna-market", "jtbc-breaking", "yna-industry"}:
+        if fast_primary and invocation.source not in {
+            "yna-market",
+            "jtbc-breaking",
+            "yna-industry",
+        }:
             continue
         if invocation.source in FINNHUB_SOURCES:
             _pace_finnhub(pace_path, clock=clock, sleeper=sleeper)
@@ -170,30 +198,52 @@ def _run_news_group_locked(group, scheduled_for, manifest, *, runtime_dir,
         status = "FAILED"
     else:
         status = "PARTIAL_FAILURE"
-    _write_receipt(receipts / f"{tick_id}.json", {
-        "tick_id": tick_id, "status": status,
-        "sources": [asdict(result) for result in results],
-    })
+    _write_receipt(
+        receipts / f"{tick_id}.json",
+        {
+            "tick_id": tick_id,
+            "status": status,
+            "sources": [asdict(result) for result in results],
+        },
+    )
     return GroupRunResult(tick_id, status)
 
 
-def run_news_group(group, scheduled_for, manifest, *, runtime_dir, executor,
-                   clock=time.monotonic, sleeper=time.sleep, fast_primary=False):
+def run_news_group(
+    group,
+    scheduled_for,
+    manifest,
+    *,
+    runtime_dir,
+    executor,
+    clock=time.monotonic,
+    sleeper=time.sleep,
+    fast_primary=False,
+):
     runtime_dir = Path(runtime_dir)
     _private_dir(runtime_dir)
     # The full sweep can wait on slow secondary sources. Primary polling has
     # its own single-worker lock so that sweep cannot suppress urgent inputs.
     # Both paths still use the canonical source attempt ledger and news DB.
-    lock_path = runtime_dir / ("tokmo-news-primary.lock" if fast_primary else "tokmo-news-collection.lock")
+    lock_path = runtime_dir / (
+        "tokmo-news-primary.lock" if fast_primary else "tokmo-news-collection.lock"
+    )
     descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
     with os.fdopen(descriptor, "r+") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            return GroupRunResult(news_tick_id(group, scheduled_for, fast_primary=fast_primary),
-                                  "SKIPPED_OVERLAP")
+            return GroupRunResult(
+                news_tick_id(group, scheduled_for, fast_primary=fast_primary),
+                "SKIPPED_OVERLAP",
+            )
         return _run_news_group_locked(
-            group, scheduled_for, manifest,
-            runtime_dir=runtime_dir, executor=executor,
-            clock=clock, sleeper=sleeper, fast_primary=fast_primary,
+            group,
+            scheduled_for,
+            manifest,
+            runtime_dir=runtime_dir,
+            executor=executor,
+            clock=clock,
+            sleeper=sleeper,
+            fast_primary=fast_primary,
         )

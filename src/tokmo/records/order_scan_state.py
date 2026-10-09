@@ -1,11 +1,11 @@
 """Bounded durable state for completed-order scanning."""
 
-from contextlib import contextmanager
-from dataclasses import asdict, dataclass
 import os
-from pathlib import Path
 import sqlite3
 import stat
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass
+from pathlib import Path
 
 from tokmo.values.session_gate import Market
 
@@ -178,32 +178,55 @@ class OrderScanStateStore:
     def _validate_schema(db):
         expected = {
             "order_scan_state": (
-                "account_scope", "watermark_date", "pending_cursor",
-                "pending_window_from", "pending_window_to", "backfill_cursor",
-                "backfill_active", "last_backfill_date", "watermark_frozen",
+                "account_scope",
+                "watermark_date",
+                "pending_cursor",
+                "pending_window_from",
+                "pending_window_to",
+                "backfill_cursor",
+                "backfill_active",
+                "last_backfill_date",
+                "watermark_frozen",
                 "updated_at",
             ),
             "execution_incomplete_retry": (
-                "account_scope", "source_record_key", "classified_market",
-                "first_seen_tick_id", "attempts", "last_attempt_tick_id",
-                "session_age", "reference_date", "terminal_state",
+                "account_scope",
+                "source_record_key",
+                "classified_market",
+                "first_seen_tick_id",
+                "attempts",
+                "last_attempt_tick_id",
+                "session_age",
+                "reference_date",
+                "terminal_state",
             ),
             "execution_quarantine": (
-                "account_scope", "source_record_key", "quarantined_at", "reason",
+                "account_scope",
+                "source_record_key",
+                "quarantined_at",
+                "reason",
             ),
             "execution_ingest_audit": (
-                "source", "account_scope", "source_record_key",
-                "filled_at_utc", "tick_id", "stored_at",
+                "source",
+                "account_scope",
+                "source_record_key",
+                "filled_at_utc",
+                "tick_id",
+                "stored_at",
             ),
             "execution_market_pending": (
-                "account_scope", "order_id", "symbol", "currency", "status",
-                "reason", "first_seen_tick_id", "updated_at",
+                "account_scope",
+                "order_id",
+                "symbol",
+                "currency",
+                "status",
+                "reason",
+                "first_seen_tick_id",
+                "updated_at",
             ),
         }
         for table, columns in expected.items():
-            actual = tuple(
-                row[1] for row in db.execute(f"PRAGMA table_info({table})")
-            )
+            actual = tuple(row[1] for row in db.execute(f"PRAGMA table_info({table})"))
             if actual != columns:
                 raise ScanStateCorruptError("noncanonical scan state schema")
 
@@ -212,8 +235,16 @@ class OrderScanStateStore:
             row = db.execute(
                 "SELECT * FROM order_scan_state WHERE account_scope=?", (scope,)
             ).fetchone()
-        return None if row is None else ScanStateV1(
-            *row[:6], bool(row[6]), row[7], bool(row[8]), row[9],
+        return (
+            None
+            if row is None
+            else ScanStateV1(
+                *row[:6],
+                bool(row[6]),
+                row[7],
+                bool(row[8]),
+                row[9],
+            )
         )
 
     def save_state(self, state):
@@ -226,7 +257,8 @@ class OrderScanStateStore:
         with self._connection() as db:
             rows = db.execute(
                 "SELECT source_record_key FROM execution_quarantine "
-                "WHERE account_scope=? ORDER BY source_record_key", (scope,)
+                "WHERE account_scope=? ORDER BY source_record_key",
+                (scope,),
             ).fetchall()
         return tuple(row[0] for row in rows)
 
@@ -244,7 +276,8 @@ class OrderScanStateStore:
             db.execute("BEGIN IMMEDIATE")
             db.executemany(
                 "DELETE FROM execution_quarantine WHERE account_scope=? "
-                "AND source_record_key=?", ((scope, key) for key in keys),
+                "AND source_record_key=?",
+                ((scope, key) for key in keys),
             )
 
     def read_incomplete_retry(self):
@@ -290,7 +323,8 @@ class OrderScanStateStore:
         with self._connection() as db:
             row = db.execute(
                 "SELECT * FROM execution_ingest_audit WHERE "
-                "source=? AND account_scope=? AND source_record_key=?", tuple(key)
+                "source=? AND account_scope=? AND source_record_key=?",
+                tuple(key),
             ).fetchone()
         return None if row is None else IngestAuditRow(*row)
 
@@ -301,7 +335,8 @@ class OrderScanStateStore:
         with self._connection() as db:
             rows = db.execute(
                 "SELECT * FROM execution_market_pending WHERE account_scope=? "
-                "ORDER BY order_id", (scope,)
+                "ORDER BY order_id",
+                (scope,),
             ).fetchall()
         return tuple(MarketPendingRow(*row) for row in rows)
 

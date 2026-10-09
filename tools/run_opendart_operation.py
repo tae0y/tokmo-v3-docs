@@ -3,8 +3,8 @@
 
 import argparse
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -12,7 +12,8 @@ for bootstrap in (ROOT, SRC):
     if str(bootstrap) not in sys.path:
         sys.path.insert(0, str(bootstrap))
 
-from tools.opendart_bulk import main as bulk_main, failure_details
+from tools.opendart_bulk import failure_details
+from tools.opendart_bulk import main as bulk_main
 
 
 def main(argv=None):
@@ -20,10 +21,15 @@ def main(argv=None):
     parser.add_argument("--home", required=True, type=Path)
     args = parser.parse_args(argv)
     details = {}
-    code = bulk_main(["operate", "--home", str(args.home)],
-                     emit=lambda value: details.update(failure_details(value)))
+    code = bulk_main(
+        ["operate", "--home", str(args.home)],
+        emit=lambda value: details.update(failure_details(value)),
+    )
     if code:
-        print(json.dumps(dict(status="failed", **details), separators=(",", ":")), file=sys.stderr)
+        print(
+            json.dumps(dict(status="failed", **details), separators=(",", ":")),
+            file=sys.stderr,
+        )
     return code
 
 

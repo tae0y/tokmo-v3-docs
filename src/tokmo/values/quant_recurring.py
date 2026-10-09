@@ -8,7 +8,6 @@ from re import fullmatch
 
 from tokmo.values.quant_multifactor_core import MarketV1
 
-
 QUANT_RECURRING_PROGRAM_ID = "quant-recurring-shadow-v1"
 QUANT_RECURRING_UNIVERSE_ID = "us-personal-holdings-v1"
 QUANT_RECURRING_UNIVERSE_POLICY_VERSION = "quant-universe-us-personal-v1"
@@ -76,14 +75,27 @@ class QuantDueIdentityV1:
     universe_revision: str
     quant_policy_version: str
 
-    def __init__(self, *args, market=None, completed_session_date=None,
-                 universe_revision=None, quant_policy_version=None, **legacy):
+    def __init__(
+        self,
+        *args,
+        market=None,
+        completed_session_date=None,
+        universe_revision=None,
+        quant_policy_version=None,
+        **legacy,
+    ):
         # Retain the inactive 300-second shadow caller while new product callers
         # use the reviewed four-field identity.
         if args:
             if len(args) != 5:
                 raise TypeError("QuantDueIdentityV1")
-            program_id, quant_policy_version, market, completed_session_date, universe_revision = args
+            (
+                program_id,
+                quant_policy_version,
+                market,
+                completed_session_date,
+                universe_revision,
+            ) = args
             if program_id != QUANT_RECURRING_PROGRAM_ID:
                 raise ValueError("program_id")
         elif legacy:
@@ -105,8 +117,10 @@ class QuantDueIdentityV1:
     def __post_init__(self) -> None:
         if type(self.completed_session_date) is not date:
             raise ValueError("completed_session_date")
-        for value, name in ((self.quant_policy_version, "quant_policy_version"),
-                            (self.universe_revision, "universe_revision")):
+        for value, name in (
+            (self.quant_policy_version, "quant_policy_version"),
+            (self.universe_revision, "universe_revision"),
+        ):
             if fullmatch(r"[A-Za-z0-9._:-]{1,64}", value or "") is None:
                 raise ValueError(name)
 
@@ -124,8 +138,12 @@ class QuantDueIdentityV1:
 
     @property
     def product_fields(self) -> tuple[str, str, str, str]:
-        return (self.market.value, self.completed_session_date.isoformat(),
-                self.universe_revision, self.quant_policy_version)
+        return (
+            self.market.value,
+            self.completed_session_date.isoformat(),
+            self.universe_revision,
+            self.quant_policy_version,
+        )
 
     @property
     def identity_digest(self) -> str:
@@ -200,10 +218,7 @@ class QuantTickCalendarInputV1:
             raise ValueError("quant_calendar_failed_refresh_open_conflict")
         if self.us_verdict_open != (self.us_verdict_reason == "open"):
             raise ValueError("quant_calendar_verdict_flag_conflict")
-        if (
-            self.mask_bound
-            and self.us_in_effective_mask != self.us_verdict_open
-        ):
+        if self.mask_bound and self.us_in_effective_mask != self.us_verdict_open:
             raise ValueError("quant_calendar_mask_verdict_conflict")
         if not self.mask_bound and self.us_in_effective_mask:
             raise ValueError("quant_calendar_unbound_mask_conflict")

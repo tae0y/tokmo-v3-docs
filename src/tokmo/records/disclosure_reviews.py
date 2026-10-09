@@ -13,7 +13,7 @@ import contextlib
 import json
 import os
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from tokmo.records.durability import fsync_directory
@@ -30,17 +30,39 @@ __all__ = ["DisclosureReviewReceipt", "DisclosureReviewStore"]
 SCHEMA_VERSION = 1
 MAX_STORE_BYTES = 16 * 1024 * 1024
 
-SEC_RECORD_FIELDS = frozenset({
-    "source", "ticker", "cik", "company_name",
-    "accession_number", "form", "filing_date", "report_date",
-    "primary_document", "is_xbrl", "observed_at", "reviewed_at",
-})
+SEC_RECORD_FIELDS = frozenset(
+    {
+        "source",
+        "ticker",
+        "cik",
+        "company_name",
+        "accession_number",
+        "form",
+        "filing_date",
+        "report_date",
+        "primary_document",
+        "is_xbrl",
+        "observed_at",
+        "reviewed_at",
+    }
+)
 
-OPENDART_RECORD_FIELDS = frozenset({
-    "source", "stock_code", "corp_code", "corp_name",
-    "corp_cls", "report_name", "receipt_number", "filer_name",
-    "receipt_date", "remark", "observed_at", "reviewed_at",
-})
+OPENDART_RECORD_FIELDS = frozenset(
+    {
+        "source",
+        "stock_code",
+        "corp_code",
+        "corp_name",
+        "corp_cls",
+        "report_name",
+        "receipt_number",
+        "filer_name",
+        "receipt_date",
+        "remark",
+        "observed_at",
+        "reviewed_at",
+    }
+)
 
 _TOP_LEVEL_FIELDS = frozenset({"schema_version", "source", "records"})
 
@@ -85,26 +107,26 @@ class DisclosureReviewStore:
         source_ref = getattr(fact, "source_ref", fact.__class__.__name__)
         error = self._validate_input(fact, reviewed_at)
         if error is not None:
-            return DisclosureReviewReceipt(
-                SaveStatus.FAILED, source_ref, error, None)
+            return DisclosureReviewReceipt(SaveStatus.FAILED, source_ref, error, None)
 
         try:
             records = self._load()
         except (ValueError, OSError):
             return DisclosureReviewReceipt(
-                SaveStatus.FAILED, source_ref, "store_corrupt", None)
+                SaveStatus.FAILED, source_ref, "store_corrupt", None
+            )
 
         existing = self._find_identity(records, fact)
         if existing is not None:
             if self._content_matches(existing, fact):
                 first_reviewed = _parse_ts(existing["reviewed_at"])
                 return DisclosureReviewReceipt(
-                    SaveStatus.DUPLICATE, source_ref, "duplicate",
-                    first_reviewed)
+                    SaveStatus.DUPLICATE, source_ref, "duplicate", first_reviewed
+                )
             first_reviewed = _parse_ts(existing["reviewed_at"])
             return DisclosureReviewReceipt(
-                SaveStatus.CONFLICT, source_ref, "identity_conflict",
-                first_reviewed)
+                SaveStatus.CONFLICT, source_ref, "identity_conflict", first_reviewed
+            )
 
         new_record = self._fact_to_record(fact, reviewed_at)
         try:
@@ -114,21 +136,25 @@ class DisclosureReviewStore:
                 _validate_opendart_record(new_record)
         except ValueError:
             return DisclosureReviewReceipt(
-                SaveStatus.FAILED, source_ref, "invalid_fact", None)
+                SaveStatus.FAILED, source_ref, "invalid_fact", None
+            )
         records.append(new_record)
         try:
             self._atomic_write(records)
         except OSError:
             return DisclosureReviewReceipt(
-                SaveStatus.FAILED, source_ref, "store_write_failed", None)
+                SaveStatus.FAILED, source_ref, "store_write_failed", None
+            )
 
         return DisclosureReviewReceipt(
-            SaveStatus.SAVED, source_ref, "saved", reviewed_at)
+            SaveStatus.SAVED, source_ref, "saved", reviewed_at
+        )
 
     # -- validation ---------------------------------------------------------
 
     def _validate_input(
-        self, fact: SecFilingFact | OpenDartDisclosureFact,
+        self,
+        fact: SecFilingFact | OpenDartDisclosureFact,
         reviewed_at: datetime,
     ) -> str | None:
         if not isinstance(reviewed_at, datetime):
@@ -154,7 +180,9 @@ class DisclosureReviewStore:
         return dt.tzinfo is not None and dt.utcoffset() is not None
 
     def _validate_sec_fact(
-        self, fact: SecFilingFact, reviewed_at: datetime,
+        self,
+        fact: SecFilingFact,
+        reviewed_at: datetime,
     ) -> str | None:
         if not self._validate_aware(fact.observed_at):
             return "invalid_fact"
@@ -165,7 +193,9 @@ class DisclosureReviewStore:
         return None
 
     def _validate_dart_fact(
-        self, fact: OpenDartDisclosureFact, reviewed_at: datetime,
+        self,
+        fact: OpenDartDisclosureFact,
+        reviewed_at: datetime,
     ) -> str | None:
         if not self._validate_aware(fact.observed_at):
             return "invalid_fact"
@@ -199,8 +229,9 @@ class DisclosureReviewStore:
         records = payload.get("records")
         if not isinstance(records, list):
             raise ValueError("store_corrupt")
-        expected = SEC_RECORD_FIELDS if self.source == SEC_SOURCE \
-            else OPENDART_RECORD_FIELDS
+        expected = (
+            SEC_RECORD_FIELDS if self.source == SEC_SOURCE else OPENDART_RECORD_FIELDS
+        )
         for record in records:
             if not isinstance(record, dict):
                 raise ValueError("store_corrupt")
@@ -215,19 +246,25 @@ class DisclosureReviewStore:
     # -- identity and content matching -------------------------------------
 
     def _find_identity(
-        self, records: list[dict],
+        self,
+        records: list[dict],
         fact: SecFilingFact | OpenDartDisclosureFact,
     ) -> dict | None:
         if self.source == SEC_SOURCE and isinstance(fact, SecFilingFact):
             for r in records:
-                if (r["cik"] == fact.cik
-                        and r["accession_number"] == fact.accession_number):
+                if (
+                    r["cik"] == fact.cik
+                    and r["accession_number"] == fact.accession_number
+                ):
                     return r
         elif self.source == OPENDART_SOURCE and isinstance(
-                fact, OpenDartDisclosureFact):
+            fact, OpenDartDisclosureFact
+        ):
             for r in records:
-                if (r["corp_code"] == fact.corp_code
-                        and r["receipt_number"] == fact.receipt_number):
+                if (
+                    r["corp_code"] == fact.corp_code
+                    and r["receipt_number"] == fact.receipt_number
+                ):
                     return r
         return None
 
@@ -240,8 +277,8 @@ class DisclosureReviewStore:
                 and record["company_name"] == fact.company_name
                 and record["form"] == fact.form
                 and record["filing_date"] == fact.filing_date.isoformat()
-                and record["report_date"] == (
-                    fact.report_date.isoformat() if fact.report_date else None)
+                and record["report_date"]
+                == (fact.report_date.isoformat() if fact.report_date else None)
                 and record["primary_document"] == fact.primary_document
                 and record["is_xbrl"] == fact.is_xbrl
             )
@@ -258,7 +295,8 @@ class DisclosureReviewStore:
     # -- serialisation ------------------------------------------------------
 
     def _fact_to_record(
-        self, fact: SecFilingFact | OpenDartDisclosureFact,
+        self,
+        fact: SecFilingFact | OpenDartDisclosureFact,
         reviewed_at: datetime,
     ) -> dict:
         if isinstance(fact, SecFilingFact):
@@ -270,8 +308,9 @@ class DisclosureReviewStore:
                 "accession_number": fact.accession_number,
                 "form": fact.form,
                 "filing_date": fact.filing_date.isoformat(),
-                "report_date": (fact.report_date.isoformat()
-                                if fact.report_date else None),
+                "report_date": (
+                    fact.report_date.isoformat() if fact.report_date else None
+                ),
                 "primary_document": fact.primary_document,
                 "is_xbrl": fact.is_xbrl,
                 "observed_at": _canonical_ts(fact.observed_at),
@@ -301,15 +340,16 @@ class DisclosureReviewStore:
             "records": records,
         }
         data = json.dumps(
-            payload, separators=(",", ":"), ensure_ascii=False,
+            payload,
+            separators=(",", ":"),
+            ensure_ascii=False,
             allow_nan=False,
         ).encode("utf-8")
 
         self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         temp = self.path.with_name(f".{self.path.name}.tmp")
         try:
-            fd = os.open(
-                temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             try:
                 os.fchmod(fd, 0o600)
                 with os.fdopen(fd, "wb", closefd=False) as handle:
@@ -342,7 +382,7 @@ class DisclosureReviewStore:
 
 def _canonical_ts(dt: datetime) -> str:
     """Canonical UTC with microseconds and +00:00 suffix."""
-    utc = dt.astimezone(timezone.utc)
+    utc = dt.astimezone(UTC)
     return utc.isoformat(timespec="microseconds")
 
 
@@ -373,7 +413,9 @@ def _validate_opendart_record(record: dict) -> None:
     if record["source"] != OPENDART_SOURCE:
         raise ValueError("store_corrupt")
     for field, width in (
-        ("stock_code", 6), ("corp_code", 8), ("receipt_number", 14),
+        ("stock_code", 6),
+        ("corp_code", 8),
+        ("receipt_number", 14),
     ):
         v = record[field]
         if len(v) != width or not v.isascii() or not v.isdigit():
@@ -405,6 +447,6 @@ def _check_canonical_utc(ts_str: str) -> None:
     dt = datetime.fromisoformat(ts_str)
     if dt.tzinfo is None or dt.utcoffset() is None:
         raise ValueError("store_corrupt")
-    canonical = dt.astimezone(timezone.utc).isoformat(timespec="microseconds")
+    canonical = dt.astimezone(UTC).isoformat(timespec="microseconds")
     if canonical != ts_str:
         raise ValueError("store_corrupt")

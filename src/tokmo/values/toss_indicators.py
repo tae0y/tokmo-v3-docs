@@ -6,8 +6,9 @@ from datetime import datetime
 from tokmo.values._primitives import MISSING, Missing
 
 __all__ = [
-    "MarketIndicatorPrice", "MarketIndicatorCandle",
+    "MarketIndicatorCandle",
     "MarketIndicatorCandlePageResponse",
+    "MarketIndicatorPrice",
 ]
 
 

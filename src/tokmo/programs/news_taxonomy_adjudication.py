@@ -33,6 +33,7 @@ queue. The worker is inert by default and fail-closed everywhere:
   adjudication job ledger (same pending evidence never starts twice;
   crashes reconcile to explicit UNKNOWN; default retry budget 0).
 """
+
 import argparse
 import json
 import re
@@ -66,34 +67,40 @@ ADJUDICATION_STALE_AFTER_SECONDS = 900
 # Pending reasons that already prove collision/ambiguity risk: always the
 # highest adjudication priority.
 _AMBIGUITY_REASONS = frozenset(
-    {"ALIAS_COLLISION", "CATALYST_AMBIGUOUS", "EFFECT_AMBIGUOUS"})
+    {"ALIAS_COLLISION", "CATALYST_AMBIGUOUS", "EFFECT_AMBIGUOUS"}
+)
 # Broad low-value pending: unscoped repeated phrases and subject-less
 # metrics are never sent to a model unless the current scope reaches them.
 _LOW_VALUE_UNSCOPED_REASONS = frozenset(
-    {"TOPIC_UNSCOPED_REPEATED", "METRIC_SUBJECT_UNRESOLVED"})
+    {"TOPIC_UNSCOPED_REPEATED", "METRIC_SUBJECT_UNRESOLVED"}
+)
 _KIND_ORDER = {kind: index for index, kind in enumerate(TAXONOMY_KINDS_V1)}
 _ROUTE_SLUG = re.compile(r"[a-z0-9][a-z0-9.-]{0,127}")
 
 
 @dataclass(frozen=True)
 class AdjudicationConfigV1:
-    mode: str                      # "OFF" | "ROUTE"
+    mode: str  # "OFF" | "ROUTE"
     route_id: "str | None"
     batch_max: int
     max_starts: int
     retry_max: int
-    reason: str                    # OFF/MISSING/MALFORMED/ROUTE
+    reason: str  # OFF/MISSING/MALFORMED/ROUTE
 
 
 def _off(reason):
-    return AdjudicationConfigV1("OFF", None, ADJUDICATION_BATCH_DEFAULT,
-                                ADJUDICATION_STARTS_DEFAULT, 0, reason)
+    return AdjudicationConfigV1(
+        "OFF", None, ADJUDICATION_BATCH_DEFAULT, ADJUDICATION_STARTS_DEFAULT, 0, reason
+    )
 
 
 def _bounded_int(payload, key, default, ceiling):
     value = payload.get(key, default)
-    if type(value) is not int or not 0 <= value <= ceiling \
-            or (key != "retry_max" and value < 1):
+    if (
+        type(value) is not int
+        or not 0 <= value <= ceiling
+        or (key != "retry_max" and value < 1)
+    ):
         raise ValueError(key)
     return value
 
@@ -114,28 +121,45 @@ def read_adjudication_config(path) -> AdjudicationConfigV1:
             return _off("OFF")
         if payload.get("mode") != "ROUTE":
             raise ValueError("mode")
-        if not set(payload) <= {"mode", "route_id", "batch_max",
-                                "max_starts", "retry_max"}:
+        if not set(payload) <= {
+            "mode",
+            "route_id",
+            "batch_max",
+            "max_starts",
+            "retry_max",
+        }:
             raise ValueError("keys")
         route_id = payload["route_id"]
         if type(route_id) is not str or not _ROUTE_SLUG.fullmatch(route_id):
             raise ValueError("route_id")
         return AdjudicationConfigV1(
-            "ROUTE", route_id,
-            _bounded_int(payload, "batch_max", ADJUDICATION_BATCH_DEFAULT,
-                         ADJUDICATION_BATCH_HARD_MAX),
-            _bounded_int(payload, "max_starts", ADJUDICATION_STARTS_DEFAULT,
-                         ADJUDICATION_STARTS_HARD_MAX),
-            _bounded_int(payload, "retry_max", 0,
-                         ADJUDICATION_RETRY_HARD_MAX),
-            "ROUTE")
+            "ROUTE",
+            route_id,
+            _bounded_int(
+                payload,
+                "batch_max",
+                ADJUDICATION_BATCH_DEFAULT,
+                ADJUDICATION_BATCH_HARD_MAX,
+            ),
+            _bounded_int(
+                payload,
+                "max_starts",
+                ADJUDICATION_STARTS_DEFAULT,
+                ADJUDICATION_STARTS_HARD_MAX,
+            ),
+            _bounded_int(payload, "retry_max", 0, ADJUDICATION_RETRY_HARD_MAX),
+            "ROUTE",
+        )
     except (OSError, ValueError, KeyError, TypeError):
         return _off("MALFORMED")
 
 
 def _scope_texts(row):
-    texts = [row["unit_key"], row.get("display_text") or "",
-             row.get("canonical_key") or ""]
+    texts = [
+        row["unit_key"],
+        row.get("display_text") or "",
+        row.get("canonical_key") or "",
+    ]
     try:
         evidence = json.loads(row["payload_json"])
     except (TypeError, ValueError):
@@ -154,8 +178,7 @@ def _scope_texts(row):
 def _unit_scoped(row, scope_terms):
     for text in _scope_texts(row):
         tokens = _tokens(str(text))
-        if tokens and any(_contains_term(tokens, term)
-                          for term in scope_terms):
+        if tokens and any(_contains_term(tokens, term) for term in scope_terms):
             return True
     return False
 
@@ -168,9 +191,9 @@ def select_adjudication_units(rows, *, scope_terms, now, expiry_days):
     by kind and relevance identity, then created_at/unit_id; expirable is
     the broad low-value unscoped tail older than the expiry window (never
     model-adjudicated, durably deferred instead)."""
-    scope = tuple(term for term in
-                  (_normalise(str(term)) for term in scope_terms)
-                  if term)
+    scope = tuple(
+        term for term in (_normalise(str(term)) for term in scope_terms) if term
+    )
     horizon = (now - timedelta(days=expiry_days)).isoformat()
     ranked, expirable = [], []
     for row in rows:
@@ -187,18 +210,34 @@ def select_adjudication_units(rows, *, scope_terms, now, expiry_days):
         else:
             rank = 2
         identity = row.get("canonical_key") or ""
-        ranked.append(((rank, _KIND_ORDER.get(row["kind"], 99), identity,
-                        row["created_at"], row["unit_id"]), row))
+        ranked.append(
+            (
+                (
+                    rank,
+                    _KIND_ORDER.get(row["kind"], 99),
+                    identity,
+                    row["created_at"],
+                    row["unit_id"],
+                ),
+                row,
+            )
+        )
     ranked.sort(key=lambda pair: pair[0])
     return [row for _, row in ranked], expirable
 
 
 def run_taxonomy_adjudication_worker(
-        *, store, config, transport, now, scope_terms=frozenset(),
-        scan_limit=ADJUDICATION_SCAN_LIMIT,
-        expiry_days=ADJUDICATION_EXPIRY_DAYS,
-        expire_max=ADJUDICATION_EXPIRE_PER_RUN,
-        stale_after_seconds=ADJUDICATION_STALE_AFTER_SECONDS):
+    *,
+    store,
+    config,
+    transport,
+    now,
+    scope_terms=frozenset(),
+    scan_limit=ADJUDICATION_SCAN_LIMIT,
+    expiry_days=ADJUDICATION_EXPIRY_DAYS,
+    expire_max=ADJUDICATION_EXPIRE_PER_RUN,
+    stale_after_seconds=ADJUDICATION_STALE_AFTER_SECONDS,
+):
     """Drain at most ``config.max_starts`` bounded batches once.
 
     OFF (any reason) does nothing at all; a ROUTE config without a bound
@@ -206,37 +245,56 @@ def run_taxonomy_adjudication_worker(
     failure is exact-counted; there is no loop until empty and no
     automatic retry (EXHAUSTED batches defer their units durably so later
     runs move on)."""
-    report = {"mode": config.mode, "route_id": config.route_id,
-              "config_reason": config.reason,
-              "transport_bound": transport is not None,
-              "reconciled_unknown": 0, "eligible": 0, "expired_deferred": 0,
-              "exhausted_deferred": 0, "requested": 0, "started": 0,
-              "settled": 0, "failed": 0, "replay_skipped": 0,
-              "in_flight_skipped": 0, "verified": 0, "rejected": 0,
-              "deferred": 0}
+    report = {
+        "mode": config.mode,
+        "route_id": config.route_id,
+        "config_reason": config.reason,
+        "transport_bound": transport is not None,
+        "reconciled_unknown": 0,
+        "eligible": 0,
+        "expired_deferred": 0,
+        "exhausted_deferred": 0,
+        "requested": 0,
+        "started": 0,
+        "settled": 0,
+        "failed": 0,
+        "replay_skipped": 0,
+        "in_flight_skipped": 0,
+        "verified": 0,
+        "rejected": 0,
+        "deferred": 0,
+    }
     if config.mode != "ROUTE" or transport is None:
         return report
     report["reconciled_unknown"] = store.reconcile_taxonomy_adjudication(
-        now=now, stale_after_seconds=stale_after_seconds)
+        now=now, stale_after_seconds=stale_after_seconds
+    )
     rows = store.list_taxonomy_adjudication_eligible(limit=scan_limit)
     report["eligible"] = len(rows)
     ordered, expirable = select_adjudication_units(
-        rows, scope_terms=scope_terms, now=now, expiry_days=expiry_days)
+        rows, scope_terms=scope_terms, now=now, expiry_days=expiry_days
+    )
     for row in expirable[:expire_max]:
         store.mark_taxonomy_adjudication_deferral(
-            row["unit_id"], "EXPIRED", "ADJUDICATION_EXPIRED_LOW_VALUE",
-            now=now)
+            row["unit_id"], "EXPIRED", "ADJUDICATION_EXPIRED_LOW_VALUE", now=now
+        )
         report["expired_deferred"] += 1
-    batches = [ordered[index:index + config.batch_max]
-               for index in range(0, len(ordered), config.batch_max)]
-    for batch in batches[:config.max_starts]:
+    batches = [
+        ordered[index : index + config.batch_max]
+        for index in range(0, len(ordered), config.batch_max)
+    ]
+    for batch in batches[: config.max_starts]:
         request = build_adjudication_batch_request(batch)
         job_id = adjudication_job_id(batch)
         report["requested"] += len(batch)
         token = store.begin_taxonomy_adjudication(
-            job_id, request_digest=request["request_digest"],
-            unit_ids=request["unit_ids"], route_id=config.route_id,
-            now=now, retry_max=config.retry_max)
+            job_id,
+            request_digest=request["request_digest"],
+            unit_ids=request["unit_ids"],
+            route_id=config.route_id,
+            now=now,
+            retry_max=config.retry_max,
+        )
         if token == "REPLAY_SETTLED":
             report["replay_skipped"] += 1
             continue
@@ -246,9 +304,12 @@ def run_taxonomy_adjudication_worker(
         if token == "EXHAUSTED":
             for row in batch:
                 store.mark_taxonomy_adjudication_deferral(
-                    row["unit_id"], "EXHAUSTED",
-                    "ADJUDICATION_ATTEMPTS_EXHAUSTED", now=now,
-                    job_id=job_id)
+                    row["unit_id"],
+                    "EXHAUSTED",
+                    "ADJUDICATION_ATTEMPTS_EXHAUSTED",
+                    now=now,
+                    job_id=job_id,
+                )
                 report["exhausted_deferred"] += 1
             continue
         report["started"] += 1
@@ -256,24 +317,29 @@ def run_taxonomy_adjudication_worker(
             response = transport(request)
         except Exception:
             store.settle_taxonomy_adjudication_failure(
-                job_id, "TRANSPORT_FAIL", now=now)
+                job_id, "TRANSPORT_FAIL", now=now
+            )
             report["failed"] += 1
             continue
         try:
             results = validate_adjudication_batch_response(response, request)
         except ValueError:
             store.settle_taxonomy_adjudication_failure(
-                job_id, "INVALID_RESPONSE", now=now)
+                job_id, "INVALID_RESPONSE", now=now
+            )
             report["failed"] += 1
             continue
         try:
             store.apply_taxonomy_adjudication(
-                job_id, results,
+                job_id,
+                results,
                 response_digest=adjudication_response_digest(response),
-                now=now)
+                now=now,
+            )
         except Exception:
             store.settle_taxonomy_adjudication_failure(
-                job_id, "STATE_CONFLICT", now=now)
+                job_id, "STATE_CONFLICT", now=now
+            )
             report["failed"] += 1
             continue
         report["settled"] += 1
@@ -287,19 +353,25 @@ def main(argv=None):
 
     parser = argparse.ArgumentParser(
         description="Drain the NEWS taxonomy pending adjudication queue "
-                    "once. Inert by construction: no transport is bound "
-                    "here, so a ROUTE config reports itself and starts "
-                    "zero; binding a route adapter is a separate "
-                    "composition change behind its own review.")
+        "once. Inert by construction: no transport is bound "
+        "here, so a ROUTE config reports itself and starts "
+        "zero; binding a route adapter is a separate "
+        "composition change behind its own review."
+    )
     parser.add_argument("--root", required=True)
-    parser.add_argument("--now", required=True,
-                        help="aware ISO-8601 judgment instant")
-    parser.add_argument("--config", default=None,
-                        help="route config path (default: "
-                             "<root>/news_taxonomy_adjudication.json)")
-    parser.add_argument("--scope-term", action="append", default=[],
-                        help="holdings/watchlist/typed-interest scope term "
-                             "for deterministic priority (repeatable)")
+    parser.add_argument("--now", required=True, help="aware ISO-8601 judgment instant")
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="route config path (default: <root>/news_taxonomy_adjudication.json)",
+    )
+    parser.add_argument(
+        "--scope-term",
+        action="append",
+        default=[],
+        help="holdings/watchlist/typed-interest scope term "
+        "for deterministic priority (repeatable)",
+    )
     arguments = parser.parse_args(argv)
     try:
         now = datetime.fromisoformat(arguments.now.replace("Z", "+00:00"))
@@ -309,12 +381,18 @@ def main(argv=None):
         parser.error("--now must be timezone-aware")
     root = Path(arguments.root)
     config = read_adjudication_config(
-        Path(arguments.config) if arguments.config
-        else root / "news_taxonomy_adjudication.json")
+        Path(arguments.config)
+        if arguments.config
+        else root / "news_taxonomy_adjudication.json"
+    )
     store = NewsEpisodeStore(root / "stores" / "news_episodes.sqlite3")
     report = run_taxonomy_adjudication_worker(
-        store=store, config=config, transport=None, now=now,
-        scope_terms=frozenset(arguments.scope_term))
+        store=store,
+        config=config,
+        transport=None,
+        now=now,
+        scope_terms=frozenset(arguments.scope_term),
+    )
     print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     return 0
 

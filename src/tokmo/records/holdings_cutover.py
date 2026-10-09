@@ -10,11 +10,12 @@ import json
 import os
 import stat
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Callable, TypeVar
+from typing import TypeVar
 
 from tokmo.records.holdings_snapshots import (
     HoldingsSnapshotReadError,
@@ -70,14 +71,17 @@ def parse_marker_bytes(raw: bytes) -> CutoverMarkerV1:
     """Parse only the CLOSED exact two-key marker schema."""
     try:
         value = json.loads(
-            raw.decode("utf-8"), object_pairs_hook=_object_without_duplicates)
+            raw.decode("utf-8"), object_pairs_hook=_object_without_duplicates
+        )
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
         raise ValueError("cutover_incomplete") from None
-    if (type(value) is not dict
-            or set(value) != {"state", "schema_version"}
-            or value["state"] != "sqlite-v1"
-            or type(value["schema_version"]) is not int
-            or value["schema_version"] != 1):
+    if (
+        type(value) is not dict
+        or set(value) != {"state", "schema_version"}
+        or value["state"] != "sqlite-v1"
+        or type(value["schema_version"]) is not int
+        or value["schema_version"] != 1
+    ):
         raise ValueError("cutover_incomplete")
     return CutoverMarkerV1("sqlite-v1", 1)
 
@@ -89,15 +93,20 @@ def _private_regular(path: Path) -> bool:
 
 def _read_private(path: Path) -> bytes:
     pre = os.lstat(path)
-    if (stat.S_ISLNK(pre.st_mode) or not stat.S_ISREG(pre.st_mode)
-            or stat.S_IMODE(pre.st_mode) != 0o600
-            or pre.st_uid != os.getuid()):
+    if (
+        stat.S_ISLNK(pre.st_mode)
+        or not stat.S_ISREG(pre.st_mode)
+        or stat.S_IMODE(pre.st_mode) != 0o600
+        or pre.st_uid != os.getuid()
+    ):
         raise OSError("cutover_incomplete")
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     try:
         opened = os.fstat(fd)
-        if ((pre.st_dev, pre.st_ino) != (opened.st_dev, opened.st_ino)
-                or not stat.S_ISREG(opened.st_mode)):
+        if (pre.st_dev, pre.st_ino) != (
+            opened.st_dev,
+            opened.st_ino,
+        ) or not stat.S_ISREG(opened.st_mode):
             raise OSError("cutover_incomplete")
         chunks = []
         while True:
@@ -128,7 +137,8 @@ def _sqlite_state(path: Path) -> str:
         return "invalid"
     try:
         HoldingsSnapshotStore(
-            path, clock=lambda: datetime(1970, 1, 1, tzinfo=timezone.utc),
+            path,
+            clock=lambda: datetime(1970, 1, 1, tzinfo=UTC),
         ).list_capture_headers(limit=1)
     except (HoldingsSnapshotReadError, OSError, ValueError):
         return "invalid"
@@ -150,7 +160,10 @@ def _legacy_state(path: Path, *, first_use: bool) -> str:
 
 
 def resolve_route(
-    *, marker_path: Path, sqlite_path: Path, json_path: Path,
+    *,
+    marker_path: Path,
+    sqlite_path: Path,
+    json_path: Path,
     context: CutoverContext,
 ) -> HoldingsRoute:
     """Resolve the exhaustive SDS §9.3 matrix without creating anything."""
@@ -159,17 +172,17 @@ def resolve_route(
     if marker == "invalid":
         return HoldingsRoute.INVALID
     if marker == "valid":
-        return (HoldingsRoute.SQLITE_V1 if sqlite == "valid"
-                else HoldingsRoute.INVALID)
+        return HoldingsRoute.SQLITE_V1 if sqlite == "valid" else HoldingsRoute.INVALID
     if sqlite == "sidecars":
         return HoldingsRoute.INVALID
     if sqlite != "absent":
         return HoldingsRoute.STAGED_OR_CRASHED
-    legacy = _legacy_state(
-        json_path, first_use=context.first_use_legacy)
-    return (HoldingsRoute.LEGACY
-            if legacy in {"safe_absent", "safe_valid"}
-            else HoldingsRoute.INVALID)
+    legacy = _legacy_state(json_path, first_use=context.first_use_legacy)
+    return (
+        HoldingsRoute.LEGACY
+        if legacy in {"safe_absent", "safe_valid"}
+        else HoldingsRoute.INVALID
+    )
 
 
 def _unlock_close(fd: int) -> None:
@@ -180,7 +193,9 @@ def _unlock_close(fd: int) -> None:
 
 
 def acquire_family_lock(
-    lock_path: Path, *, exclusive: bool,
+    lock_path: Path,
+    *,
+    exclusive: bool,
     deadline_s: float = FAMILY_LOCK_DEADLINE_S,
 ) -> int:
     """Acquire owner-only flock using LOCK_NB under one monotonic deadline."""
@@ -193,21 +208,24 @@ def acquire_family_lock(
         fd = None
         try:
             parent = os.lstat(lock_path.parent)
-            if (stat.S_ISLNK(parent.st_mode)
-                    or not stat.S_ISDIR(parent.st_mode)
-                    or stat.S_IMODE(parent.st_mode) != 0o700
-                    or parent.st_uid != os.getuid()):
+            if (
+                stat.S_ISLNK(parent.st_mode)
+                or not stat.S_ISDIR(parent.st_mode)
+                or stat.S_IMODE(parent.st_mode) != 0o700
+                or parent.st_uid != os.getuid()
+            ):
                 raise OSError(errno.EPERM, "family_locked")
             with private_creation():
-                fd = os.open(
-                    lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+                fd = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
             if time.monotonic() >= deadline:
                 os.close(fd)
                 raise FamilyLockTimeout(deadline_s=deadline_s)
             opened = os.fstat(fd)
-            if (not stat.S_ISREG(opened.st_mode)
-                    or stat.S_IMODE(opened.st_mode) != 0o600
-                    or opened.st_uid != os.getuid()):
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or stat.S_IMODE(opened.st_mode) != 0o600
+                or opened.st_uid != os.getuid()
+            ):
                 os.close(fd)
                 fd = None
                 raise FamilyLockTimeout(deadline_s=deadline_s)
@@ -224,10 +242,12 @@ def acquire_family_lock(
         except (BlockingIOError, OSError) as error:
             if fd is not None:
                 os.close(fd)
-            if (isinstance(error, OSError)
-                    and error.errno not in {
-                        errno.EAGAIN, errno.EACCES, errno.EINTR, errno.EWOULDBLOCK,
-                    }):
+            if isinstance(error, OSError) and error.errno not in {
+                errno.EAGAIN,
+                errno.EACCES,
+                errno.EINTR,
+                errno.EWOULDBLOCK,
+            }:
                 # Unsafe/unopenable lock paths are deliberately reported with
                 # the same bounded closed reason as contention.
                 pass
@@ -240,11 +260,13 @@ def acquire_family_lock(
 
 
 def with_family_lock(
-    lock_path: Path, *, exclusive: bool, fn: Callable[[], _T],
+    lock_path: Path,
+    *,
+    exclusive: bool,
+    fn: Callable[[], _T],
     deadline_s: float = FAMILY_LOCK_DEADLINE_S,
 ) -> _T:
-    fd = acquire_family_lock(
-        lock_path, exclusive=exclusive, deadline_s=deadline_s)
+    fd = acquire_family_lock(lock_path, exclusive=exclusive, deadline_s=deadline_s)
     try:
         return fn()
     finally:

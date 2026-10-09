@@ -5,7 +5,8 @@ def test_failure_fingerprint_cooldown_reason_change_and_recovery(tmp_path):
     state = tmp_path / "cadence-alert.json"
 
     emit, message = record_failure(
-        state, fingerprint="watchlist:duplicate_symbol",
+        state,
+        fingerprint="watchlist:duplicate_symbol",
         detail="reason=watchlist_preflight_failed_duplicate_symbol",
         now=100,
     )
@@ -14,14 +15,16 @@ def test_failure_fingerprint_cooldown_reason_change_and_recovery(tmp_path):
     assert "consecutive=1" in message
 
     emit, message = record_failure(
-        state, fingerprint="watchlist:duplicate_symbol",
+        state,
+        fingerprint="watchlist:duplicate_symbol",
         detail="reason=watchlist_preflight_failed_duplicate_symbol",
         now=200,
     )
     assert (emit, message) == (False, "")
 
     emit, message = record_failure(
-        state, fingerprint="credential:missing",
+        state,
+        fingerprint="credential:missing",
         detail="reason=credential_preflight_failed",
         now=300,
     )
@@ -30,7 +33,8 @@ def test_failure_fingerprint_cooldown_reason_change_and_recovery(tmp_path):
     assert "consecutive=1" in message
 
     emit, message = record_failure(
-        state, fingerprint="credential:missing",
+        state,
+        fingerprint="credential:missing",
         detail="reason=credential_preflight_failed",
         now=3900,
     )

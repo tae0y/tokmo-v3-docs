@@ -1,12 +1,12 @@
 """Configurable one-shot subscription model adapter; no launcher or tools."""
+
 import json
 import os
 import time
 from pathlib import Path
-from urllib.request import build_opener, ProxyHandler
+from urllib.request import ProxyHandler, build_opener
 
-from tokmo.facts.news_http import zai_chat_once, _NoRedirect
-
+from tokmo.facts.news_http import _NoRedirect, zai_chat_once
 
 POLICY = """너는 개인 투자자의 중요 사건 감지 담당이다. 출력은 한국어 JSON만.
 입력은 과거·합성 재현에도 사용된다. 합성 표기 자체를 중요도 제외 이유로 삼지 말라.
@@ -79,6 +79,7 @@ class _Capture:
     def open(self, request, timeout):
         response = self.handler.open(request, timeout=timeout)
         original = response.read
+
         def read(size=-1):
             raw = original(size)
             try:
@@ -86,6 +87,7 @@ class _Capture:
             except (ValueError, AttributeError):
                 pass
             return raw
+
         response.read = read
         return response
 
@@ -99,20 +101,54 @@ class DecisionModel:
     def __call__(self, request):
         started = time.monotonic()
         from tokmo.programs.news_classifier_executor import read_zai_credential_file
-        key = os.environ.get("ZAI_API_KEY") or os.environ.get("GLM_API_KEY") or read_zai_credential_file(self.env_file)
+
+        key = (
+            os.environ.get("ZAI_API_KEY")
+            or os.environ.get("GLM_API_KEY")
+            or read_zai_credential_file(self.env_file)
+        )
         capture = _Capture()
-        prompt = POLICY + (SCREEN if self.stage == "screen" else ANALYZE) + "\nINPUT_JSON:\n" + json.dumps(request, ensure_ascii=False)
-        text = zai_chat_once(prompt, timeout_seconds=self.timeout, api_key=key,
-                             opener=capture, model=self.model, max_tokens=self.max_output_tokens, json_mode=True)
+        prompt = (
+            POLICY
+            + (SCREEN if self.stage == "screen" else ANALYZE)
+            + "\nINPUT_JSON:\n"
+            + json.dumps(request, ensure_ascii=False)
+        )
+        text = zai_chat_once(
+            prompt,
+            timeout_seconds=self.timeout,
+            api_key=key,
+            opener=capture,
+            model=self.model,
+            max_tokens=self.max_output_tokens,
+            json_mode=True,
+        )
         result = json.loads(text)
         if not isinstance(result, dict):
             raise ValueError("Expected JSON object")
         if set(result) == {"answer"} and isinstance(result["answer"], dict):
             result = result["answer"]
-        result.update(_usage=capture.usage, _model=self.model, _elapsed_seconds=round(time.monotonic() - started, 3))
+        result.update(
+            _usage=capture.usage,
+            _model=self.model,
+            _elapsed_seconds=round(time.monotonic() - started, 3),
+        )
         return result
 
 
-def build_models(model=None, *, screen_model="glm-5.3-flash", analysis_model="glm-5.3", timeout=90, env_file=None):
-    return (DecisionModel(model or screen_model, "screen", timeout=timeout, env_file=env_file),
-            DecisionModel(model or analysis_model, "analyze", timeout=timeout, env_file=env_file))
+def build_models(
+    model=None,
+    *,
+    screen_model="glm-5.3-flash",
+    analysis_model="glm-5.3",
+    timeout=90,
+    env_file=None,
+):
+    return (
+        DecisionModel(
+            model or screen_model, "screen", timeout=timeout, env_file=env_file
+        ),
+        DecisionModel(
+            model or analysis_model, "analyze", timeout=timeout, env_file=env_file
+        ),
+    )

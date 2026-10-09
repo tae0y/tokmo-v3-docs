@@ -11,9 +11,10 @@ an outbox row created before delivery.cutoff (semantic aware-UTC
 comparison, fail-closed on malformed/naive timestamps), and the attempt
 reservation/cap must stay untouched when no post-cutoff row exists.
 """
+
 import json
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from tokmo.programs.news_event_admission import run_news_event_admission
@@ -21,10 +22,10 @@ from tokmo.records.news_episode_store import NewsEpisodeStore
 from tokmo.records.ops_kernel import OpsKernelStore
 from tokmo.values.ops_kernel import ProducerRole
 
-UTC = timezone.utc
-CUTOFF = datetime(2026, 8, 22, 2, 6, 19, tzinfo=UTC)   # gate r2 cutoff
+UTC = UTC
+CUTOFF = datetime(2026, 8, 22, 2, 6, 19, tzinfo=UTC)  # gate r2 cutoff
 WINDOW_END = CUTOFF + timedelta(minutes=60)
-NOW = datetime(2026, 8, 22, 2, 7, 0, tzinfo=UTC)       # natural pulse tick
+NOW = datetime(2026, 8, 22, 2, 7, 0, tzinfo=UTC)  # natural pulse tick
 OLD_ONE = datetime(2026, 8, 21, 23, 33, 0, 283067, tzinfo=UTC)
 OLD_TWO = datetime(2026, 8, 21, 23, 34, 0, 339226, tzinfo=UTC)
 FRESH = CUTOFF + timedelta(seconds=30)
@@ -35,19 +36,26 @@ PRED_ID = "news-g3-canary-20260821"
 
 def _stores(tmp_path):
     news = NewsEpisodeStore(tmp_path / "stores" / "news_episodes.sqlite3")
-    ops = OpsKernelStore(tmp_path / "ops" / "ops_kernel.sqlite3",
-                         stable_phase_ids=frozenset())
+    ops = OpsKernelStore(
+        tmp_path / "ops" / "ops_kernel.sqlite3", stable_phase_ids=frozenset()
+    )
     return news, ops
 
 
 def _draft(episode_id, revision_no, *, observed_at, body="본문"):
-    return {"episode_id": episode_id, "revision_no": revision_no,
-            "revision_kind": "INITIAL" if revision_no == 1
-            else "MATERIAL_UPDATE",
-            "body_text": body, "portfolio_context_digest": "0" * 64,
-            "confidence": 50, "material_change_kind":
-                "FIRST_ADMISSION" if revision_no == 1 else "SCALE_CHANGE",
-            "material_change_observed_at": observed_at, "links": ()}
+    return {
+        "episode_id": episode_id,
+        "revision_no": revision_no,
+        "revision_kind": "INITIAL" if revision_no == 1 else "MATERIAL_UPDATE",
+        "body_text": body,
+        "portfolio_context_digest": "0" * 64,
+        "confidence": 50,
+        "material_change_kind": "FIRST_ADMISSION"
+        if revision_no == 1
+        else "SCALE_CHANGE",
+        "material_change_observed_at": observed_at,
+        "links": (),
+    }
 
 
 def _admit(news, ops, term, *, now, body="본문"):
@@ -56,10 +64,16 @@ def _admit(news, ops, term, *, now, body="본문"):
     admission-time eligibility passes (no admission cutoff)."""
     episode = news.upsert(term, (), now)
     run_news_event_admission(
-        store=news, ops_kernel=ops, role=ProducerRole.HERMES,
-        draft=_draft(episode.episode_id, 1,
-                     observed_at=now - timedelta(minutes=5), body=body),
-        activation_enabled=True, telegram_cutoff=None, now=now)
+        store=news,
+        ops_kernel=ops,
+        role=ProducerRole.HERMES,
+        draft=_draft(
+            episode.episode_id, 1, observed_at=now - timedelta(minutes=5), body=body
+        ),
+        activation_enabled=True,
+        telegram_cutoff=None,
+        now=now,
+    )
     return episode.episode_id
 
 
@@ -67,28 +81,37 @@ def _sender_recorder(calls, provider_message_id="608"):
     def sender(text, reply_markup=None):
         calls.append((text, reply_markup))
         return provider_message_id
+
     return sender
 
 
 def _canary_delivery():
     from tokmo.programs.pulse_production_deps import NewsDeliveryV1
-    return NewsDeliveryV1("TELEGRAM_CANARY", ACTIVATION_ID, CUTOFF,
-                          WINDOW_END, 1)
+
+    return NewsDeliveryV1("TELEGRAM_CANARY", ACTIVATION_ID, CUTOFF, WINDOW_END, 1)
 
 
 def _live_delivery():
     from tokmo.programs.pulse_production_deps import NewsDeliveryV1
-    return NewsDeliveryV1("TELEGRAM_LIVE", LIVE_ID, CUTOFF,
-                          CUTOFF + timedelta(hours=24), None, PRED_ID)
+
+    return NewsDeliveryV1(
+        "TELEGRAM_LIVE", LIVE_ID, CUTOFF, CUTOFF + timedelta(hours=24), None, PRED_ID
+    )
 
 
 def _run_canary(news, ops, sender, *, now=NOW):
     from tokmo.programs.news_alert_delivery import run_canary_alert_delivery
+
     return run_canary_alert_delivery(
-        ops_kernel=ops, role=ProducerRole.HERMES, ledger=news,
-        delivery=_canary_delivery(), telegram_send=sender,
+        ops_kernel=ops,
+        role=ProducerRole.HERMES,
+        ledger=news,
+        delivery=_canary_delivery(),
+        telegram_send=sender,
         keyboard_resolver=lambda alert_id: None,
-        delivery_binder=news.bind_delivery_by_ops_alert, now=now)
+        delivery_binder=news.bind_delivery_by_ops_alert,
+        now=now,
+    )
 
 
 def _seed_predecessor(news):
@@ -96,31 +119,46 @@ def _seed_predecessor(news):
     news.reserve_canary_attempt(PRED_ID, "nal-pred", now=earlier)
     news.settle_canary_attempt(PRED_ID, "SENT", now=earlier)
     news.record_canary_slot_proof(
-        PRED_ID, ("2026-08-22T00:30:00+00:00", "2026-08-22T01:00:00+00:00"),
-        1, now=CUTOFF - timedelta(hours=1))
+        PRED_ID,
+        ("2026-08-22T00:30:00+00:00", "2026-08-22T01:00:00+00:00"),
+        1,
+        now=CUTOFF - timedelta(hours=1),
+    )
 
 
 def _run_live(news, ops, sender, *, now=NOW):
     from tokmo.programs.news_alert_delivery import run_live_alert_delivery
+
     return run_live_alert_delivery(
-        ops_kernel=ops, role=ProducerRole.HERMES, ledger=news,
-        delivery=_live_delivery(), telegram_send=sender,
+        ops_kernel=ops,
+        role=ProducerRole.HERMES,
+        ledger=news,
+        delivery=_live_delivery(),
+        telegram_send=sender,
         keyboard_resolver=lambda alert_id: None,
-        delivery_binder=news.bind_delivery_by_ops_alert, now=now,
-        body_guard=lambda outbox: True)
+        delivery_binder=news.bind_delivery_by_ops_alert,
+        now=now,
+        body_guard=lambda outbox: True,
+    )
 
 
 def _telegram_rows(ops):
-    return [tuple(row) for row in ops._connect().execute(
-        "SELECT alert_id,status,attempted_at,created_at FROM alert_outbox"
-        " WHERE channel='TELEGRAM' ORDER BY created_at,alert_id").fetchall()]
+    return [
+        tuple(row)
+        for row in ops._connect()
+        .execute(
+            "SELECT alert_id,status,attempted_at,created_at FROM alert_outbox"
+            " WHERE channel='TELEGRAM' ORDER BY created_at,alert_id"
+        )
+        .fetchall()
+    ]
 
 
 def _rewrite_created_at(ops, alert_id, raw):
     connection = ops._connect()
     connection.execute(
-        "UPDATE alert_outbox SET created_at=? WHERE alert_id=?",
-        (raw, alert_id))
+        "UPDATE alert_outbox SET created_at=? WHERE alert_id=?", (raw, alert_id)
+    )
     connection.commit()
 
 
@@ -140,8 +178,10 @@ def test_incident_old_pending_backlog_not_selected_by_canary(tmp_path):
     assert result["reserved"] == 0
     assert calls == []
     assert news.canary_attempt(ACTIVATION_ID) is None
-    assert [(row[1], row[2]) for row in _telegram_rows(ops)] \
-        == [("PENDING", None), ("PENDING", None)]
+    assert [(row[1], row[2]) for row in _telegram_rows(ops)] == [
+        ("PENDING", None),
+        ("PENDING", None),
+    ]
 
 
 def test_canary_replay_zero_then_fresh_row_still_has_cap(tmp_path):
@@ -151,8 +191,9 @@ def test_canary_replay_zero_then_fresh_row_still_has_cap(tmp_path):
     _admit(news, ops, "엠알엔에이", now=OLD_ONE)
     calls = []
     for tick in range(3):
-        result = _run_canary(news, ops, _sender_recorder(calls),
-                             now=NOW + timedelta(seconds=60 * tick))
+        result = _run_canary(
+            news, ops, _sender_recorder(calls), now=NOW + timedelta(seconds=60 * tick)
+        )
         assert result["claimed"] == 0 and calls == []
         assert news.canary_attempt(ACTIVATION_ID) is None
     fresh_episode = _admit(news, ops, "신규사건", now=FRESH, body="신규본문")
@@ -188,8 +229,7 @@ def test_live_selector_excludes_pre_cutoff_backlog(tmp_path):
     assert result["claimed"] == 0 and result["sent"] == 0
     assert result["tripped"] is None and calls == []
     assert news.live_trip(LIVE_ID) is None
-    assert [(row[1], row[2]) for row in _telegram_rows(ops)] \
-        == [("PENDING", None)]
+    assert [(row[1], row[2]) for row in _telegram_rows(ops)] == [("PENDING", None)]
 
 
 def test_live_mixed_backlog_selects_only_post_cutoff_row(tmp_path):
@@ -243,8 +283,7 @@ def test_utc_offset_forms_compare_semantically_not_textually(tmp_path):
     assert result["claimed"] == 0 and calls == []
     assert news.canary_attempt(ACTIVATION_ID) is None
     _admit(news, ops, "경계시각", now=FRESH, body="경계본문")
-    boundary_id = next(row[0] for row in _telegram_rows(ops)
-                       if row[0] != old_row[0])
+    boundary_id = next(row[0] for row in _telegram_rows(ops) if row[0] != old_row[0])
     _rewrite_created_at(ops, boundary_id, "2026-08-22T02:06:19+00:00")
     result = _run_canary(news, ops, _sender_recorder(calls))
     assert result["sent"] == 1 and len(calls) == 1
@@ -264,20 +303,25 @@ def test_cutoff_scan_skips_deep_ineligible_backlog_to_first_eligible(tmp_path):
     eligible row is untouched (selection stops at the first eligible)."""
     news, ops = _stores(tmp_path)
     for index in range(8):
-        _admit(news, ops, f"구형{index}",
-               now=OLD_ONE + timedelta(seconds=index), body=f"옛본문{index}")
+        _admit(
+            news,
+            ops,
+            f"구형{index}",
+            now=OLD_ONE + timedelta(seconds=index),
+            body=f"옛본문{index}",
+        )
     backlog = _telegram_rows(ops)
     _rewrite_created_at(ops, backlog[0][0], "0000-not-a-timestamp")
     _rewrite_created_at(ops, backlog[1][0], "2026-08-21T23:00:00")  # naive
-    ineligible = {row[0]: (row[1], row[2], row[3])
-                  for row in _telegram_rows(ops)}
+    ineligible = {row[0]: (row[1], row[2], row[3]) for row in _telegram_rows(ops)}
     _admit(news, ops, "첫적격", now=FRESH, body="첫적격본문")
-    first_id = next(row[0] for row in _telegram_rows(ops)
-                    if row[0] not in ineligible)
-    _admit(news, ops, "차적격", now=FRESH + timedelta(seconds=1),
-           body="차적격본문")
-    second_id = next(row[0] for row in _telegram_rows(ops)
-                     if row[0] not in ineligible and row[0] != first_id)
+    first_id = next(row[0] for row in _telegram_rows(ops) if row[0] not in ineligible)
+    _admit(news, ops, "차적격", now=FRESH + timedelta(seconds=1), body="차적격본문")
+    second_id = next(
+        row[0]
+        for row in _telegram_rows(ops)
+        if row[0] not in ineligible and row[0] != first_id
+    )
     calls = []
     result = _run_canary(news, ops, _sender_recorder(calls))
     assert result["sent"] == 1 and len(calls) == 1
@@ -310,17 +354,27 @@ def test_no_cutoff_claim_keeps_historical_unfiltered_first_row(tmp_path):
 
 def _write_gate(root, cutoff=CUTOFF, window_end=WINDOW_END):
     path = Path(root) / "news_activation.json"
-    path.write_text(json.dumps({
-        "enabled": True, "producer_mode": "SHADOW",
-        "delivery_mode": "TELEGRAM_CANARY", "activation_id": ACTIVATION_ID,
-        "cutoff": cutoff.isoformat(), "window_end": window_end.isoformat(),
-        "telegram_attempt_cap": 1, "approved_by": "woong"}))
+    path.write_text(
+        json.dumps(
+            {
+                "enabled": True,
+                "producer_mode": "SHADOW",
+                "delivery_mode": "TELEGRAM_CANARY",
+                "activation_id": ACTIVATION_ID,
+                "cutoff": cutoff.isoformat(),
+                "window_end": window_end.isoformat(),
+                "telegram_attempt_cap": 1,
+                "approved_by": "woong",
+            }
+        )
+    )
     os.chmod(path, 0o600)
 
 
 def test_readback_and_preflight_expose_post_cutoff_pending_count(tmp_path):
     from tokmo.programs.news_canary_readback import read_news_canary_state
     from tokmo.programs.news_g3_preflight import read_news_preflight
+
     _write_gate(tmp_path)
     news, ops = _stores(tmp_path)
     _admit(news, ops, "엠알엔에이", now=OLD_ONE)

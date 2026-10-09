@@ -23,6 +23,7 @@ Usage:
 DO NOT RUN during cadence operation. DO NOT RUN against production without an
 authorization record naming the exact source SHA-256.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -61,7 +62,7 @@ FAULT_ENV = "TOKMO_MIGRATION_FAULT"
 FAULT_AFTER_REPLACE = "after_replace"
 FAULT_AT_FSYNC = "at_fsync"
 FAULT_AT_POST_VERIFY = "post_verify"
-FAULT_RESTORE_PREFIX = "restore:"   # + the primitive's stage name
+FAULT_RESTORE_PREFIX = "restore:"  # + the primitive's stage name
 
 
 def _fault(point: str) -> None:
@@ -77,8 +78,9 @@ def _fault(point: str) -> None:
         raise _FaultAt(point)
 
 
-def _restore(source: Path, backup: Path, manifest: Path, *,
-             target_already_replaced: bool = False) -> int:
+def _restore(
+    source: Path, backup: Path, manifest: Path, *, target_already_replaced: bool = False
+) -> int:
     """Durably put the verified backup back, never consuming it.
 
     Delegates to the one shared primitive so there is no second, subtly
@@ -95,34 +97,51 @@ def _restore(source: Path, backup: Path, manifest: Path, *,
     # The restore has its own stage vocabulary; namespace it so an install
     # fault and a restore fault of the same name cannot collide.
     outcome = durable_restore_from_backup(
-        target=Path(source), backup=Path(backup),
+        target=Path(source),
+        backup=Path(backup),
         expected_sha256=expected,
-        fault=lambda stage: _fault(f"{FAULT_RESTORE_PREFIX}{stage}"))
+        fault=lambda stage: _fault(f"{FAULT_RESTORE_PREFIX}{stage}"),
+    )
 
     if outcome.ok:
         if not _verify_restored_schema(Path(source)):
-            print("ERROR: restored file does not carry the expected schema",
-                  file=sys.stderr)
-            print("UNCERTAIN: bytes match the manifest but the schema check "
-                  "failed. Backup and manifest are intact.", file=sys.stderr)
+            print(
+                "ERROR: restored file does not carry the expected schema",
+                file=sys.stderr,
+            )
+            print(
+                "UNCERTAIN: bytes match the manifest but the schema check "
+                "failed. Backup and manifest are intact.",
+                file=sys.stderr,
+            )
             return EXIT_RESTORE_FAILED
-        print(f"Restored from backup; sha256 {expected[:16]}... and schema "
-              f"verified. Backup and manifest preserved and re-verified.")
+        print(
+            f"Restored from backup; sha256 {expected[:16]}... and schema "
+            f"verified. Backup and manifest preserved and re-verified."
+        )
         return EXIT_RESTORED
 
-    print(f"ERROR: restore failed at stage '{outcome.stage}': {outcome.detail}",
-          file=sys.stderr)
+    print(
+        f"ERROR: restore failed at stage '{outcome.stage}': {outcome.detail}",
+        file=sys.stderr,
+    )
     if outcome.replacement_may_have_occurred or target_already_replaced:
         # Either the restore itself may have replaced, or the install already
         # did and the restore did not finish undoing it. Both mean the target
         # is not known to be the original.
-        print("UNCERTAIN: the target is not known to hold the original bytes. "
-              "The backup and manifest are intact and were not overwritten; "
-              "rerun --restore.", file=sys.stderr)
+        print(
+            "UNCERTAIN: the target is not known to hold the original bytes. "
+            "The backup and manifest are intact and were not overwritten; "
+            "rerun --restore.",
+            file=sys.stderr,
+        )
     else:
-        print("The target was NOT replaced by this restore and the install had "
-              "not replaced it either. The backup and manifest are intact and "
-              "were not overwritten.", file=sys.stderr)
+        print(
+            "The target was NOT replaced by this restore and the install had "
+            "not replaced it either. The backup and manifest are intact and "
+            "were not overwritten.",
+            file=sys.stderr,
+        )
     return EXIT_RESTORE_FAILED
 
 
@@ -130,8 +149,10 @@ def _verify_restored_schema(source: Path) -> bool:
     """A restored snapshot store must reopen as the original generation."""
     try:
         from tokmo.records.holdings_snapshots import HoldingsSnapshotStore
+
         connection, generation = HoldingsSnapshotStore(
-            source, clock=lambda: None)._open_read_generation()
+            source, clock=lambda: None
+        )._open_read_generation()
         connection.close()
         return generation == 1
     except Exception:  # noqa: BLE001 - any doubt is a failed restore
@@ -140,17 +161,30 @@ def _verify_restored_schema(source: Path) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Offline holdings snapshot store migration executor")
-    parser.add_argument("--source", type=Path, required=True,
-                        help="the live holdings snapshot SQLite file")
+        description="Offline holdings snapshot store migration executor"
+    )
+    parser.add_argument(
+        "--source",
+        type=Path,
+        required=True,
+        help="the live holdings snapshot SQLite file",
+    )
     parser.add_argument("--backup", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, required=True)
-    parser.add_argument("--authorization-record", type=Path, default=None,
-                        help="file naming the exact source SHA-256")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="inspect only; write nothing")
-    parser.add_argument("--restore", action="store_true",
-                        help="put the verified backup back and re-verify")
+    parser.add_argument(
+        "--authorization-record",
+        type=Path,
+        default=None,
+        help="file naming the exact source SHA-256",
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="inspect only; write nothing"
+    )
+    parser.add_argument(
+        "--restore",
+        action="store_true",
+        help="put the verified backup back and re-verify",
+    )
     args = parser.parse_args(argv)
 
     from tokmo.records.holdings_snapshot_migration import (
@@ -179,23 +213,25 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_OK
 
     if args.authorization_record is None:
-        print("ERROR: --authorization-record is required for a real migration",
-              file=sys.stderr)
+        print(
+            "ERROR: --authorization-record is required for a real migration",
+            file=sys.stderr,
+        )
         return EXIT_REFUSED
     if not args.authorization_record.exists():
         print("ERROR: authorization record not found", file=sys.stderr)
         return EXIT_REFUSED
-    if inventory.sha256 not in args.authorization_record.read_text(
-            encoding="utf-8"):
-        print("ERROR: authorization record does not name the source sha256",
-              file=sys.stderr)
+    if inventory.sha256 not in args.authorization_record.read_text(encoding="utf-8"):
+        print(
+            "ERROR: authorization record does not name the source sha256",
+            file=sys.stderr,
+        )
         return EXIT_REFUSED
 
     print(f"Backing up to {args.backup} ...")
     receipt = backup_v1(args.source, args.backup, args.manifest)
     if receipt.sha256 != inventory.sha256 or _sha256(args.backup) != inventory.sha256:
-        print("ERROR: backup does not match the inspected source",
-              file=sys.stderr)
+        print("ERROR: backup does not match the inspected source", file=sys.stderr)
         return EXIT_REFUSED
     print(f"  backup sha256 verified: {receipt.sha256[:16]}...")
 
@@ -212,8 +248,9 @@ def main(argv: list[str] | None = None) -> int:
         except OSError:
             pass
         if _sha256(args.source) != inventory.sha256:
-            print("ERROR: source changed despite a pre-install failure",
-                  file=sys.stderr)
+            print(
+                "ERROR: source changed despite a pre-install failure", file=sys.stderr
+            )
             return EXIT_REFUSED
         print("Source is byte-identical; nothing was installed.")
         return EXIT_REFUSED
@@ -239,15 +276,17 @@ def main(argv: list[str] | None = None) -> int:
             SCHEMA_GENERATION_TWO,
             HoldingsSnapshotStore,
         )
+
         store = HoldingsSnapshotStore(args.source, clock=lambda: None)
         connection, generation = store._open_read_generation()
         try:
             counts = {
-                table: connection.execute(
-                    f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-                for table in ("holdings_snapshots",
-                              "holdings_snapshot_accounts",
-                              "holdings_snapshot_items")
+                table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                for table in (
+                    "holdings_snapshots",
+                    "holdings_snapshot_accounts",
+                    "holdings_snapshot_items",
+                )
             }
         finally:
             connection.close()
@@ -266,17 +305,25 @@ def main(argv: list[str] | None = None) -> int:
             if _sha256(args.source) == inventory.sha256:
                 print("Replacement did not occur; source is byte-identical.")
                 return EXIT_REFUSED
-            print("UNCERTAIN: replacement did not report success but the "
-                  "source changed; restoring.", file=sys.stderr)
+            print(
+                "UNCERTAIN: replacement did not report success but the "
+                "source changed; restoring.",
+                file=sys.stderr,
+            )
         else:
-            print("Replacement occurred; restoring the verified backup ...",
-                  file=sys.stderr)
-        return _restore(args.source, args.backup, args.manifest,
-                        target_already_replaced=replaced)
+            print(
+                "Replacement occurred; restoring the verified backup ...",
+                file=sys.stderr,
+            )
+        return _restore(
+            args.source, args.backup, args.manifest, target_already_replaced=replaced
+        )
 
     print("Migration complete and verified. Generation 2 is installed.")
-    print(f"Recovery, if ever needed: --restore --source {args.source} "
-          f"--backup {args.backup} --manifest {args.manifest}")
+    print(
+        f"Recovery, if ever needed: --restore --source {args.source} "
+        f"--backup {args.backup} --manifest {args.manifest}"
+    )
     return EXIT_OK
 
 

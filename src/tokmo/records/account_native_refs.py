@@ -8,11 +8,11 @@ only at the provider-call boundary — never in logs, receipts, prompts, or
 messages.
 """
 
-from datetime import datetime, timedelta
 import os
-from pathlib import Path
 import sqlite3
 import stat
+from datetime import datetime, timedelta
+from pathlib import Path
 
 from tokmo.values.account_scope_patterns import ACCOUNT_SCOPE_RE
 
@@ -35,8 +35,10 @@ class NativeRefMappingV1:
         return self._refs.get(scope)
 
     def __repr__(self) -> str:
-        return (f"<NativeRefMappingV1 REDACTED scopes={len(self._refs)} "
-                f"binding={self.receipt_binding!r}>")
+        return (
+            f"<NativeRefMappingV1 REDACTED scopes={len(self._refs)} "
+            f"binding={self.receipt_binding!r}>"
+        )
 
     def __str__(self) -> str:
         return self.__repr__()
@@ -53,8 +55,11 @@ CREATE TABLE IF NOT EXISTS account_native_refs(
 
 
 def _aware_utc(value) -> bool:
-    return (isinstance(value, datetime) and value.tzinfo is not None
-            and value.utcoffset() == timedelta(0))
+    return (
+        isinstance(value, datetime)
+        and value.tzinfo is not None
+        and value.utcoffset() == timedelta(0)
+    )
 
 
 class AccountNativeRefStoreV1:
@@ -105,9 +110,15 @@ class AccountNativeRefStoreV1:
                 connection.execute("DELETE FROM account_native_refs")
                 connection.executemany(
                     "INSERT INTO account_native_refs VALUES(?,?,?,?)",
-                    ((scope, ref, receipt_binding,
-                      now.isoformat().replace("+00:00", "Z"))
-                     for scope, ref in sorted(refs.items())),
+                    (
+                        (
+                            scope,
+                            ref,
+                            receipt_binding,
+                            now.isoformat().replace("+00:00", "Z"),
+                        )
+                        for scope, ref in sorted(refs.items())
+                    ),
                 )
                 connection.execute("COMMIT")
             except BaseException:

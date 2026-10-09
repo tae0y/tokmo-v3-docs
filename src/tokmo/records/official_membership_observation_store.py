@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import fields
-from datetime import date, datetime, timezone
 import os
-from pathlib import Path
 import sqlite3
 import time
+from dataclasses import fields
+from datetime import UTC, date, datetime
+from pathlib import Path
 
 from tokmo.records.canonical_observation_registry import (
     OFFICIAL_MEMBERSHIP_OBSERVATION_FAMILY,
@@ -90,18 +90,22 @@ _LEGACY_READONLY_METADATA = {
 
 def _plain(value):
     if isinstance(value, datetime):
-        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
     if isinstance(value, date):
         return value.isoformat()
     if isinstance(value, tuple):
         return [_plain(item) for item in value]
-    if isinstance(value, MembershipPolicyV1 | ListingVenueV1
-                  | MembershipSectorV1 | ObservationSourceKindV1):
+    if isinstance(
+        value,
+        MembershipPolicyV1
+        | ListingVenueV1
+        | MembershipSectorV1
+        | ObservationSourceKindV1,
+    ):
         return value.value
     if hasattr(value, "__dataclass_fields__"):
         return {
-            field.name: _plain(getattr(value, field.name))
-            for field in fields(value)
+            field.name: _plain(getattr(value, field.name)) for field in fields(value)
         }
     return value
 
@@ -113,7 +117,7 @@ def _canonical_json(value) -> bytes:
 
 
 def _utc(value: datetime) -> str:
-    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 def _decode_datetime(text: str) -> datetime:
@@ -201,9 +205,7 @@ def _decode_acquisition(data: dict) -> OfficialMembershipAcquisitionV1:
         source_contract_version=data["source_contract_version"],
         sic_snapshot=_decode_sic_snapshot(data["sic_snapshot"]),
         listings=tuple(_decode_listing(item) for item in data["listings"]),
-        registry_rows=tuple(
-            _decode_registry(item) for item in data["registry_rows"]
-        ),
+        registry_rows=tuple(_decode_registry(item) for item in data["registry_rows"]),
         issuer_rows=tuple(_decode_issuer(item) for item in data["issuer_rows"]),
     )
 
@@ -223,8 +225,7 @@ def _decode_material(data: dict) -> MembershipMaterialV1:
         sic_snapshot_version=data["sic_snapshot_version"],
         sic_code=data["sic_code"],
         observation_instants=tuple(
-            _decode_observation_instant(item)
-            for item in data["observation_instants"]
+            _decode_observation_instant(item) for item in data["observation_instants"]
         ),
         listing_source_ref=data["listing_source_ref"],
         registry_source_ref=data["registry_source_ref"],
@@ -273,7 +274,7 @@ class OfficialMembershipObservationStore:
         self._stamp_factory = (
             stamp_factory
             if stamp_factory is not None
-            else lambda: datetime.fromtimestamp(time.time(), tz=timezone.utc)
+            else lambda: datetime.fromtimestamp(time.time(), tz=UTC)
         )
 
     def _initialize(self, connection: sqlite3.Connection) -> None:
@@ -357,16 +358,22 @@ class OfficialMembershipObservationStore:
             reason=reason,
             promoted_symbols=tuple(sorted(promoted_symbols)),
             stored_at=stored_at,
-            source_receipts=tuple(sorted((
-                SourceReceiptLinkV1(
-                    source_kind=item.source_kind,
-                    subject_key=item.subject_key,
-                    request_identity=item.request_identity,
-                    started_count=item.started_count,
-                    observed_at=item.observed_at,
-                    payload_sha256=item.payload_sha256,
-                ) for item in payloads
-            ), key=lambda item: (item.source_kind.value, item.subject_key))),
+            source_receipts=tuple(
+                sorted(
+                    (
+                        SourceReceiptLinkV1(
+                            source_kind=item.source_kind,
+                            subject_key=item.subject_key,
+                            request_identity=item.request_identity,
+                            started_count=item.started_count,
+                            observed_at=item.observed_at,
+                            payload_sha256=item.payload_sha256,
+                        )
+                        for item in payloads
+                    ),
+                    key=lambda item: (item.source_kind.value, item.subject_key),
+                )
+            ),
         )
 
     def _existing_state(self, connection: sqlite3.Connection, acquisition_id: str):
@@ -376,17 +383,21 @@ class OfficialMembershipObservationStore:
         ).fetchone()
         if acquisition_row is None:
             return None
-        payload_rows = tuple(connection.execute(
-            "SELECT source_kind, subject_key, request_identity_json, started_count, "
-            "observed_at, payload_sha256, payload_bytes "
-            "FROM payloads WHERE acquisition_id=? ORDER BY source_kind, subject_key",
-            (acquisition_id,),
-        ))
-        material_rows = tuple(connection.execute(
-            "SELECT symbol, material_json FROM materials WHERE acquisition_id=? "
-            "ORDER BY symbol",
-            (acquisition_id,),
-        ))
+        payload_rows = tuple(
+            connection.execute(
+                "SELECT source_kind, subject_key, request_identity_json, started_count, "
+                "observed_at, payload_sha256, payload_bytes "
+                "FROM payloads WHERE acquisition_id=? ORDER BY source_kind, subject_key",
+                (acquisition_id,),
+            )
+        )
+        material_rows = tuple(
+            connection.execute(
+                "SELECT symbol, material_json FROM materials WHERE acquisition_id=? "
+                "ORDER BY symbol",
+                (acquisition_id,),
+            )
+        )
         receipt_row = connection.execute(
             "SELECT receipt_json FROM receipts WHERE acquisition_id=?",
             (acquisition_id,),
@@ -426,7 +437,9 @@ class OfficialMembershipObservationStore:
                 item.payload_sha256,
                 item.payload_bytes,
             )
-            for item in sorted(payloads, key=lambda item: (item.source_kind.value, item.subject_key))
+            for item in sorted(
+                payloads, key=lambda item: (item.source_kind.value, item.subject_key)
+            )
         )
         material_json_rows = tuple(
             (item.symbol, _canonical_json(item))
@@ -445,8 +458,10 @@ class OfficialMembershipObservationStore:
                     and tuple(
                         (row[0], row[1], row[2], row[3], row[4], row[5], row[6])
                         for row in existing[1]
-                    ) == payload_json_rows
-                    and tuple((row[0], row[1]) for row in existing[2]) == material_json_rows
+                    )
+                    == payload_json_rows
+                    and tuple((row[0], row[1]) for row in existing[2])
+                    == material_json_rows
                 )
                 connection.execute("ROLLBACK")
                 return self._build_receipt(
@@ -536,7 +551,9 @@ class OfficialMembershipObservationStore:
                 item.payload_sha256,
                 item.payload_bytes,
             )
-            for item in sorted(payloads, key=lambda item: (item.source_kind.value, item.subject_key))
+            for item in sorted(
+                payloads, key=lambda item: (item.source_kind.value, item.subject_key)
+            )
         )
         receipt_json = _canonical_json(receipt)
         connection, _ = self._open()
@@ -551,7 +568,8 @@ class OfficialMembershipObservationStore:
                     and tuple(
                         (row[0], row[1], row[2], row[3], row[4], row[5], row[6])
                         for row in existing[1]
-                    ) == payload_json_rows
+                    )
+                    == payload_json_rows
                     and not existing[2]
                 )
                 connection.execute("ROLLBACK")
@@ -646,7 +664,10 @@ class OfficialMembershipObservationStore:
             import json
 
             material = _decode_material(json.loads(row[0].decode("utf-8")))
-            if require_policy is not None and material.membership_policy.value != require_policy:
+            if (
+                require_policy is not None
+                and material.membership_policy.value != require_policy
+            ):
                 return None
             return material
         finally:
@@ -665,8 +686,7 @@ class OfficialMembershipObservationStore:
                 (acquisition_id,),
             ).fetchall()
             return tuple(
-                _decode_material(json.loads(row[0].decode("utf-8")))
-                for row in rows
+                _decode_material(json.loads(row[0].decode("utf-8"))) for row in rows
             )
         finally:
             connection.close()

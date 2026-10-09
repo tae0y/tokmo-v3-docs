@@ -44,11 +44,16 @@ def parse_yield_curve_xml(xml_text: str, *, observed_at: datetime) -> YieldCurve
     )
 
 
-def get_yield_curve(*, year: int, month: int, transport: Transport,
-                    clock: Callable[[], datetime]) -> YieldCurveFact:
+def get_yield_curve(
+    *, year: int, month: int, transport: Transport, clock: Callable[[], datetime]
+) -> YieldCurveFact:
     if year < 1990 or not 1 <= month <= 12:
         raise ValueError("invalid_treasury_month")
-    query = urlencode({"data": "daily_treasury_yield_curve",
-                       "field_tdr_date_value_month": f"{year:04d}{month:02d}"})
+    query = urlencode(
+        {
+            "data": "daily_treasury_yield_curve",
+            "field_tdr_date_value_month": f"{year:04d}{month:02d}",
+        }
+    )
     body = transport(f"{ENDPOINT}?{query}", 10.0)
     return parse_yield_curve_xml(body.decode("utf-8"), observed_at=clock())

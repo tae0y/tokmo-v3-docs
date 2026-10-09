@@ -53,13 +53,18 @@ class AccountSourceProfileV1:
             raise ValueError("every scope quotes through Toss current price")
         if not isinstance(self.transaction_source, TransactionSourceV1):
             raise ValueError("invalid transaction source")
-        if type(self.supports_live_orders) is not bool or type(
-                self.native_order_ref_present) is not bool:
+        if (
+            type(self.supports_live_orders) is not bool
+            or type(self.native_order_ref_present) is not bool
+        ):
             raise ValueError("invalid capability flags")
         if is_pension:
             if self.holdings_source is not HoldingsSourceV1.PENSION_EXCEL:
                 raise ValueError("pension scope requires the Excel holdings source")
-            if self.transaction_source is not TransactionSourceV1.RETIREMENT_EXCEL_IMPORT:
+            if (
+                self.transaction_source
+                is not TransactionSourceV1.RETIREMENT_EXCEL_IMPORT
+            ):
                 raise ValueError("pension transactions never route to Toss Orders")
             if self.supports_live_orders or self.native_order_ref_present:
                 raise ValueError("pension scope cannot claim live-order capability")
@@ -71,7 +76,9 @@ class AccountSourceProfileV1:
 
 
 def derive_account_source_profiles(
-    holdings: CurrentHoldingsV1, *, native_ref_scopes: frozenset,
+    holdings: CurrentHoldingsV1,
+    *,
+    native_ref_scopes: frozenset,
 ) -> tuple[AccountSourceProfileV1, ...]:
     """Pure derivation from the canonical composite holdings snapshot."""
     if not isinstance(holdings, CurrentHoldingsV1):
@@ -82,26 +89,35 @@ def derive_account_source_profiles(
     for account in holdings.accounts:
         scope = account.account_scope
         if PENSION_SCOPE_RE.fullmatch(scope) is not None:
-            profiles.append(AccountSourceProfileV1(
-                scope, HoldingsSourceV1.PENSION_EXCEL,
-                QuoteSourceV1.TOSS_CURRENT_PRICE,
-                TransactionSourceV1.RETIREMENT_EXCEL_IMPORT,
-                False, False,
-            ))
+            profiles.append(
+                AccountSourceProfileV1(
+                    scope,
+                    HoldingsSourceV1.PENSION_EXCEL,
+                    QuoteSourceV1.TOSS_CURRENT_PRICE,
+                    TransactionSourceV1.RETIREMENT_EXCEL_IMPORT,
+                    False,
+                    False,
+                )
+            )
         else:
-            profiles.append(AccountSourceProfileV1(
-                scope, HoldingsSourceV1.TOSS,
-                QuoteSourceV1.TOSS_CURRENT_PRICE,
-                TransactionSourceV1.TOSS_ORDERS,
-                True, scope in native_ref_scopes,
-            ))
+            profiles.append(
+                AccountSourceProfileV1(
+                    scope,
+                    HoldingsSourceV1.TOSS,
+                    QuoteSourceV1.TOSS_CURRENT_PRICE,
+                    TransactionSourceV1.TOSS_ORDERS,
+                    True,
+                    scope in native_ref_scopes,
+                )
+            )
     return tuple(profiles)
 
 
 def toss_orders_target_scopes(profiles) -> tuple[str, ...]:
     """Scopes with a live-scan obligation (§17.4 routing gate)."""
     return tuple(
-        profile.account_scope for profile in profiles
+        profile.account_scope
+        for profile in profiles
         if profile.supports_live_orders
         and profile.transaction_source is TransactionSourceV1.TOSS_ORDERS
         and profile.native_order_ref_present

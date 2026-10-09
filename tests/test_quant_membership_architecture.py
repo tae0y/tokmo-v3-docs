@@ -1,7 +1,6 @@
 import ast
 from pathlib import Path
 
-
 ROOT = Path(__file__).parents[1]
 SRC = ROOT / "src" / "tokmo"
 
@@ -52,7 +51,13 @@ def test_fixture_canary_is_detected_before_fixture_tree_exclusion():
     fixture_text = (
         ROOT / "tests/fixtures/quant_membership/review_canary.txt"
     ).read_text()
-    for token in ("client_secret", "api_key", "/Users/fake/path", "raw_body", "response_body"):
+    for token in (
+        "client_secret",
+        "api_key",
+        "/Users/fake/path",
+        "raw_body",
+        "response_body",
+    ):
         assert token in fixture_text
     production_texts = [
         (SRC / "values/official_membership_observation.py").read_text(),

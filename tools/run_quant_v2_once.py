@@ -2,8 +2,8 @@
 """Local fixture-only one-shot; never reads credentials or production runtime."""
 
 import argparse
-from datetime import date, datetime, timezone
 import json
+from datetime import UTC, date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -34,20 +34,37 @@ def main(argv=None):
         return _Reply(replies[key])
 
     deps = SimpleNamespace(
-        root=Path(data["root"]), token=data["token"], transport=transport,
-        clock=lambda: datetime.now(timezone.utc), profiles=(QuantMarketProfileV1.KR,),
-        completed_sessions={QuantMarketProfileV1.KR: date.fromisoformat(data["completed_session"])},
-        profile_revision=data["profile_revision"], report_revision=data["report_revision"],
-        shortlist_cap=data["shortlist_cap"], candle_start_cap=data["candle_start_cap"],
-        public_symbols=(), personal_symbols=(), pension_revision=None, reviewed_peers=(),
+        root=Path(data["root"]),
+        token=data["token"],
+        transport=transport,
+        clock=lambda: datetime.now(UTC),
+        profiles=(QuantMarketProfileV1.KR,),
+        completed_sessions={
+            QuantMarketProfileV1.KR: date.fromisoformat(data["completed_session"])
+        },
+        profile_revision=data["profile_revision"],
+        report_revision=data["report_revision"],
+        shortlist_cap=data["shortlist_cap"],
+        candle_start_cap=data["candle_start_cap"],
+        public_symbols=(),
+        personal_symbols=(),
+        pension_revision=None,
+        reviewed_peers=(),
     )
-    result = run_quant_once(deps=deps, now=datetime.now(timezone.utc))
+    result = run_quant_once(deps=deps, now=datetime.now(UTC))
     receipt = result.receipt
-    print(json.dumps({"identity_sha256": receipt.identity.identity_sha256,
-                      "outcome": receipt.outcome,
-                      "operation_counts": receipt.operation_counts,
-                      "report_sha256": receipt.report_sha256,
-                      "delivery_state": receipt.delivery_state}, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                "identity_sha256": receipt.identity.identity_sha256,
+                "outcome": receipt.outcome,
+                "operation_counts": receipt.operation_counts,
+                "report_sha256": receipt.report_sha256,
+                "delivery_state": receipt.delivery_state,
+            },
+            sort_keys=True,
+        )
+    )
     return 0
 
 

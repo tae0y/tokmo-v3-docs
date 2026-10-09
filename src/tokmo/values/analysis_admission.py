@@ -7,22 +7,21 @@ AI-ADMIT-001 admission evaluator may emit the same
 :class:`AdmissionDecisionV1` without changing these contracts.
 """
 
+import hashlib
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal, InvalidOperation
 from enum import Enum
-import hashlib
 from types import MappingProxyType
-from typing import Mapping
 
-from tokmo.values.material_pack import canonical_encode
-from tokmo.values.ops_kernel import require_token
 from tokmo.values.analysis_contracts import (
     ChangeBasis,
     EvidenceRefV1,
     FreshnessState,
     MaterialKindV1,
 )
+from tokmo.values.material_pack import canonical_encode
+from tokmo.values.ops_kernel import require_token
 
 
 class CriterionIdV1(str, Enum):
@@ -70,7 +69,11 @@ _AWARE_DATETIME = None
 
 
 def _aware(value: datetime, name: str) -> None:
-    if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+    if (
+        not isinstance(value, datetime)
+        or value.tzinfo is None
+        or value.utcoffset() is None
+    ):
         raise ValueError(f"{name} must be aware")
 
 
@@ -124,9 +127,7 @@ class AdmissionDecisionV1:
     @property
     def admission_reason_codes(self) -> tuple[str, ...]:
         """Ordered non-empty tuple of matched reason codes (ADMIT only)."""
-        return tuple(
-            r.reason_code.value for r in self.matched_results if r.matched
-        )
+        return tuple(r.reason_code.value for r in self.matched_results if r.matched)
 
 
 @dataclass(frozen=True)
@@ -165,13 +166,17 @@ class MaterialDeltaV1:
             raise ValueError("invalid tick_id")
         if len(self.material_binding_digest) != 64:
             raise ValueError("invalid material_binding_digest")
-        if type(self.evidence_refs) is not tuple or not self.evidence_refs or any(
-            not isinstance(r, EvidenceRefV1) for r in self.evidence_refs
+        if (
+            type(self.evidence_refs) is not tuple
+            or not self.evidence_refs
+            or any(not isinstance(r, EvidenceRefV1) for r in self.evidence_refs)
         ):
             raise ValueError("invalid evidence_refs")
         if not isinstance(self.current_fields, Mapping):
             raise ValueError("invalid current_fields")
-        if self.baseline_fields is not None and not isinstance(self.baseline_fields, Mapping):
+        if self.baseline_fields is not None and not isinstance(
+            self.baseline_fields, Mapping
+        ):
             raise ValueError("invalid baseline_fields")
         if not isinstance(self.change_basis, ChangeBasis):
             raise ValueError("invalid change_basis")
@@ -180,11 +185,14 @@ class MaterialDeltaV1:
         _aware(self.created_at, "created_at")
         # Freeze mappings
         object.__setattr__(
-            self, "current_fields", MappingProxyType(dict(self.current_fields)),
+            self,
+            "current_fields",
+            MappingProxyType(dict(self.current_fields)),
         )
         if self.baseline_fields is not None:
             object.__setattr__(
-                self, "baseline_fields",
+                self,
+                "baseline_fields",
                 MappingProxyType(dict(self.baseline_fields)),
             )
         # Privacy: no account identity may appear

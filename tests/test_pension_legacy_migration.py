@@ -1,4 +1,5 @@
 """Tests for V2 MD → V3 pension migration adapter."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -8,15 +9,11 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from tokmo.programs.pension_legacy_migration import (
-    migrate_legacy_md,
-    PensionTradeRecordV1,
     _PENSION_SYMBOL_MAP,
-    _parse_holdings_table,
-    _parse_trade_history,
-    _compute_avg_prices,
+    PensionTradeRecordV1,
+    migrate_legacy_md,
 )
 from tokmo.values.pension_holdings import PensionHoldingsRevisionV1
-from tokmo.values.current_holdings import HoldingItemV1
 
 _KST = ZoneInfo("Asia/Seoul")
 

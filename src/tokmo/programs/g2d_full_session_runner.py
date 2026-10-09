@@ -53,15 +53,15 @@ live Toss adapters and the wrapped model stubs are constructed only by
 ``tokmo.composition`` (the single sanctioned live importer) and injected.
 """
 
-from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
 import fcntl
 import json
 import os
-from pathlib import Path
 import secrets
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
+from pathlib import Path
 from types import MappingProxyType
-from typing import Callable, Mapping
 
 from tokmo.programs.g2a_shadow_runner import (
     TICK_SECONDS,
@@ -102,7 +102,7 @@ _DATA_INCOMPLETE = "DATA_INCOMPLETE"
 
 # Session bounds and ceilings (§10.3, §10.5).
 G2D_MAX_TICKS = 100
-_G2D_PER_TICK_DATA_CEILING = 23   # 1 ACCOUNTS + 5 holdings + 5 quotes + 12 trades
+_G2D_PER_TICK_DATA_CEILING = 23  # 1 ACCOUNTS + 5 holdings + 5 quotes + 12 trades
 G2D_CAMPAIGN_DATA_CEILING = 10 + G2D_MAX_TICKS * _G2D_PER_TICK_DATA_CEILING  # 2310
 
 # STOP codes that mean the single process lost its footing rather than reaching a
@@ -110,8 +110,13 @@ G2D_CAMPAIGN_DATA_CEILING = 10 + G2D_MAX_TICKS * _G2D_PER_TICK_DATA_CEILING  # 2
 _INCOMPLETE_STOP_CODES = frozenset({"token_lost_incomplete"})
 
 _D_STAGE_ORDER = (
-    "calendar_provider", "session_gate", "holdings_runner", "quotes_runner",
-    "trades_runner", "barrier_runner", "analysis_runner",
+    "calendar_provider",
+    "session_gate",
+    "holdings_runner",
+    "quotes_runner",
+    "trades_runner",
+    "barrier_runner",
+    "analysis_runner",
 )
 
 _METRICS_LEAF = "g2d_metrics.jsonl"
@@ -120,6 +125,7 @@ _METRICS_LEAF = "g2d_metrics.jsonl"
 # ---------------------------------------------------------------------------
 # Injected model slot: the marker + masked counter for caller-supplied stubs.
 # ---------------------------------------------------------------------------
+
 
 class _G2DInjectedModelCall:
     """Marker proving a model slot is caller-injected (never a live provider).
@@ -165,6 +171,7 @@ def _token_acquire_for(deps: IntegratedCadenceDepsV1):
 # Report (masked aggregates only — no symbol/account/amount raw; §10.9).
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class G2DReport:
     run_id: str
@@ -209,6 +216,7 @@ class G2DReport:
 # KR-open gate policy (§10.6): reused by ``_run_one_tick`` at stage position 1.
 # ---------------------------------------------------------------------------
 
+
 def _d_gate_policy(session) -> None:
     """STOP before any data provider unless KR is open (US is barrier's concern)."""
     verdicts = {verdict.market: verdict for verdict in session.verdicts}
@@ -229,8 +237,14 @@ def _d_gate_policy(session) -> None:
 # Run-state (single JSON; there is deliberately no per-tick progress table).
 # ---------------------------------------------------------------------------
 
-def _write_d_state(root: Path, status: str, stop_code: str | None,
-                   now: datetime, exception_type: str | None = None) -> None:
+
+def _write_d_state(
+    root: Path,
+    status: str,
+    stop_code: str | None,
+    now: datetime,
+    exception_type: str | None = None,
+) -> None:
     payload = {"status": status, "stop_code": stop_code, "updated_at": now.isoformat()}
     if exception_type is not None:
         payload["exception_type"] = exception_type
@@ -253,10 +267,16 @@ def _write_d_state(root: Path, status: str, stop_code: str | None,
 # Full-session driver.
 # ---------------------------------------------------------------------------
 
+
 def run_d_full_session(
-    *, home: Path, utc_day: date, deps: IntegratedCadenceDepsV1,
-    credential_path: Path | None, clock: Callable[[], datetime],
-    sleeper: Callable[[float], None], open_handle_probe: Callable[[Path], int],
+    *,
+    home: Path,
+    utc_day: date,
+    deps: IntegratedCadenceDepsV1,
+    credential_path: Path | None,
+    clock: Callable[[], datetime],
+    sleeper: Callable[[float], None],
+    open_handle_probe: Callable[[Path], int],
     campaign_data_ceiling: int = G2D_CAMPAIGN_DATA_CEILING,
     approved_rerun: bool = False,
     metrics_sink: Callable[[dict], None] | None = None,
@@ -278,8 +298,13 @@ def run_d_full_session(
     if numeric_evidence is None or token_lost is None:
         raise G2AStopError("g2d_instrumentation_not_wired")
 
-    preflight(home=home, utc_day=utc_day, credential_path=credential_path,
-              clock=clock, open_handle_probe=open_handle_probe)
+    preflight(
+        home=home,
+        utc_day=utc_day,
+        credential_path=credential_path,
+        clock=clock,
+        open_handle_probe=open_handle_probe,
+    )
 
     root = _confine_shadow_root(home, shadow_root(home, utc_day))
     _private_dir(_data_root(home) / "shadow")
@@ -313,8 +338,9 @@ def run_d_full_session(
     try:
         _write_d_state(root, "RUNNING", None, start_wall)
         store = OpsKernelStore(root / "ops" / "ops_kernel.sqlite3")
-        store.reconcile_requests(ProducerRole.COLLECTOR,
-                                 invocation_id=secrets.token_hex(16), now=start_wall)
+        store.reconcile_requests(
+            ProducerRole.COLLECTOR, invocation_id=secrets.token_hex(16), now=start_wall
+        )
         stages = _production_stage_deps(root, deps)
         stage_callables = tuple(getattr(stages, name) for name in _D_STAGE_ORDER)
         base = _grid_base(start_wall)
@@ -334,10 +360,17 @@ def run_d_full_session(
                 if delay > 0:
                     sleeper(delay)
                 metric = _run_one_tick(
-                    index=index, scheduled=scheduled, store=store,
-                    stage_callables=stage_callables, counters=counters, root=root,
-                    clock=clock, metrics_sink=metrics_sink,
-                    gate_policy=_d_gate_policy, metrics_leaf=_METRICS_LEAF)
+                    index=index,
+                    scheduled=scheduled,
+                    store=store,
+                    stage_callables=stage_callables,
+                    counters=counters,
+                    root=root,
+                    clock=clock,
+                    metrics_sink=metrics_sink,
+                    gate_policy=_d_gate_policy,
+                    metrics_leaf=_METRICS_LEAF,
+                )
                 executed_tick_ids.append(metric.tick_id)
                 for job, reason in metric.receipts.items():
                     key = f"{job}:{reason}"
@@ -360,7 +393,8 @@ def run_d_full_session(
             stop_reason = "token_lost_incomplete"
             incomplete = True
         missing_evidence = sum(
-            1 for tick_id in executed_tick_ids if tick_id not in numeric_evidence)
+            1 for tick_id in executed_tick_ids if tick_id not in numeric_evidence
+        )
         if missing_evidence:
             # An executed tick without its explicit numeric metric is an
             # instrumentation gap, not "no signal": the run may not look
@@ -376,10 +410,19 @@ def run_d_full_session(
         status = _final_status(incomplete, stop_reason, len(executed_tick_ids))
         _write_d_state(root, status, stop_reason, end_wall)
         return _build_report(
-            run_id, utc_day, root, deps, executed_tick_ids, stop_reason,
-            incomplete, production_ok, (end_wall - start_wall).total_seconds(),
-            green_tick_count=green_tick_count, receipt_counts=receipt_counts,
-            missing_evidence=missing_evidence)
+            run_id,
+            utc_day,
+            root,
+            deps,
+            executed_tick_ids,
+            stop_reason,
+            incomplete,
+            production_ok,
+            (end_wall - start_wall).total_seconds(),
+            green_tick_count=green_tick_count,
+            receipt_counts=receipt_counts,
+            missing_evidence=missing_evidence,
+        )
     except Exception as error:
         # A crash ends the single process INCOMPLETE, with no resume (§10.4).
         # The production invariant is re-measured even here (B-3) and the
@@ -389,23 +432,42 @@ def run_d_full_session(
         production_code = _reconcile_production(production_paths, before, "crashed")
         production_ok = production_code == "crashed"
         masked_exception = type(error).__name__
-        _write_d_state(root, "INCOMPLETE", production_code, end_wall,
-                       exception_type=masked_exception)
+        _write_d_state(
+            root,
+            "INCOMPLETE",
+            production_code,
+            end_wall,
+            exception_type=masked_exception,
+        )
         return _build_report(
-            run_id, utc_day, root, deps, executed_tick_ids, production_code,
-            True, production_ok, (end_wall - start_wall).total_seconds(),
-            green_tick_count=green_tick_count, receipt_counts=receipt_counts,
+            run_id,
+            utc_day,
+            root,
+            deps,
+            executed_tick_ids,
+            production_code,
+            True,
+            production_ok,
+            (end_wall - start_wall).total_seconds(),
+            green_tick_count=green_tick_count,
+            receipt_counts=receipt_counts,
             missing_evidence=sum(
-                1 for tick_id in executed_tick_ids
-                if tick_id not in numeric_evidence),
-            masked_exception_type=masked_exception)
+                1 for tick_id in executed_tick_ids if tick_id not in numeric_evidence
+            ),
+            masked_exception_type=masked_exception,
+        )
     except BaseException as error:
         # KeyboardInterrupt/SystemExit are never swallowed: record the abort
         # durably (guarded, so recording can never mask the abort) and re-raise.
         try:
             production_code = _reconcile_production(production_paths, before, "aborted")
-            _write_d_state(root, "INCOMPLETE", production_code, _aware_utc(clock()),
-                           exception_type=type(error).__name__)
+            _write_d_state(
+                root,
+                "INCOMPLETE",
+                production_code,
+                _aware_utc(clock()),
+                exception_type=type(error).__name__,
+            )
         except Exception:
             pass
         raise
@@ -414,12 +476,14 @@ def run_d_full_session(
         os.close(lock_descriptor)
 
 
-def _final_status(incomplete: bool, stop_reason: str | None,
-                  tick_count: int) -> str:
+def _final_status(incomplete: bool, stop_reason: str | None, tick_count: int) -> str:
     if incomplete:
         return "INCOMPLETE"
-    if (stop_reason is not None and stop_reason.startswith("kr_not_open")
-            and tick_count == 0):
+    if (
+        stop_reason is not None
+        and stop_reason.startswith("kr_not_open")
+        and tick_count == 0
+    ):
         # A zero-tick refusal (before_open/no_regular/...) never seals the day:
         # the rerun gate admits a prior REFUSED record without approval (M-2).
         return "REFUSED"
@@ -428,10 +492,22 @@ def _final_status(incomplete: bool, stop_reason: str | None,
     return "STOPPED"
 
 
-def _build_report(run_id, utc_day, root, deps, executed_tick_ids, stop_reason,
-                  incomplete, production_ok, duration_seconds, *,
-                  green_tick_count=0, receipt_counts=None, missing_evidence=0,
-                  masked_exception_type=None) -> G2DReport:
+def _build_report(
+    run_id,
+    utc_day,
+    root,
+    deps,
+    executed_tick_ids,
+    stop_reason,
+    incomplete,
+    production_ok,
+    duration_seconds,
+    *,
+    green_tick_count=0,
+    receipt_counts=None,
+    missing_evidence=0,
+    masked_exception_type=None,
+) -> G2DReport:
     started = _started_operations(root)
     wire = sum(count for op, count in started.items() if op in _WIRE_OPERATIONS)
     store = OpsKernelStore(root / "ops" / "ops_kernel.sqlite3")
@@ -454,19 +530,23 @@ def _build_report(run_id, utc_day, root, deps, executed_tick_ids, stop_reason,
         for kind, count in payload["trigger_counts"].items():
             trigger_counts[kind] = trigger_counts.get(kind, 0) + count
     established = sum(
-        count for state, count in state_counts.items()
-        if state != _DATA_INCOMPLETE)
+        count for state, count in state_counts.items() if state != _DATA_INCOMPLETE
+    )
     return G2DReport(
-        run_id=run_id, utc_day=utc_day.isoformat(),
-        tick_count=len(executed_tick_ids), stop_reason=stop_reason,
+        run_id=run_id,
+        utc_day=utc_day.isoformat(),
+        tick_count=len(executed_tick_ids),
+        stop_reason=stop_reason,
         provider_started_count=_provider_started_count(root, utc_day),
         wire_attempt_count=wire,
         numeric_state_established_count=established,
         trigger_counts=MappingProxyType(dict(sorted(trigger_counts.items()))),
         disposition_counts=MappingProxyType(dict(sorted(dispositions.items()))),
-        production_invariant_ok=production_ok, incomplete=incomplete,
+        production_invariant_ok=production_ok,
+        incomplete=incomplete,
         duration_seconds=duration_seconds,
-        glm_calls=deps.glm_call.count, sol_calls=deps.sol_call.count,
+        glm_calls=deps.glm_call.count,
+        sol_calls=deps.sol_call.count,
         green_tick_count=green_tick_count,
         receipt_counts=MappingProxyType(dict(sorted((receipt_counts or {}).items()))),
         numeric_state_counts=MappingProxyType(dict(sorted(state_counts.items()))),

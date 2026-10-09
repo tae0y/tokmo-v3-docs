@@ -1,22 +1,25 @@
 """Domain formatter contract tests for WTI, YieldCurve, and UnavailableFact."""
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
 
 from tokmo.presentation import format_value
 from tokmo.presentation.options import (
-    FormatOptions, RAW, NUMBER, USD, KRW, KOREAN,
-    CurrencyStyle, DateStyle,
+    KOREAN,
+    KRW,
+    NUMBER,
+    RAW,
+    USD,
 )
 from tokmo.presentation.registry import (
     CurrencyConflictError,
 )
-from tokmo.values import WtiFact, YieldCurveFact, UnavailableFact
-
+from tokmo.values import UnavailableFact, WtiFact, YieldCurveFact
 
 # === WtiFact ===
+
 
 class TestWtiFactFormatter:
     def _make_fact(self, value="78.42", period_date=None):
@@ -26,7 +29,7 @@ class TestWtiFactFormatter:
             period=period_date or date(2026, 7, 25),
             value=Decimal(value),
             units="$/BBL",
-            observed_at=datetime(2026, 7, 25, 12, 0, 0, tzinfo=timezone.utc),
+            observed_at=datetime(2026, 7, 25, 12, 0, 0, tzinfo=UTC),
         )
 
     def test_default_output_exact_match(self):
@@ -74,6 +77,7 @@ class TestWtiFactFormatter:
 
 # === YieldCurveFact ===
 
+
 class TestYieldCurveFormatter:
     def _make_fact(self, two="4.25", ten="4.40"):
         return YieldCurveFact(
@@ -82,13 +86,16 @@ class TestYieldCurveFormatter:
             rate_date=date(2026, 7, 25),
             two_year_percent=Decimal(two) if two else None,
             ten_year_percent=Decimal(ten) if ten else None,
-            observed_at=datetime(2026, 7, 25, 12, 0, 0, tzinfo=timezone.utc),
+            observed_at=datetime(2026, 7, 25, 12, 0, 0, tzinfo=UTC),
         )
 
     def test_default_output_exact_match(self):
         fact = self._make_fact()
         result = format_value(fact)
-        assert result == "미국 국채금리 (2026-07-25): 2년 4.25% · 10년 4.40% · 스프레드 0.15%p"
+        assert (
+            result
+            == "미국 국채금리 (2026-07-25): 2년 4.25% · 10년 4.40% · 스프레드 0.15%p"
+        )
 
     def test_two_year_null(self):
         fact = self._make_fact(two=None, ten="4.40")
@@ -118,12 +125,13 @@ class TestYieldCurveFormatter:
 
 # === UnavailableFact ===
 
+
 class TestUnavailableFormatter:
     def _make_fact(self, reason="config_missing"):
         return UnavailableFact(
             source="eia_wti_rwtc",
             reason=reason,
-            observed_at=datetime(2026, 7, 25, 12, 0, 0, tzinfo=timezone.utc),
+            observed_at=datetime(2026, 7, 25, 12, 0, 0, tzinfo=UTC),
         )
 
     def test_default_output(self):
@@ -139,32 +147,41 @@ class TestUnavailableFormatter:
 
 # === format_value public API ===
 
+
 class TestFormatValueAPI:
     def test_options_none_uses_domain_default(self):
         fact = WtiFact(
-            source="eia_wti_rwtc", series="RWTC",
-            period=date(2026, 7, 25), value=Decimal("78.42"),
-            units="$/BBL", observed_at=datetime(2026, 7, 25, tzinfo=timezone.utc),
+            source="eia_wti_rwtc",
+            series="RWTC",
+            period=date(2026, 7, 25),
+            value=Decimal("78.42"),
+            units="$/BBL",
+            observed_at=datetime(2026, 7, 25, tzinfo=UTC),
         )
         result = format_value(fact)
         assert "$78.42" in result
 
     def test_options_explicit_applies(self):
         fact = WtiFact(
-            source="eia_wti_rwtc", series="RWTC",
-            period=date(2026, 7, 25), value=Decimal("78.42"),
-            units="$/BBL", observed_at=datetime(2026, 7, 25, tzinfo=timezone.utc),
+            source="eia_wti_rwtc",
+            series="RWTC",
+            period=date(2026, 7, 25),
+            value=Decimal("78.42"),
+            units="$/BBL",
+            observed_at=datetime(2026, 7, 25, tzinfo=UTC),
         )
         result = format_value(fact, options=RAW)
         assert "$" not in result
 
     def test_unregistered_type_raises(self):
         from tokmo.presentation.registry import UnsupportedPresentationType
+
         with pytest.raises(UnsupportedPresentationType):
             format_value(42)
 
     def test_unregistered_type_no_str_fallback(self):
         """A plain dict should not be silently stringified."""
         from tokmo.presentation.registry import UnsupportedPresentationType
+
         with pytest.raises(UnsupportedPresentationType):
             format_value({"secret": "value"})

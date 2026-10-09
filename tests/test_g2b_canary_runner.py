@@ -7,40 +7,45 @@ token identity, and the untouched-production invariant are all exercised end to
 end without a real socket, DNS, credential, or production database.
 """
 
-from datetime import date, datetime, timedelta, timezone
-from email.message import Message
 import io
 import json
 import os
 import socket
 import sqlite3
+import urllib.parse
+import urllib.request
+import urllib.response
+from datetime import UTC, date, datetime, timedelta
+from email.message import Message
 
 import pytest
 
 from tokmo.composition import build_g2b_live_deps
 from tokmo.programs.g2a_shadow_runner import (
-    G2APreflightError, G2AStopError, stable_run_id,
+    G2APreflightError,
+    G2AStopError,
 )
 from tokmo.programs.g2b_canary_runner import (
-    _fingerprint, _production_paths, _reconcile_production, _snapshot_production,
-    run_b_canary, shadow_root,
+    _fingerprint,
+    _production_paths,
+    _reconcile_production,
+    _snapshot_production,
+    run_b_canary,
+    shadow_root,
 )
 from tokmo.records.ops_kernel import OpsKernelStore
-
-import urllib.parse
-import urllib.request
-import urllib.response
-
 
 # ---------------------------------------------------------------------------
 # Scripted-HTTPS fixtures shared across the file.
 # ---------------------------------------------------------------------------
 
+
 def _JsonResponse(body: bytes):
     headers = Message()
     response = urllib.response.addinfourl(
-        io.BytesIO(body), headers, "https://openapi.tossinvest.com/x", code=200)
-    setattr(response, "msg", "OK")
+        io.BytesIO(body), headers, "https://openapi.tossinvest.com/x", code=200
+    )
+    response.msg = "OK"
     return response
 
 
@@ -57,45 +62,75 @@ def _handler_factory(responses, wire):
 
 
 def _token_body() -> bytes:
-    return json.dumps({
-        "access_token": "a" * 40, "expires_in": 3600, "token_type": "Bearer",
-    }).encode()
+    return json.dumps(
+        {
+            "access_token": "a" * 40,
+            "expires_in": 3600,
+            "token_type": "Bearer",
+        }
+    ).encode()
 
 
 def _kr_closed_body(day: date) -> bytes:
-    return json.dumps({"result": {
-        "today": {"date": day.isoformat()},
-        "previousBusinessDay": {"date": "2026-07-30"},
-        "nextBusinessDay": {"date": "2026-08-03"},
-    }}).encode()
+    return json.dumps(
+        {
+            "result": {
+                "today": {"date": day.isoformat()},
+                "previousBusinessDay": {"date": "2026-07-30"},
+                "nextBusinessDay": {"date": "2026-08-03"},
+            }
+        }
+    ).encode()
 
 
 def _kr_open_body(day: date) -> bytes:
-    return json.dumps({"result": {
-        "today": {"date": day.isoformat(), "integrated": {"regularMarket": {
-            "startTime": f"{day.isoformat()}T00:00:00+00:00",
-            "endTime": f"{day.isoformat()}T23:00:00+00:00"}}},
-        "previousBusinessDay": {"date": "2026-07-30"},
-        "nextBusinessDay": {"date": "2026-08-03"},
-    }}).encode()
+    return json.dumps(
+        {
+            "result": {
+                "today": {
+                    "date": day.isoformat(),
+                    "integrated": {
+                        "regularMarket": {
+                            "startTime": f"{day.isoformat()}T00:00:00+00:00",
+                            "endTime": f"{day.isoformat()}T23:00:00+00:00",
+                        }
+                    },
+                },
+                "previousBusinessDay": {"date": "2026-07-30"},
+                "nextBusinessDay": {"date": "2026-08-03"},
+            }
+        }
+    ).encode()
 
 
 def _us_open_body(day: date) -> bytes:
-    return json.dumps({"result": {
-        "today": {"date": day.isoformat(), "regularMarket": {
-            "startTime": f"{day.isoformat()}T13:30:00+00:00",
-            "endTime": f"{day.isoformat()}T20:00:00+00:00"}},
-        "previousBusinessDay": {"date": "2026-07-30"},
-        "nextBusinessDay": {"date": "2026-08-03"},
-    }}).encode()
+    return json.dumps(
+        {
+            "result": {
+                "today": {
+                    "date": day.isoformat(),
+                    "regularMarket": {
+                        "startTime": f"{day.isoformat()}T13:30:00+00:00",
+                        "endTime": f"{day.isoformat()}T20:00:00+00:00",
+                    },
+                },
+                "previousBusinessDay": {"date": "2026-07-30"},
+                "nextBusinessDay": {"date": "2026-08-03"},
+            }
+        }
+    ).encode()
 
 
 def _us_closed_body(day: date) -> bytes:
-    return json.dumps({"result": {
-        "today": {"date": day.isoformat()},
-        "previousBusinessDay": {"date": "2026-07-30"},
-        "nextBusinessDay": {"date": "2026-08-03"},
-    }}).encode()
+    return json.dumps(
+        {
+            "result": {
+                "today": {"date": day.isoformat()},
+                "previousBusinessDay": {"date": "2026-07-30"},
+                "nextBusinessDay": {"date": "2026-08-03"},
+            }
+        }
+    ).encode()
 
 
 def _accounts_body(*seqs: str) -> bytes:
@@ -103,22 +138,46 @@ def _accounts_body(*seqs: str) -> bytes:
 
 
 def _us_and_kr_holdings_body() -> bytes:
-    return json.dumps({"result": {"items": [
-        {"symbol": "AAPL", "quantity": "10", "averagePrice": "150",
-         "market": "US", "currency": "USD"},
-        {"symbol": "005930", "quantity": "5", "averagePrice": "70000",
-         "market": "KR", "currency": "KRW"},
-    ]}}).encode()
+    return json.dumps(
+        {
+            "result": {
+                "items": [
+                    {
+                        "symbol": "AAPL",
+                        "quantity": "10",
+                        "averagePrice": "150",
+                        "market": "US",
+                        "currency": "USD",
+                    },
+                    {
+                        "symbol": "005930",
+                        "quantity": "5",
+                        "averagePrice": "70000",
+                        "market": "KR",
+                        "currency": "KRW",
+                    },
+                ]
+            }
+        }
+    ).encode()
 
 
 def _price_body() -> bytes:
     # One valid current-price fact per requested US symbol (the US holding is
     # AAPL; the KR holding is dropped upstream by the closed KR session), so the
     # single US quote batch actually parses, stores, and receipts green.
-    return json.dumps({"result": [
-        {"symbol": "AAPL", "lastPrice": "150.25", "currency": "USD",
-         "timestamp": "2026-07-31T14:00:00+00:00"},
-    ]}).encode()
+    return json.dumps(
+        {
+            "result": [
+                {
+                    "symbol": "AAPL",
+                    "lastPrice": "150.25",
+                    "currency": "USD",
+                    "timestamp": "2026-07-31T14:00:00+00:00",
+                },
+            ]
+        }
+    ).encode()
 
 
 def _kr_prefetch_open(day: date) -> bytes:
@@ -131,7 +190,8 @@ def _kr_prefetch_bodies(anchor: date, count: int = 20):
     # find ``count`` regular sessions.
     return tuple(
         _JsonResponse(_kr_prefetch_open(anchor - timedelta(days=offset)))
-        for offset in range(count))
+        for offset in range(count)
+    )
 
 
 def _us_prefetch_bodies(anchor: date, count: int = 20):
@@ -140,12 +200,14 @@ def _us_prefetch_bodies(anchor: date, count: int = 20):
     # shortcut), so the US window is prefetched exactly like the KR one.
     return tuple(
         _JsonResponse(_us_open_body(anchor - timedelta(days=offset)))
-        for offset in range(count))
+        for offset in range(count)
+    )
 
 
 def _orders_empty_closed() -> bytes:
-    return json.dumps({"result": {
-        "orders": [], "nextCursor": None, "hasNext": False}}).encode()
+    return json.dumps(
+        {"result": {"orders": [], "nextCursor": None, "hasNext": False}}
+    ).encode()
 
 
 def _completing_tick_responses(day: date):
@@ -157,14 +219,19 @@ def _completing_tick_responses(day: date):
     CLOSED orders page comes back empty (no order details needed).
     """
     return (
-        _JsonResponse(_token_body()),
-        _JsonResponse(_kr_closed_body(day)),       # session gate KR (closed today)
-        _JsonResponse(_us_open_body(day)),         # session gate US (open now)
-        _JsonResponse(_accounts_body("1001")),
-        _JsonResponse(_us_and_kr_holdings_body()),
-        _JsonResponse(_price_body()),              # one US quote batch
-    ) + _kr_prefetch_bodies(day, 20) + _us_prefetch_bodies(day, 20) + (
-        _JsonResponse(_orders_empty_closed()),     # one CLOSED page, empty
+        (
+            _JsonResponse(_token_body()),
+            _JsonResponse(_kr_closed_body(day)),  # session gate KR (closed today)
+            _JsonResponse(_us_open_body(day)),  # session gate US (open now)
+            _JsonResponse(_accounts_body("1001")),
+            _JsonResponse(_us_and_kr_holdings_body()),
+            _JsonResponse(_price_body()),  # one US quote batch
+        )
+        + _kr_prefetch_bodies(day, 20)
+        + _us_prefetch_bodies(day, 20)
+        + (
+            _JsonResponse(_orders_empty_closed()),  # one CLOSED page, empty
+        )
     )
 
 
@@ -176,7 +243,7 @@ def _credential(tmp_path):
 
 
 # A wall instant where US regular is open (13:30-20:00 UTC) and KR is closed.
-START = datetime(2026, 7, 31, 14, 0, tzinfo=timezone.utc)
+START = datetime(2026, 7, 31, 14, 0, tzinfo=UTC)
 
 
 def _clock():
@@ -198,11 +265,18 @@ def _run(tmp_path, responses, monkeypatch):
     _forbid_socket(monkeypatch, real_socket)
     wire: list = []
     deps = build_g2b_live_deps(
-        project_root=tmp_path, clock=_clock,
-        https_handler_factory=_handler_factory(responses, wire))
+        project_root=tmp_path,
+        clock=_clock,
+        https_handler_factory=_handler_factory(responses, wire),
+    )
     report = run_b_canary(
-        home=tmp_path, utc_day=START.date(), deps=deps, credential_path=None,
-        clock=_clock, open_handle_probe=lambda _p: 0)
+        home=tmp_path,
+        utc_day=START.date(),
+        deps=deps,
+        credential_path=None,
+        clock=_clock,
+        open_handle_probe=lambda _p: 0,
+    )
     return report, wire, real_socket
 
 
@@ -217,11 +291,14 @@ def _restore_socket():
 # 1. Full US-open / KR-closed one-tick canary through the composed live deps.
 # ---------------------------------------------------------------------------
 
+
 def test_us_open_kr_closed_one_tick_quotes_us_only_and_leaves_production_untouched(
-        tmp_path, monkeypatch):
+    tmp_path, monkeypatch
+):
     day = START.date()
     report, wire, real_socket = _run(
-        tmp_path, _completing_tick_responses(day), monkeypatch)
+        tmp_path, _completing_tick_responses(day), monkeypatch
+    )
 
     assert report.tick_count == 1
     assert report.token_started_count == 1
@@ -235,18 +312,24 @@ def test_us_open_kr_closed_one_tick_quotes_us_only_and_leaves_production_untouch
     assert report.kr_quote_count == 0
     # Completed CLOSED trades really queried now that session dates are available.
     assert report.orders_page_count == 1
-    assert report.order_detail_count == 0             # the CLOSED page was empty
+    assert report.order_detail_count == 0  # the CLOSED page was empty
     assert report.production_invariant_ok is True
     assert real_socket == []
 
     # The leading fixed prologue: token, both gate calendars, accounts, holdings,
     # one price GET.
     assert _paths(wire)[:6] == [
-        "/oauth2/token", "/api/v1/market-calendar/KR", "/api/v1/market-calendar/US",
-        "/api/v1/accounts", "/api/v1/holdings", "/api/v1/prices",
+        "/oauth2/token",
+        "/api/v1/market-calendar/KR",
+        "/api/v1/market-calendar/US",
+        "/api/v1/accounts",
+        "/api/v1/holdings",
+        "/api/v1/prices",
     ]
     # Twenty descending KR session-date probes, then exactly one CLOSED orders GET.
-    assert _paths(wire).count("/api/v1/market-calendar/KR") == 21   # 1 gate + 20 prefetch
+    assert (
+        _paths(wire).count("/api/v1/market-calendar/KR") == 21
+    )  # 1 gate + 20 prefetch
     assert _paths(wire).count("/api/v1/orders") == 1
     # A single price GET means KR was never quoted.
     assert _paths(wire).count("/api/v1/prices") == 1
@@ -261,6 +344,7 @@ def test_day_counter_is_reused_from_a_prior_run_not_reset(tmp_path, monkeypatch)
     # prove the canary advances it rather than minting a fresh counter.
     from tokmo.composition import _g2a_plan_start_token, _g2a_settle_token
     from tokmo.programs.g2b_canary_runner import _private_dir
+
     day = START.date()
     root = shadow_root(tmp_path, day)
     _private_dir(root / "ops")
@@ -269,7 +353,8 @@ def test_day_counter_is_reused_from_a_prior_run_not_reset(tmp_path, monkeypatch)
     _g2a_settle_token(seed, "OK", START)
 
     report, _wire, _socket = _run(
-        tmp_path, _completing_tick_responses(day), monkeypatch)
+        tmp_path, _completing_tick_responses(day), monkeypatch
+    )
 
     # A(1) + B TOKEN + ACCOUNTS + ACCOUNT_HOLDINGS + PRICE_BATCH + ORDERS_PAGE = 6.
     # (The twenty calendar prefetch probes spend the separate calendar budget.)
@@ -278,7 +363,8 @@ def test_day_counter_is_reused_from_a_prior_run_not_reset(tmp_path, monkeypatch)
     try:
         tokens = connection.execute(
             "SELECT job_scope, ordinal, state FROM planned_requests "
-            "WHERE operation='TOKEN' ORDER BY job_scope").fetchall()
+            "WHERE operation='TOKEN' ORDER BY job_scope"
+        ).fetchall()
     finally:
         connection.close()
     # A's terminal CALENDAR token is preserved; B added exactly one HOLDINGS one.
@@ -288,6 +374,7 @@ def test_day_counter_is_reused_from_a_prior_run_not_reset(tmp_path, monkeypatch)
 # ---------------------------------------------------------------------------
 # 2. Gate policy: KR open or US closed STOPs before any data provider.
 # ---------------------------------------------------------------------------
+
 
 def test_kr_open_stops_before_any_data_provider(tmp_path, monkeypatch):
     day = START.date()
@@ -321,14 +408,26 @@ def test_gate_stop_makes_no_data_wire(tmp_path, monkeypatch):
     _forbid_socket(monkeypatch, [])
     wire: list = []
     deps = build_g2b_live_deps(
-        project_root=tmp_path, clock=_clock,
-        https_handler_factory=_handler_factory((
-            _JsonResponse(_token_body()), _JsonResponse(_kr_open_body(day)),
-            _JsonResponse(_us_open_body(day)),
-        ), wire))
+        project_root=tmp_path,
+        clock=_clock,
+        https_handler_factory=_handler_factory(
+            (
+                _JsonResponse(_token_body()),
+                _JsonResponse(_kr_open_body(day)),
+                _JsonResponse(_us_open_body(day)),
+            ),
+            wire,
+        ),
+    )
     with pytest.raises(G2AStopError, match="kr_must_be_closed"):
-        run_b_canary(home=tmp_path, utc_day=day, deps=deps, credential_path=None,
-                     clock=_clock, open_handle_probe=lambda _p: 0)
+        run_b_canary(
+            home=tmp_path,
+            utc_day=day,
+            deps=deps,
+            credential_path=None,
+            clock=_clock,
+            open_handle_probe=lambda _p: 0,
+        )
     paths = _paths(wire)
     assert "/api/v1/accounts" not in paths
     assert "/api/v1/holdings" not in paths
@@ -339,18 +438,22 @@ def test_gate_stop_makes_no_data_wire(tmp_path, monkeypatch):
 # 2b. A tick whose data is not green STOPs on the receipt gate, commits nothing.
 # ---------------------------------------------------------------------------
 
+
 def _empty_price_responses(day: date):
     """A US-open/KR-closed tick whose price body is empty: holdings and trades
     go green but the quotes receipt fails, so the whole tick is not green."""
     return (
-        _JsonResponse(_token_body()),
-        _JsonResponse(_kr_closed_body(day)),
-        _JsonResponse(_us_open_body(day)),
-        _JsonResponse(_accounts_body("1001")),
-        _JsonResponse(_us_and_kr_holdings_body()),
-        _JsonResponse(json.dumps({"result": []}).encode()),   # empty US quote batch
-    ) + _kr_prefetch_bodies(day, 20) + _us_prefetch_bodies(day, 20) + (
-        _JsonResponse(_orders_empty_closed()),
+        (
+            _JsonResponse(_token_body()),
+            _JsonResponse(_kr_closed_body(day)),
+            _JsonResponse(_us_open_body(day)),
+            _JsonResponse(_accounts_body("1001")),
+            _JsonResponse(_us_and_kr_holdings_body()),
+            _JsonResponse(json.dumps({"result": []}).encode()),  # empty US quote batch
+        )
+        + _kr_prefetch_bodies(day, 20)
+        + _us_prefetch_bodies(day, 20)
+        + (_JsonResponse(_orders_empty_closed()),)
     )
 
 
@@ -375,22 +478,32 @@ def test_non_green_data_tick_stops_and_commits_nothing(tmp_path, monkeypatch):
 # 3. Exactly one tick: a second invocation refuses.
 # ---------------------------------------------------------------------------
 
+
 def test_second_invocation_refuses_to_run_a_second_tick(tmp_path, monkeypatch):
     day = START.date()
     _run(tmp_path, _completing_tick_responses(day), monkeypatch)
 
     _forbid_socket(monkeypatch, [])
     deps = build_g2b_live_deps(
-        project_root=tmp_path, clock=_clock,
-        https_handler_factory=_handler_factory((), []))
+        project_root=tmp_path,
+        clock=_clock,
+        https_handler_factory=_handler_factory((), []),
+    )
     with pytest.raises(G2AStopError, match="canary_already_ran"):
-        run_b_canary(home=tmp_path, utc_day=day, deps=deps, credential_path=None,
-                     clock=_clock, open_handle_probe=lambda _p: 0)
+        run_b_canary(
+            home=tmp_path,
+            utc_day=day,
+            deps=deps,
+            credential_path=None,
+            clock=_clock,
+            open_handle_probe=lambda _p: 0,
+        )
 
 
 # ---------------------------------------------------------------------------
 # 4. Preflight: a shadow schema mismatch refuses before any work.
 # ---------------------------------------------------------------------------
+
 
 def test_preflight_refuses_on_shadow_schema_mismatch(tmp_path, monkeypatch):
     day = START.date()
@@ -404,23 +517,36 @@ def test_preflight_refuses_on_shadow_schema_mismatch(tmp_path, monkeypatch):
     _credential(tmp_path)
     _forbid_socket(monkeypatch, [])
     deps = build_g2b_live_deps(
-        project_root=tmp_path, clock=_clock,
-        https_handler_factory=_handler_factory((), []))
+        project_root=tmp_path,
+        clock=_clock,
+        https_handler_factory=_handler_factory((), []),
+    )
     with pytest.raises(G2APreflightError, match="shadow_schema"):
-        run_b_canary(home=tmp_path, utc_day=day, deps=deps, credential_path=None,
-                     clock=_clock, open_handle_probe=lambda _p: 0)
+        run_b_canary(
+            home=tmp_path,
+            utc_day=day,
+            deps=deps,
+            credential_path=None,
+            clock=_clock,
+            open_handle_probe=lambda _p: 0,
+        )
 
 
 # ---------------------------------------------------------------------------
 # 5. Private canary artifacts are 0600; production fingerprint mismatch STOPs.
 # ---------------------------------------------------------------------------
 
+
 def test_private_canary_artifacts_are_owner_only(tmp_path, monkeypatch):
     day = START.date()
     _run(tmp_path, _completing_tick_responses(day), monkeypatch)
     root = shadow_root(tmp_path, day)
-    for leaf in ("g2b_run_state.json", "ops/g2b_progress.sqlite3",
-                 "ops/ops_kernel.sqlite3", "ops/g2b_session_dates.sqlite3"):
+    for leaf in (
+        "g2b_run_state.json",
+        "ops/g2b_progress.sqlite3",
+        "ops/ops_kernel.sqlite3",
+        "ops/g2b_session_dates.sqlite3",
+    ):
         mode = os.stat(root / leaf).st_mode & 0o777
         assert mode == 0o600, leaf
 
@@ -454,15 +580,28 @@ def test_fingerprint_distinguishes_absent_regular_and_symlink(tmp_path):
 # 6. CLI routing: `g2b --run-b-canary` dispatches and prints masked counts.
 # ---------------------------------------------------------------------------
 
+
 def _fake_report():
     from tokmo.programs.g2b_canary_runner import G2BReport
+
     return G2BReport(
-        run_id="g2a-a-2026-07-31", utc_day="2026-07-31", tick_count=1,
-        provider_started_count=4, token_started_count=1, accounts_started_count=1,
-        account_holdings_started_count=1, us_quote_batch_count=1, kr_quote_count=0,
-        orders_page_count=0, order_detail_count=0, calendar_started_count=2,
-        wire_attempt_count=6, production_invariant_ok=True, duration_seconds=0.0,
-        per_operation={})
+        run_id="g2a-a-2026-07-31",
+        utc_day="2026-07-31",
+        tick_count=1,
+        provider_started_count=4,
+        token_started_count=1,
+        accounts_started_count=1,
+        account_holdings_started_count=1,
+        us_quote_batch_count=1,
+        kr_quote_count=0,
+        orders_page_count=0,
+        order_detail_count=0,
+        calendar_started_count=2,
+        wire_attempt_count=6,
+        production_invariant_ok=True,
+        duration_seconds=0.0,
+        per_operation={},
+    )
 
 
 def test_cli_routes_g2b_run_b_canary(monkeypatch, capsys):
@@ -483,7 +622,7 @@ def test_cli_routes_g2b_run_b_canary(monkeypatch, capsys):
     code = composition.main(["g2b", "--run-b-canary"])
     out = capsys.readouterr().out
     assert code == 0
-    assert "deps" in calls and "run" in calls          # the g2b branch was taken
+    assert "deps" in calls and "run" in calls  # the g2b branch was taken
     assert "g2b run=complete" in out
     assert "kr_quotes=0" in out and "us_quote_batches=1" in out
     assert "production_ok=True" in out
@@ -504,5 +643,6 @@ def test_cli_g2b_stop_returns_two(monkeypatch, capsys):
 
 def test_cli_help_lists_g2b(capsys):
     from tokmo import composition
+
     assert composition.main(["bogus-unknown-command"]) == 64
     assert "g2b --run-b-canary" in capsys.readouterr().err

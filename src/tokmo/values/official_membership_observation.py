@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from enum import Enum
 from hashlib import sha256
 from re import fullmatch
@@ -31,8 +31,11 @@ def _ascii_match(value: str, pattern: str, code: str) -> None:
 
 
 def _aware(value: datetime, code: str) -> None:
-    if (not isinstance(value, datetime) or value.tzinfo is None
-            or value.utcoffset() is None):
+    if (
+        not isinstance(value, datetime)
+        or value.tzinfo is None
+        or value.utcoffset() is None
+    ):
         raise ValueError(code)
 
 
@@ -40,7 +43,7 @@ def _plain(value):
     if isinstance(value, Enum):
         return value.value
     if isinstance(value, datetime):
-        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
     if isinstance(value, date):
         return value.isoformat()
     if isinstance(value, tuple):
@@ -327,7 +330,9 @@ class OfficialMembershipAcquisitionV1:
             (self.registry_rows, SecRegistryObservationV1, "registry_rows"),
             (self.issuer_rows, SecIssuerObservationV1, "issuer_rows"),
         ):
-            if type(value) is not tuple or not all(isinstance(item, expected) for item in value):
+            if type(value) is not tuple or not all(
+                isinstance(item, expected) for item in value
+            ):
                 raise ValueError(code)
 
 
@@ -359,7 +364,9 @@ class MembershipMaterialV1:
             raise ValueError("material_venue")
         if not isinstance(self.sector, MembershipSectorV1):
             raise ValueError("material_sector")
-        if self.listed_at_as_of is not True or not isinstance(self.membership_as_of, date):
+        if self.listed_at_as_of is not True or not isinstance(
+            self.membership_as_of, date
+        ):
             raise ValueError("material_membership_as_of")
         _ascii_match(self.acquisition_id, _ID_RE, "material_acquisition_id")
         if not isinstance(self.membership_policy, MembershipPolicyV1):
@@ -380,11 +387,18 @@ class MembershipMaterialV1:
             "material_sic_snapshot_version",
         )
         _ascii_match(self.sic_code, r"[0-9]{4}", "material_sic_code")
-        if type(self.observation_instants) is not tuple or len(self.observation_instants) < 3:
+        if (
+            type(self.observation_instants) is not tuple
+            or len(self.observation_instants) < 3
+        ):
             raise ValueError("material_observation_instants")
-        if not all(isinstance(item, ObservationInstantV1) for item in self.observation_instants):
+        if not all(
+            isinstance(item, ObservationInstantV1) for item in self.observation_instants
+        ):
             raise ValueError("material_observation_instants")
-        if len({item.source_kind for item in self.observation_instants}) != len(self.observation_instants):
+        if len({item.source_kind for item in self.observation_instants}) != len(
+            self.observation_instants
+        ):
             raise ValueError("material_observation_instants")
         for reference, code in (
             (self.listing_source_ref, "material_listing_source_ref"),

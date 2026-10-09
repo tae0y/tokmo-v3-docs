@@ -123,7 +123,11 @@ def resolve_kr_opendart_targets(
             provenance = HOLDING
         else:
             provenance = WATCHLIST
-        targets.append(OpenDartTarget(
-            symbol=symbol, corp_code=mapped.corp_code, provenance=provenance,
-        ))
+        targets.append(
+            OpenDartTarget(
+                symbol=symbol,
+                corp_code=mapped.corp_code,
+                provenance=provenance,
+            )
+        )
     return OpenDartTargetResolution(tuple(targets), tuple(unmapped))

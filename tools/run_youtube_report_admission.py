@@ -21,27 +21,27 @@ Exit 0 = admission ran and the JSON line is authoritative;
 
 import argparse
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 
 _TOOL_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = _TOOL_DIR.parent
 if str(PROJECT_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from tokmo.programs.youtube_report_admission import (  # noqa: E402
+from tokmo.programs.youtube_report_admission import (
     admit_archived_report,
     observed_at_from_archive_meta,
 )
-from tokmo.programs.youtube_tracking import (  # noqa: E402
+from tokmo.programs.youtube_tracking import (
     TrackingCandidateParseError,
     provenance_from_archive_meta,
 )
-from tokmo.records.ops_kernel import (  # noqa: E402
+from tokmo.records.ops_kernel import (
     OpsKernelCorruptError,
     OpsKernelStore,
 )
-from tokmo.records.private_sqlite import prepare_private_path  # noqa: E402
+from tokmo.records.private_sqlite import prepare_private_path
 
 
 def _refuse(reason: str) -> int:
@@ -64,16 +64,29 @@ def _read_private_text(path: Path, kind: str):
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="run-youtube-report-admission", add_help=True,
+        prog="run-youtube-report-admission",
+        add_help=True,
     )
-    parser.add_argument("--meta", required=True, type=Path,
-                        help="archived 12man .meta.json (immutable archive)")
-    parser.add_argument("--report", required=True, type=Path,
-                        help="private report/candidate text file")
-    parser.add_argument("--db", required=True, type=Path,
-                        help="explicit ops-kernel sqlite path (no default)")
-    parser.add_argument("--expect-source-ref", default=None,
-                        help="refuse unless the meta video_id equals this")
+    parser.add_argument(
+        "--meta",
+        required=True,
+        type=Path,
+        help="archived 12man .meta.json (immutable archive)",
+    )
+    parser.add_argument(
+        "--report", required=True, type=Path, help="private report/candidate text file"
+    )
+    parser.add_argument(
+        "--db",
+        required=True,
+        type=Path,
+        help="explicit ops-kernel sqlite path (no default)",
+    )
+    parser.add_argument(
+        "--expect-source-ref",
+        default=None,
+        help="refuse unless the meta video_id equals this",
+    )
     args = parser.parse_args(argv)
 
     meta_text, error = _read_private_text(args.meta, "meta")
@@ -93,8 +106,10 @@ def main(argv: list[str] | None = None) -> int:
         observed_at_from_archive_meta(meta)
     except TrackingCandidateParseError:
         return _refuse("bad_provenance")
-    if (args.expect_source_ref is not None
-            and args.expect_source_ref != provenance.source_ref):
+    if (
+        args.expect_source_ref is not None
+        and args.expect_source_ref != provenance.source_ref
+    ):
         return _refuse("source_mismatch")
 
     try:
@@ -103,11 +118,15 @@ def main(argv: list[str] | None = None) -> int:
         return _refuse("unsafe_store")
     try:
         result = admit_archived_report(
-            store, meta=meta, report_text=report_text,
+            store,
+            meta=meta,
+            report_text=report_text,
         )
     except Exception as error:
-        print(f"run-youtube-report-admission failed={type(error).__name__}",
-              file=sys.stderr)
+        print(
+            f"run-youtube-report-admission failed={type(error).__name__}",
+            file=sys.stderr,
+        )
         return 2
     finally:
         store.close()

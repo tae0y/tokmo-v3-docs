@@ -8,7 +8,7 @@ selects by provider-declared absolute ``[start, end)`` membership in UTC,
 never by the market's current local date.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 import pytest
 
@@ -51,14 +51,26 @@ def _us_day_edt(trade_date="2026-08-10", offset_days=0):
         trade_date=trade_date,
         source_trade_date=trade_date,
         sessions=(
-            _session("dayMarket", shift("2026-08-10T00:00:00Z"),
-                     shift("2026-08-10T08:00:00Z")),
-            _session("preMarket", shift("2026-08-10T08:00:00Z"),
-                     shift("2026-08-10T13:30:00Z")),
-            _session("regularMarket", shift("2026-08-10T13:30:00Z"),
-                     shift("2026-08-10T20:00:00Z")),
-            _session("afterMarket", shift("2026-08-10T20:00:00Z"),
-                     shift("2026-08-10T23:50:00Z")),
+            _session(
+                "dayMarket",
+                shift("2026-08-10T00:00:00Z"),
+                shift("2026-08-10T08:00:00Z"),
+            ),
+            _session(
+                "preMarket",
+                shift("2026-08-10T08:00:00Z"),
+                shift("2026-08-10T13:30:00Z"),
+            ),
+            _session(
+                "regularMarket",
+                shift("2026-08-10T13:30:00Z"),
+                shift("2026-08-10T20:00:00Z"),
+            ),
+            _session(
+                "afterMarket",
+                shift("2026-08-10T20:00:00Z"),
+                shift("2026-08-10T23:50:00Z"),
+            ),
         ),
         fetched_at=CLOCK_NOW,
         provenance="calendar:US:2026-08-10:0",
@@ -77,62 +89,78 @@ def _store(tmp_path):
 
 def test_lookahead_day_rejects_naive_overlapping_or_reversed_sessions():
     with pytest.raises(ValueError):
-        LookaheadSessionV1("dayMarket", datetime(2026, 8, 10),
-                           _utc("2026-08-10T08:00:00Z"))
+        LookaheadSessionV1(
+            "dayMarket", datetime(2026, 8, 10), _utc("2026-08-10T08:00:00Z")
+        )
     with pytest.raises(ValueError):
         _session("dayMarket", "2026-08-10T08:00:00Z", "2026-08-10T00:00:00Z")
     with pytest.raises(ValueError):
         LookaheadDayV1(
-            Market.US, "2026-08-10", "2026-08-10",
+            Market.US,
+            "2026-08-10",
+            "2026-08-10",
             (
-                _session("dayMarket", "2026-08-10T00:00:00Z",
-                         "2026-08-10T08:00:00Z"),
-                _session("preMarket", "2026-08-10T07:00:00Z",
-                         "2026-08-10T13:30:00Z"),
+                _session("dayMarket", "2026-08-10T00:00:00Z", "2026-08-10T08:00:00Z"),
+                _session("preMarket", "2026-08-10T07:00:00Z", "2026-08-10T13:30:00Z"),
             ),
-            CLOCK_NOW, "calendar:US:2026-08-10:0",
+            CLOCK_NOW,
+            "calendar:US:2026-08-10:0",
         )
 
 
 def test_lookahead_day_rejects_unknown_session_kind_and_bad_dates():
     with pytest.raises(ValueError):
         LookaheadDayV1(
-            Market.US, "2026-08-10", "2026-08-10",
-            (_session("midnightMarket", "2026-08-10T00:00:00Z",
-                      "2026-08-10T08:00:00Z"),),
-            CLOCK_NOW, "calendar:US:2026-08-10:0",
+            Market.US,
+            "2026-08-10",
+            "2026-08-10",
+            (
+                _session(
+                    "midnightMarket", "2026-08-10T00:00:00Z", "2026-08-10T08:00:00Z"
+                ),
+            ),
+            CLOCK_NOW,
+            "calendar:US:2026-08-10:0",
         )
     with pytest.raises(ValueError):
         LookaheadDayV1(
-            Market.US, "2026-8-10", "2026-08-10",
-            (_session("dayMarket", "2026-08-10T00:00:00Z",
-                      "2026-08-10T08:00:00Z"),),
-            CLOCK_NOW, "calendar:US:2026-08-10:0",
+            Market.US,
+            "2026-8-10",
+            "2026-08-10",
+            (_session("dayMarket", "2026-08-10T00:00:00Z", "2026-08-10T08:00:00Z"),),
+            CLOCK_NOW,
+            "calendar:US:2026-08-10:0",
         )
     # KR cannot carry a US-only dayMarket session.
     with pytest.raises(ValueError):
         LookaheadDayV1(
-            Market.KR, "2026-08-10", "2026-08-10",
-            (_session("dayMarket", "2026-08-10T00:00:00Z",
-                      "2026-08-10T08:00:00Z"),),
-            CLOCK_NOW, "calendar:KR:2026-08-10:0",
+            Market.KR,
+            "2026-08-10",
+            "2026-08-10",
+            (_session("dayMarket", "2026-08-10T00:00:00Z", "2026-08-10T08:00:00Z"),),
+            CLOCK_NOW,
+            "calendar:KR:2026-08-10:0",
         )
 
 
 def test_lookahead_day_requires_canonical_provenance_identity():
     with pytest.raises(ValueError):
         LookaheadDayV1(
-            Market.US, "2026-08-10", "2026-08-10",
-            (_session("dayMarket", "2026-08-10T00:00:00Z",
-                      "2026-08-10T08:00:00Z"),),
-            CLOCK_NOW, "made-up-provenance",
+            Market.US,
+            "2026-08-10",
+            "2026-08-10",
+            (_session("dayMarket", "2026-08-10T00:00:00Z", "2026-08-10T08:00:00Z"),),
+            CLOCK_NOW,
+            "made-up-provenance",
         )
     with pytest.raises(ValueError):
         LookaheadDayV1(
-            Market.US, "2026-08-10", "2026-08-10",
-            (_session("dayMarket", "2026-08-10T00:00:00Z",
-                      "2026-08-10T08:00:00Z"),),
-            CLOCK_NOW, "calendar:KR:2026-08-10:0",  # market mismatch
+            Market.US,
+            "2026-08-10",
+            "2026-08-10",
+            (_session("dayMarket", "2026-08-10T00:00:00Z", "2026-08-10T08:00:00Z"),),
+            CLOCK_NOW,
+            "calendar:KR:2026-08-10:0",  # market mismatch
         )
 
 
@@ -153,14 +181,22 @@ def test_store_roundtrips_current_and_next_days(tmp_path):
 def test_store_caps_at_two_days_and_requires_ascending_distinct_dates(tmp_path):
     store = _store(tmp_path)
     with pytest.raises(ValueError):
-        store.replace_market_days(Market.US, (
-            _us_day_edt(), _us_day_edt("2026-08-11", offset_days=1),
-            _us_day_edt("2026-08-12", offset_days=2),
-        ))
+        store.replace_market_days(
+            Market.US,
+            (
+                _us_day_edt(),
+                _us_day_edt("2026-08-11", offset_days=1),
+                _us_day_edt("2026-08-12", offset_days=2),
+            ),
+        )
     with pytest.raises(ValueError):
-        store.replace_market_days(Market.US, (
-            _us_day_edt("2026-08-11", offset_days=1), _us_day_edt(),
-        ))
+        store.replace_market_days(
+            Market.US,
+            (
+                _us_day_edt("2026-08-11", offset_days=1),
+                _us_day_edt(),
+            ),
+        )
     with pytest.raises(ValueError):
         store.replace_market_days(Market.US, (_us_day_edt(), _us_day_edt()))
     with pytest.raises(ValueError):
@@ -169,35 +205,50 @@ def test_store_caps_at_two_days_and_requires_ascending_distinct_dates(tmp_path):
 
 def test_store_is_market_isolated_and_replacement_prunes_stale_days(tmp_path):
     store = _store(tmp_path)
-    store.replace_market_days(Market.US, (
-        _us_day_edt(), _us_day_edt("2026-08-11", offset_days=1),
-    ))
+    store.replace_market_days(
+        Market.US,
+        (
+            _us_day_edt(),
+            _us_day_edt("2026-08-11", offset_days=1),
+        ),
+    )
     kr_day = LookaheadDayV1(
-        Market.KR, "2026-08-10", "2026-08-10",
-        (_session("regularMarket", "2026-08-10T00:00:00Z",
-                  "2026-08-10T06:30:00Z"),),
-        CLOCK_NOW, "calendar:KR:2026-08-10:0",
+        Market.KR,
+        "2026-08-10",
+        "2026-08-10",
+        (_session("regularMarket", "2026-08-10T00:00:00Z", "2026-08-10T06:30:00Z"),),
+        CLOCK_NOW,
+        "calendar:KR:2026-08-10:0",
     )
     store.replace_market_days(Market.KR, (kr_day,))
     assert [d.trade_date for d in store.read_days(Market.US)] == [
-        "2026-08-10", "2026-08-11"]
+        "2026-08-10",
+        "2026-08-11",
+    ]
     assert [d.trade_date for d in store.read_days(Market.KR)] == ["2026-08-10"]
     # Rolling forward replaces the market's whole window.
-    store.replace_market_days(Market.US, (
-        _us_day_edt("2026-08-11", offset_days=1),
-        _us_day_edt("2026-08-12", offset_days=2),
-    ))
+    store.replace_market_days(
+        Market.US,
+        (
+            _us_day_edt("2026-08-11", offset_days=1),
+            _us_day_edt("2026-08-12", offset_days=2),
+        ),
+    )
     assert [d.trade_date for d in store.read_days(Market.US)] == [
-        "2026-08-11", "2026-08-12"]
+        "2026-08-11",
+        "2026-08-12",
+    ]
     assert [d.trade_date for d in store.read_days(Market.KR)] == ["2026-08-10"]
 
 
 def test_store_file_is_private_0600(tmp_path):
     import stat as stat_module
+
     store = _store(tmp_path)
     store.replace_market_days(Market.US, (_us_day_edt(),))
-    mode = stat_module.S_IMODE((tmp_path / "stores"
-                                / "calendar_lookahead.sqlite3").stat().st_mode)
+    mode = stat_module.S_IMODE(
+        (tmp_path / "stores" / "calendar_lookahead.sqlite3").stat().st_mode
+    )
     assert mode == 0o600
 
 
@@ -222,13 +273,17 @@ def _cache_day(trade_date="2026-08-10"):
         trade_date=trade_date,
         sessions={
             "dayMarket": CalendarSessionCacheSchema2(
-                "2026-08-10T00:00:00Z", "2026-08-10T08:00:00Z"),
+                "2026-08-10T00:00:00Z", "2026-08-10T08:00:00Z"
+            ),
             "preMarket": CalendarSessionCacheSchema2(
-                "2026-08-10T08:00:00Z", "2026-08-10T13:30:00Z"),
+                "2026-08-10T08:00:00Z", "2026-08-10T13:30:00Z"
+            ),
             "regularMarket": CalendarSessionCacheSchema2(
-                "2026-08-10T13:30:00Z", "2026-08-10T20:00:00Z"),
+                "2026-08-10T13:30:00Z", "2026-08-10T20:00:00Z"
+            ),
             "afterMarket": CalendarSessionCacheSchema2(
-                "2026-08-10T20:00:00Z", "2026-08-10T23:50:00Z"),
+                "2026-08-10T20:00:00Z", "2026-08-10T23:50:00Z"
+            ),
         },
         source_trade_date=trade_date,
         fetched_at="2026-08-10T00:00:00Z",
@@ -247,7 +302,8 @@ def test_conflicting_current_cache_identity_fails_closed():
         trade_date="2026-08-10",
         sessions={
             "dayMarket": CalendarSessionCacheSchema2(
-                "2026-08-10T00:00:00Z", "2026-08-10T07:00:00Z"),
+                "2026-08-10T00:00:00Z", "2026-08-10T07:00:00Z"
+            ),
         },
         source_trade_date="2026-08-10",
         fetched_at="2026-08-10T00:00:00Z",
@@ -259,8 +315,7 @@ def test_conflicting_current_cache_identity_fails_closed():
 
 
 def test_different_trade_date_or_absent_cache_entry_is_not_compared():
-    verify_against_current_cache(
-        _us_day_edt("2026-08-11", offset_days=1), _cache_day())
+    verify_against_current_cache(_us_day_edt("2026-08-11", offset_days=1), _cache_day())
     verify_against_current_cache(_us_day_edt(), None)
 
 
@@ -326,29 +381,30 @@ def test_est_winter_fixture_follows_absolute_intervals_automatically():
     # uses the provider's absolute intervals, so the offset change needs no
     # code path of its own.
     winter = LookaheadDayV1(
-        Market.US, "2026-01-15", "2026-01-15",
+        Market.US,
+        "2026-01-15",
+        "2026-01-15",
         (
-            _session("dayMarket", "2026-01-15T01:00:00Z",
-                     "2026-01-15T09:00:00Z"),
-            _session("preMarket", "2026-01-15T09:00:00Z",
-                     "2026-01-15T14:30:00Z"),
-            _session("regularMarket", "2026-01-15T14:30:00Z",
-                     "2026-01-15T21:00:00Z"),
+            _session("dayMarket", "2026-01-15T01:00:00Z", "2026-01-15T09:00:00Z"),
+            _session("preMarket", "2026-01-15T09:00:00Z", "2026-01-15T14:30:00Z"),
+            _session("regularMarket", "2026-01-15T14:30:00Z", "2026-01-15T21:00:00Z"),
         ),
-        CLOCK_NOW, "calendar:US:2026-01-15:0",
+        CLOCK_NOW,
+        "calendar:US:2026-01-15:0",
     )
     open_verdict = judge_lookahead_session(
-        Market.US, (winter,), _utc("2026-01-15T01:00:00Z"))
+        Market.US, (winter,), _utc("2026-01-15T01:00:00Z")
+    )
     assert open_verdict.open and open_verdict.session_kind == "dayMarket"
     closed_verdict = judge_lookahead_session(
-        Market.US, (winter,), _utc("2026-01-15T00:30:00Z"))
+        Market.US, (winter,), _utc("2026-01-15T00:30:00Z")
+    )
     assert closed_verdict.open is False
 
 
 def test_next_day_session_is_selected_from_the_lookahead_window():
     days = (_us_day_edt(), _us_day_edt("2026-08-11", offset_days=1))
-    verdict = judge_lookahead_session(
-        Market.US, days, _utc("2026-08-11T00:30:00Z"))
+    verdict = judge_lookahead_session(Market.US, days, _utc("2026-08-11T00:30:00Z"))
     assert verdict.open is True
     assert verdict.trade_date == "2026-08-11"
 
@@ -367,26 +423,27 @@ def test_exhausted_window_fails_closed_as_stale():
 
 def test_overlapping_days_conflict_fails_closed():
     days = (_us_day_edt(), _us_day_edt("2026-08-11"))  # same intervals, two dates
-    verdict = judge_lookahead_session(
-        Market.US, days, _utc("2026-08-10T01:00:00Z"))
+    verdict = judge_lookahead_session(Market.US, days, _utc("2026-08-10T01:00:00Z"))
     assert verdict.open is False
     assert verdict.reason == "session_conflict"
 
 
 def test_wrong_market_day_in_input_fails_closed():
     kr_day = LookaheadDayV1(
-        Market.KR, "2026-08-10", "2026-08-10",
-        (_session("regularMarket", "2026-08-10T00:00:00Z",
-                  "2026-08-10T06:30:00Z"),),
-        CLOCK_NOW, "calendar:KR:2026-08-10:0",
+        Market.KR,
+        "2026-08-10",
+        "2026-08-10",
+        (_session("regularMarket", "2026-08-10T00:00:00Z", "2026-08-10T06:30:00Z"),),
+        CLOCK_NOW,
+        "calendar:KR:2026-08-10:0",
     )
     verdict = judge_lookahead_session(
-        Market.US, (kr_day,), _utc("2026-08-10T01:00:00Z"))
+        Market.US, (kr_day,), _utc("2026-08-10T01:00:00Z")
+    )
     assert verdict.open is False
     assert verdict.reason == "market_mismatch"
 
 
 def test_naive_now_is_rejected():
     with pytest.raises(ValueError):
-        judge_lookahead_session(Market.US, (_us_day_edt(),),
-                                datetime(2026, 8, 10))
+        judge_lookahead_session(Market.US, (_us_day_edt(),), datetime(2026, 8, 10))

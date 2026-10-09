@@ -19,6 +19,8 @@ METHOD = "GET"
 MAX_BODY_BYTES = 1_048_576
 
 _REDIRECT_CODES = frozenset({301, 302, 303, 307, 308})
+
+
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
@@ -44,7 +46,9 @@ class EiaLiveTransport:
     def __init__(self, *, https_handler=None) -> None:
         self.opener = build_live_opener(https_handler)
 
-    def __call__(self, request: EiaRequest) -> _LiveTransportSuccess | _LiveTransportFailure:
+    def __call__(
+        self, request: EiaRequest
+    ) -> _LiveTransportSuccess | _LiveTransportFailure:
         try:
             url = _wire_url(request)
             if url is None:
@@ -85,7 +89,12 @@ def _wire_url(request: EiaRequest) -> str | None:
     )
     url = f"https://{EIA_HOST}{EIA_PATH}?{query}"
     parts = urllib.parse.urlsplit(url)
-    if (parts.scheme, parts.hostname, parts.path, parts.port) != ("https", EIA_HOST, EIA_PATH, None):
+    if (parts.scheme, parts.hostname, parts.path, parts.port) != (
+        "https",
+        EIA_HOST,
+        EIA_PATH,
+        None,
+    ):
         return None
     return url
 
@@ -114,7 +123,9 @@ def _map_http_error(err: urllib.error.HTTPError) -> _LiveTransportFailure:
     if code in _REDIRECT_CODES:
         return _LiveTransportFailure(code="redirect")
     if code == 429:
-        return _LiveTransportFailure(code="http_429", retry_after=_retry_after_seconds(err.headers))
+        return _LiveTransportFailure(
+            code="http_429", retry_after=_retry_after_seconds(err.headers)
+        )
     if code in (401, 403):
         return _LiveTransportFailure(code="auth_rejection")
     if 400 <= code < 500:

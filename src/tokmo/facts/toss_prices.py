@@ -1,11 +1,11 @@
 """Typed Toss current-price facts and the closed one-attempt query boundary."""
 
+import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
-import json
-import re
 
 from tokmo.values import (
     TOSS_PRICE_SOURCE,
@@ -46,18 +46,22 @@ def valid_symbols(symbols) -> bool:
         isinstance(symbols, tuple)
         and 1 <= len(symbols) <= 200
         and len(set(symbols)) == len(symbols)
-        and all(isinstance(symbol, str) and _SYMBOL_RE.fullmatch(symbol)
-                for symbol in symbols)
+        and all(
+            isinstance(symbol, str) and _SYMBOL_RE.fullmatch(symbol)
+            for symbol in symbols
+        )
     )
 
 
 def _aware(value) -> bool:
-    return (isinstance(value, datetime) and value.tzinfo is not None
-            and value.utcoffset() is not None)
+    return (
+        isinstance(value, datetime)
+        and value.tzinfo is not None
+        and value.utcoffset() is not None
+    )
 
 
-def build_prices_request(
-        *, symbols: tuple[str, ...], token: str) -> TossPricesRequest:
+def build_prices_request(*, symbols: tuple[str, ...], token: str) -> TossPricesRequest:
     if not valid_symbols(symbols):
         raise ValueError("invalid_symbols")
     return TossPricesRequest(
@@ -69,8 +73,8 @@ def build_prices_request(
 
 
 def parse_prices_response(
-        body: bytes, *, requested_symbols: tuple[str, ...],
-        fetched_at: datetime) -> TossPriceQueryOutcome:
+    body: bytes, *, requested_symbols: tuple[str, ...], fetched_at: datetime
+) -> TossPriceQueryOutcome:
     if not valid_symbols(requested_symbols) or not _aware(fetched_at):
         return TossPriceQueryOutcome("contract_mismatch")
     if not isinstance(body, bytes):
@@ -90,29 +94,38 @@ def parse_prices_response(
         price_raw = item.get("lastPrice")
         currency = item.get("currency")
         timestamp_raw = item.get("timestamp")
-        if (not isinstance(symbol, str) or not isinstance(price_raw, str)
-                or not 1 <= len(price_raw) <= 30
-                or not _PRICE_RE.fullmatch(price_raw)
-                or not isinstance(currency, str) or not currency):
+        if (
+            not isinstance(symbol, str)
+            or not isinstance(price_raw, str)
+            or not 1 <= len(price_raw) <= 30
+            or not _PRICE_RE.fullmatch(price_raw)
+            or not isinstance(currency, str)
+            or not currency
+        ):
             return TossPriceQueryOutcome("contract_mismatch")
         try:
             price = Decimal(price_raw)
             timestamp = (
-                None if timestamp_raw is None
-                else datetime.fromisoformat(timestamp_raw))
+                None if timestamp_raw is None else datetime.fromisoformat(timestamp_raw)
+            )
         except (InvalidOperation, TypeError, ValueError):
             return TossPriceQueryOutcome("contract_mismatch")
-        if (not price.is_finite() or price < 0
-                or (timestamp is not None and not _aware(timestamp))):
+        if (
+            not price.is_finite()
+            or price < 0
+            or (timestamp is not None and not _aware(timestamp))
+        ):
             return TossPriceQueryOutcome("contract_mismatch")
-        facts.append(TossCurrentPriceFact(
-            source=TOSS_PRICE_SOURCE,
-            symbol=symbol,
-            last_price=canonical_decimal(price),
-            currency_raw=currency,
-            timestamp=timestamp,
-            fetched_at=fetched_at,
-        ))
+        facts.append(
+            TossCurrentPriceFact(
+                source=TOSS_PRICE_SOURCE,
+                symbol=symbol,
+                last_price=canonical_decimal(price),
+                currency_raw=currency,
+                timestamp=timestamp,
+                fetched_at=fetched_at,
+            )
+        )
     returned = tuple(fact.symbol for fact in facts)
     if len(set(returned)) != len(returned) or set(returned) != set(requested_symbols):
         return TossPriceQueryOutcome("contract_mismatch")
@@ -120,9 +133,12 @@ def parse_prices_response(
 
 
 def query_current_prices(
-        *, symbols: tuple[str, ...], token: str,
-        transport: Callable, clock: Callable[[], datetime],
-        ) -> TossPriceQueryOutcome:
+    *,
+    symbols: tuple[str, ...],
+    token: str,
+    transport: Callable,
+    clock: Callable[[], datetime],
+) -> TossPriceQueryOutcome:
     """Start exactly one transport attempt, then parse atomically."""
     try:
         request = build_prices_request(symbols=symbols, token=token)
@@ -131,7 +147,8 @@ def query_current_prices(
     reply = transport(request)
     if hasattr(reply, "body"):
         parsed = parse_prices_response(
-            reply.body, requested_symbols=symbols, fetched_at=clock())
+            reply.body, requested_symbols=symbols, fetched_at=clock()
+        )
         return TossPriceQueryOutcome(
             parsed.code,
             parsed.facts,

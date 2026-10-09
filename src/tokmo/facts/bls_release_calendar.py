@@ -14,10 +14,10 @@ fallback to an assumed time of day, to a fixed winter offset, to the host
 zone, or to an unmatched event.
 """
 
-from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
 import hashlib
 import re
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 MAX_ICS_BYTES = 524_288
@@ -32,8 +32,7 @@ ZONE_ALLOWLIST = {BLS_TZID: IANA_ZONE}
 # calendar declaring anything else is rejected rather than interpreted.
 STANDARD_OFFSET = timedelta(hours=-5)
 DAYLIGHT_OFFSET = timedelta(hours=-4)
-DECLARED_SUBCOMPONENTS = {"STANDARD": STANDARD_OFFSET,
-                          "DAYLIGHT": DAYLIGHT_OFFSET}
+DECLARED_SUBCOMPONENTS = {"STANDARD": STANDARD_OFFSET, "DAYLIGHT": DAYLIGHT_OFFSET}
 
 CALENDAR_TIMEZONE_PROPERTY = "X-WR-TIMEZONE"
 
@@ -42,7 +41,8 @@ CALENDAR_TIMEZONE_PROPERTY = "X-WR-TIMEZONE"
 # form — floating, UTC ``Z``, ``VALUE=DATE``, fractional seconds, an unlisted
 # TZID or any trailing character — fails this pattern and is rejected.
 DTSTART_PATTERN = re.compile(
-    rf"DTSTART;TZID={re.escape(BLS_TZID)}:(\d{{8}})T(\d{{2}})(\d{{2}})(\d{{2}})?")
+    rf"DTSTART;TZID={re.escape(BLS_TZID)}:(\d{{8}})T(\d{{2}})(\d{{2}})(\d{{2}})?"
+)
 OFFSET_PATTERN = re.compile(r"([+-])(\d{2})(\d{2})")
 
 
@@ -88,8 +88,9 @@ def _declared_offset(literal: str) -> timedelta:
     if match is None:
         raise BlsCalendarRejection("vtimezone_offset_grammar_rejected")
     sign = -1 if match.group(1) == "-" else 1
-    return timedelta(hours=sign * int(match.group(2)),
-                     minutes=sign * int(match.group(3)))
+    return timedelta(
+        hours=sign * int(match.group(2)), minutes=sign * int(match.group(3))
+    )
 
 
 def parse_bls_calendar_v1(body: bytes) -> BlsCalendarV1:
@@ -124,8 +125,9 @@ def parse_bls_calendar_v1(body: bytes) -> BlsCalendarV1:
                 raise BlsCalendarRejection("invalid_component_nesting")
             stack.pop()
             if component == "VEVENT":
-                events.append(BlsCalendarEventV1(event.get("SUMMARY"),
-                                                 event.get("DTSTART")))
+                events.append(
+                    BlsCalendarEventV1(event.get("SUMMARY"), event.get("DTSTART"))
+                )
                 event = None
             continue
         name = _property_name(line)
@@ -135,10 +137,15 @@ def parse_bls_calendar_v1(body: bytes) -> BlsCalendarV1:
             calendar_zone = _property_value(line)
         elif stack[-2:] == ["VCALENDAR", "VTIMEZONE"] and name == "TZID":
             timezone_ids.append(_property_value(line))
-        elif (len(stack) == 3 and stack[1] == "VTIMEZONE"
-                and stack[2] in DECLARED_SUBCOMPONENTS and name == "TZOFFSETTO"):
+        elif (
+            len(stack) == 3
+            and stack[1] == "VTIMEZONE"
+            and stack[2] in DECLARED_SUBCOMPONENTS
+            and name == "TZOFFSETTO"
+        ):
             subcomponent_offsets[stack[2]].append(
-                _declared_offset(_property_value(line)))
+                _declared_offset(_property_value(line))
+            )
         elif stack[-1:] == ["VEVENT"] and name in ("SUMMARY", "DTSTART"):
             if name in event:
                 raise BlsCalendarRejection("duplicate_event_property")
@@ -153,9 +160,13 @@ def parse_bls_calendar_v1(body: bytes) -> BlsCalendarV1:
         declared = subcomponent_offsets[component]
         if not declared or set(declared) != {expected}:
             raise BlsCalendarRejection("vtimezone_offsets_rejected")
-    return BlsCalendarV1(calendar_zone, (STANDARD_OFFSET, DAYLIGHT_OFFSET),
-                         tuple(events), hashlib.sha256(body).hexdigest(),
-                         len(body))
+    return BlsCalendarV1(
+        calendar_zone,
+        (STANDARD_OFFSET, DAYLIGHT_OFFSET),
+        tuple(events),
+        hashlib.sha256(body).hexdigest(),
+        len(body),
+    )
 
 
 def _local_datetime(raw: object) -> datetime:
@@ -166,14 +177,21 @@ def _local_datetime(raw: object) -> datetime:
         raise BlsCalendarRejection("dtstart_grammar_rejected")
     day, hour, minute, second = match.groups()
     try:
-        return datetime(int(day[:4]), int(day[4:6]), int(day[6:]), int(hour),
-                        int(minute), 0 if second is None else int(second))
+        return datetime(
+            int(day[:4]),
+            int(day[4:6]),
+            int(day[6:]),
+            int(hour),
+            int(minute),
+            0 if second is None else int(second),
+        )
     except ValueError as error:
         raise BlsCalendarRejection("dtstart_calendar_rejected") from error
 
 
-def select_release_instant_v1(calendar: BlsCalendarV1, *, summary: str,
-                              local_date: date) -> datetime:
+def select_release_instant_v1(
+    calendar: BlsCalendarV1, *, summary: str, local_date: date
+) -> datetime:
     """Return the one official instant for this summary and Eastern date.
 
     Zero matches, two or more matches — including duplicate events carrying
@@ -205,4 +223,4 @@ def select_release_instant_v1(calendar: BlsCalendarV1, *, summary: str,
         raise BlsCalendarRejection("no_matching_event")
     if len(matched) != 1:
         raise BlsCalendarRejection("ambiguous_matching_events")
-    return matched[0].astimezone(timezone.utc)
+    return matched[0].astimezone(UTC)

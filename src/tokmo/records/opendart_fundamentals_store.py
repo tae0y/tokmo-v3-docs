@@ -40,32 +40,56 @@ STATUS_SKIPPED_NONSTANDARD_FISCAL_YEAR = "SKIPPED_NONSTANDARD_FISCAL_YEAR"
 # first set: once a report identity rests there, provider starts are 0
 # forever. NO_DATA and FAILED_RETRYABLE remain re-attempt eligible under the
 # §5 attempt/spacing bounds; IN_ATTEMPT is transient and reconciled (§7).
-TERMINAL_STATUSES = frozenset({
-    STATUS_SUCCESS, STATUS_FAILED_EXHAUSTED, STATUS_FAILED_ROW_BOUND,
-    STATUS_SKIPPED_YEAR_UNPARSEABLE, STATUS_SKIPPED_NONSTANDARD_FISCAL_YEAR,
-})
-NON_TERMINAL_STATUSES = frozenset({
-    STATUS_NO_DATA, STATUS_FAILED_RETRYABLE, STATUS_IN_ATTEMPT,
-})
+TERMINAL_STATUSES = frozenset(
+    {
+        STATUS_SUCCESS,
+        STATUS_FAILED_EXHAUSTED,
+        STATUS_FAILED_ROW_BOUND,
+        STATUS_SKIPPED_YEAR_UNPARSEABLE,
+        STATUS_SKIPPED_NONSTANDARD_FISCAL_YEAR,
+    }
+)
+NON_TERMINAL_STATUSES = frozenset(
+    {
+        STATUS_NO_DATA,
+        STATUS_FAILED_RETRYABLE,
+        STATUS_IN_ATTEMPT,
+    }
+)
 REPORT_STATUSES = TERMINAL_STATUSES | NON_TERMINAL_STATUSES
 
 RESERVED_OUTCOME = "RESERVED"
 STALE_CRASH_OUTCOME = "stale_crash"
 # Closed start-settlement vocabulary: the pinned transport failure codes,
 # the body dispositions, and exact provider status stops.
-START_OUTCOMES = frozenset({
-    "success", "schema_drift", "request_identity_disagreement",
-    STALE_CRASH_OUTCOME,
-    "timeout", "connection_failure", "protocol_failure", "auth_rejection",
-    "http_429", "redirect", "bad_request", "http_5xx", "body_too_large",
-    "unsupported_content_encoding",
-})
+START_OUTCOMES = frozenset(
+    {
+        "success",
+        "schema_drift",
+        "request_identity_disagreement",
+        STALE_CRASH_OUTCOME,
+        "timeout",
+        "connection_failure",
+        "protocol_failure",
+        "auth_rejection",
+        "http_429",
+        "redirect",
+        "bad_request",
+        "http_5xx",
+        "body_too_large",
+        "unsupported_content_encoding",
+    }
+)
 _PROVIDER_STOP_PATTERN = re.compile(r"provider_\d{3}")
 
-TICK_EVENT_OUTCOMES = frozenset({
-    "processed", "refused_inputs_unavailable", "refused_cap_reached",
-    "deferred_deadline",
-})
+TICK_EVENT_OUTCOMES = frozenset(
+    {
+        "processed",
+        "refused_inputs_unavailable",
+        "refused_cap_reached",
+        "deferred_deadline",
+    }
+)
 
 # Schema preconditions (SDS §6 m-6):
 # - bsns_year is TEXT holding the exact 4-digit string of the pinned request
@@ -122,8 +146,7 @@ class CapReachedError(FundamentalsStoreError):
 
 
 def _valid_start_outcome(outcome: str) -> bool:
-    return outcome in START_OUTCOMES or bool(
-        _PROVIDER_STOP_PATTERN.fullmatch(outcome))
+    return outcome in START_OUTCOMES or bool(_PROVIDER_STOP_PATTERN.fullmatch(outcome))
 
 
 class OpenDartFundamentalsStore:
@@ -147,11 +170,14 @@ class OpenDartFundamentalsStore:
             connection.execute("BEGIN IMMEDIATE")
             connection.executemany(
                 "insert into meta(key,value) values(?,?)",
-                [("schema_version", SCHEMA_VERSION),
-                 ("activation_epoch", now.isoformat()),
-                 ("cumulative_start_cap", str(DEFAULT_CUMULATIVE_START_CAP)),
-                 ("enabled", "1"),
-                 ("created_at", now.isoformat())])
+                [
+                    ("schema_version", SCHEMA_VERSION),
+                    ("activation_epoch", now.isoformat()),
+                    ("cumulative_start_cap", str(DEFAULT_CUMULATIVE_START_CAP)),
+                    ("enabled", "1"),
+                    ("created_at", now.isoformat()),
+                ],
+            )
             connection.execute("COMMIT")
             return cls(path, connection)
         except (OSError, sqlite3.Error) as error:
@@ -193,33 +219,47 @@ class OpenDartFundamentalsStore:
 
     def meta(self, key: str) -> str | None:
         row = self.connection.execute(
-            "select value from meta where key=?", (key,)).fetchone()
+            "select value from meta where key=?", (key,)
+        ).fetchone()
         return None if row is None else row[0]
 
     def set_meta(self, key: str, value: str) -> None:
         self.connection.execute(
             "insert into meta(key,value) values(?,?) "
             "on conflict(key) do update set value=excluded.value",
-            (key, value))
+            (key, value),
+        )
 
     # -- accounting reads --------------------------------------------------
 
     def cumulative_starts(self) -> int:
         """Every reservation ever made counts, RESERVED and stale included."""
         return self.connection.execute(
-            "select count(*) from provider_starts").fetchone()[0]
+            "select count(*) from provider_starts"
+        ).fetchone()[0]
 
     def report(self, rcept_no: str) -> dict | None:
         row = self.connection.execute(
             "select rcept_no,corp_code,stock_code,corp_name,bsns_year,"
             "provenance,status,attempts,last_attempt_at,last_outcome,"
             "updated_at from enrichments where rcept_no=?",
-            (rcept_no,)).fetchone()
+            (rcept_no,),
+        ).fetchone()
         if row is None:
             return None
-        names = ("rcept_no", "corp_code", "stock_code", "corp_name",
-                 "bsns_year", "provenance", "status", "attempts",
-                 "last_attempt_at", "last_outcome", "updated_at")
+        names = (
+            "rcept_no",
+            "corp_code",
+            "stock_code",
+            "corp_name",
+            "bsns_year",
+            "provenance",
+            "status",
+            "attempts",
+            "last_attempt_at",
+            "last_outcome",
+            "updated_at",
+        )
         return dict(zip(names, row))
 
     def is_settled(self, rcept_no: str) -> bool:
@@ -233,29 +273,39 @@ class OpenDartFundamentalsStore:
         if self.cumulative_starts() >= cap:
             raise CapReachedError("cap_reached")
 
-    def _reserve(self, rcept_no: str, endpoint: str, request_identity: str,
-                 now: datetime) -> int:
+    def _reserve(
+        self, rcept_no: str, endpoint: str, request_identity: str, now: datetime
+    ) -> int:
         self._cap_guard()
         cursor = self.connection.execute(
             "insert into provider_starts"
             "(rcept_no,endpoint,request_identity,reserved_at,outcome) "
             "values(?,?,?,?,?)",
-            (rcept_no, endpoint, request_identity, now.isoformat(),
-             RESERVED_OUTCOME))
+            (rcept_no, endpoint, request_identity, now.isoformat(), RESERVED_OUTCOME),
+        )
         return cursor.lastrowid
 
-    def begin_attempt(self, *, rcept_no: str, corp_code: str, stock_code: str,
-                      corp_name: str, bsns_year: str, provenance: str,
-                      endpoint: str, request_identity: str,
-                      now: datetime) -> int:
+    def begin_attempt(
+        self,
+        *,
+        rcept_no: str,
+        corp_code: str,
+        stock_code: str,
+        corp_name: str,
+        bsns_year: str,
+        provenance: str,
+        endpoint: str,
+        request_identity: str,
+        now: datetime,
+    ) -> int:
         """SDS §6 Txn A: IN_ATTEMPT upsert plus the first RESERVED start,
         committed together before any wire I/O. A cap refusal rolls the whole
         transaction back, so a refused candidate leaves no report row (m-2)."""
         self.connection.execute("BEGIN IMMEDIATE")
         try:
             existing = self.connection.execute(
-                "select status from enrichments where rcept_no=?",
-                (rcept_no,)).fetchone()
+                "select status from enrichments where rcept_no=?", (rcept_no,)
+            ).fetchone()
             if existing is not None and existing[0] in TERMINAL_STATUSES:
                 raise FundamentalsStoreError("report_settled")
             self.connection.execute(
@@ -266,9 +316,18 @@ class OpenDartFundamentalsStore:
                 "on conflict(rcept_no) do update set status=excluded.status,"
                 "attempts=attempts+1,last_attempt_at=excluded.last_attempt_at,"
                 "updated_at=excluded.updated_at",
-                (rcept_no, corp_code, stock_code, corp_name, bsns_year,
-                 provenance, STATUS_IN_ATTEMPT, now.isoformat(),
-                 now.isoformat()))
+                (
+                    rcept_no,
+                    corp_code,
+                    stock_code,
+                    corp_name,
+                    bsns_year,
+                    provenance,
+                    STATUS_IN_ATTEMPT,
+                    now.isoformat(),
+                    now.isoformat(),
+                ),
+            )
             start_id = self._reserve(rcept_no, endpoint, request_identity, now)
             self.connection.execute("COMMIT")
             return start_id
@@ -277,10 +336,15 @@ class OpenDartFundamentalsStore:
                 self.connection.execute("ROLLBACK")
             raise
 
-    def settle_start(self, start_id: int, outcome: str, *,
-                     body_sha256: str | None = None,
-                     reserve_next: tuple[str, str, str] | None = None,
-                     now: datetime | None = None) -> int | None:
+    def settle_start(
+        self,
+        start_id: int,
+        outcome: str,
+        *,
+        body_sha256: str | None = None,
+        reserve_next: tuple[str, str, str] | None = None,
+        now: datetime | None = None,
+    ) -> int | None:
         """SDS §6 Txn B/C: settle one RESERVED start; optionally reserve the
         fallback start in the same transaction. A cap refusal on the fallback
         still commits the settlement, then raises."""
@@ -293,13 +357,14 @@ class OpenDartFundamentalsStore:
         next_id = None
         try:
             row = self.connection.execute(
-                "select outcome from provider_starts where start_id=?",
-                (start_id,)).fetchone()
+                "select outcome from provider_starts where start_id=?", (start_id,)
+            ).fetchone()
             if row is None or row[0] != RESERVED_OUTCOME:
                 raise FundamentalsStoreError("reservation_disagreement")
             self.connection.execute(
-                "update provider_starts set outcome=?,body_sha256=? "
-                "where start_id=?", (outcome, body_sha256, start_id))
+                "update provider_starts set outcome=?,body_sha256=? where start_id=?",
+                (outcome, body_sha256, start_id),
+            )
             if reserve_next is not None:
                 try:
                     next_id = self._reserve(*reserve_next, now)
@@ -314,8 +379,7 @@ class OpenDartFundamentalsStore:
             raise cap_refusal
         return next_id
 
-    def insert_payload_rows(self, rcept_no: str, endpoint: str,
-                            payload_rows) -> None:
+    def insert_payload_rows(self, rcept_no: str, endpoint: str, payload_rows) -> None:
         """Sanitized rows for one settled report. Participates in the caller's
         transaction; the (rcept_no, endpoint, ordinal) primary key makes an
         accidental duplicate commit refuse loudly (§7)."""
@@ -323,17 +387,24 @@ class OpenDartFundamentalsStore:
             self.connection.execute(
                 "insert into fundamental_payload_rows"
                 "(rcept_no,endpoint,ordinal,row_json) values(?,?,?,?)",
-                (rcept_no, endpoint, ordinal, row_json))
+                (rcept_no, endpoint, ordinal, row_json),
+            )
 
-    def settle_report_terminal(self, *, rcept_no: str, status: str,
-                               last_outcome: str, now: datetime,
-                               corp_code: str | None = None,
-                               stock_code: str | None = None,
-                               corp_name: str | None = None,
-                               bsns_year: str | None = None,
-                               provenance: str | None = None,
-                               endpoint: str | None = None,
-                               payload_rows=()) -> None:
+    def settle_report_terminal(
+        self,
+        *,
+        rcept_no: str,
+        status: str,
+        last_outcome: str,
+        now: datetime,
+        corp_code: str | None = None,
+        stock_code: str | None = None,
+        corp_name: str | None = None,
+        bsns_year: str | None = None,
+        provenance: str | None = None,
+        endpoint: str | None = None,
+        payload_rows=(),
+    ) -> None:
         """Settle a report out of the attempt path into a resting status.
 
         SUCCESS commits its payload rows in the same transaction (§6 final
@@ -352,13 +423,12 @@ class OpenDartFundamentalsStore:
         self.connection.execute("BEGIN IMMEDIATE")
         try:
             existing = self.connection.execute(
-                "select status from enrichments where rcept_no=?",
-                (rcept_no,)).fetchone()
+                "select status from enrichments where rcept_no=?", (rcept_no,)
+            ).fetchone()
             if existing is not None and existing[0] in TERMINAL_STATUSES:
                 raise FundamentalsStoreError("report_settled")
             if existing is None:
-                fields = (corp_code, stock_code, corp_name, bsns_year,
-                          provenance)
+                fields = (corp_code, stock_code, corp_name, bsns_year, provenance)
                 if any(value is None for value in fields):
                     raise FundamentalsStoreError("report_fields_required")
                 self.connection.execute(
@@ -366,13 +436,14 @@ class OpenDartFundamentalsStore:
                     "corp_name,bsns_year,provenance,status,attempts,"
                     "last_attempt_at,last_outcome,updated_at) "
                     "values(?,?,?,?,?,?,?,0,NULL,?,?)",
-                    (rcept_no, *fields, status, last_outcome,
-                     now.isoformat()))
+                    (rcept_no, *fields, status, last_outcome, now.isoformat()),
+                )
             else:
                 self.connection.execute(
                     "update enrichments set status=?,last_outcome=?,"
                     "updated_at=? where rcept_no=?",
-                    (status, last_outcome, now.isoformat(), rcept_no))
+                    (status, last_outcome, now.isoformat(), rcept_no),
+                )
             if status == STATUS_SUCCESS:
                 self.insert_payload_rows(rcept_no, endpoint, payload_rows)
             self.connection.execute("COMMIT")
@@ -381,8 +452,7 @@ class OpenDartFundamentalsStore:
                 self.connection.execute("ROLLBACK")
             raise
 
-    def reconcile_stale(self, *, now: datetime,
-                        stale_before: datetime) -> dict:
+    def reconcile_stale(self, *, now: datetime, stale_before: datetime) -> dict:
         """SDS §7 crash reconcile: RESERVED starts older than the threshold
         settle as stale_crash (still counted toward the cumulative cap) and
         stale IN_ATTEMPT reports become FAILED_RETRYABLE."""
@@ -391,17 +461,21 @@ class OpenDartFundamentalsStore:
             stale_starts = self.connection.execute(
                 "update provider_starts set outcome=? "
                 "where outcome=? and reserved_at<?",
-                (STALE_CRASH_OUTCOME, RESERVED_OUTCOME,
-                 stale_before.isoformat())).rowcount
+                (STALE_CRASH_OUTCOME, RESERVED_OUTCOME, stale_before.isoformat()),
+            ).rowcount
             stale_reports = self.connection.execute(
                 "update enrichments set status=?,last_outcome=?,updated_at=? "
                 "where status=? and last_attempt_at<?",
-                (STATUS_FAILED_RETRYABLE, STALE_CRASH_OUTCOME,
-                 now.isoformat(), STATUS_IN_ATTEMPT,
-                 stale_before.isoformat())).rowcount
+                (
+                    STATUS_FAILED_RETRYABLE,
+                    STALE_CRASH_OUTCOME,
+                    now.isoformat(),
+                    STATUS_IN_ATTEMPT,
+                    stale_before.isoformat(),
+                ),
+            ).rowcount
             self.connection.execute("COMMIT")
-            return {"stale_starts": stale_starts,
-                    "stale_reports": stale_reports}
+            return {"stale_starts": stale_starts, "stale_reports": stale_reports}
         except BaseException:
             if self.connection.in_transaction:
                 self.connection.execute("ROLLBACK")
@@ -409,44 +483,70 @@ class OpenDartFundamentalsStore:
 
     # -- durable tick evidence and summaries -------------------------------
 
-    def append_tick_event(self, *, at: datetime, outcome: str,
-                          reason: str | None, reports_processed: int,
-                          starts: int) -> None:
+    def append_tick_event(
+        self,
+        *,
+        at: datetime,
+        outcome: str,
+        reason: str | None,
+        reports_processed: int,
+        starts: int,
+    ) -> None:
         if outcome not in TICK_EVENT_OUTCOMES:
             raise FundamentalsStoreError("unknown_tick_outcome")
         self.connection.execute(
             "insert into tick_events(at,outcome,reason,reports_processed,"
             "starts) values(?,?,?,?,?)",
-            (at.isoformat(), outcome, reason, reports_processed, starts))
+            (at.isoformat(), outcome, reason, reports_processed, starts),
+        )
 
     def status_summary(self) -> dict:
-        meta = dict(self.connection.execute(
-            "select key,value from meta order by key").fetchall())
-        reports = dict(self.connection.execute(
-            "select status,count(*) from enrichments "
-            "group by status order by status").fetchall())
+        meta = dict(
+            self.connection.execute(
+                "select key,value from meta order by key"
+            ).fetchall()
+        )
+        reports = dict(
+            self.connection.execute(
+                "select status,count(*) from enrichments "
+                "group by status order by status"
+            ).fetchall()
+        )
         events = [
-            {"at": at, "outcome": outcome, "reason": reason,
-             "reports_processed": reports_processed, "starts": starts}
-            for at, outcome, reason, reports_processed, starts
-            in self.connection.execute(
+            {
+                "at": at,
+                "outcome": outcome,
+                "reason": reason,
+                "reports_processed": reports_processed,
+                "starts": starts,
+            }
+            for at, outcome, reason, reports_processed, starts in self.connection.execute(
                 "select at,outcome,reason,reports_processed,starts "
-                "from tick_events order by event_id desc limit 5").fetchall()
+                "from tick_events order by event_id desc limit 5"
+            ).fetchall()
         ]
-        return {"meta": meta, "reports": reports,
-                "cumulative_starts": self.cumulative_starts(),
-                "tick_events": events}
+        return {
+            "meta": meta,
+            "reports": reports,
+            "cumulative_starts": self.cumulative_starts(),
+            "tick_events": events,
+        }
 
-    def latest_success_rows(self, corp_code: str,
-                            bsns_year: str) -> tuple[str, ...]:
+    def latest_success_rows(self, corp_code: str, bsns_year: str) -> tuple[str, ...]:
         """Interim evidence read (§6): payload rows of the maximum-rcept_no
         SUCCESS enrichment for the pair. Not a canonical material authority."""
         latest = self.connection.execute(
             "select rcept_no from enrichments where corp_code=? and "
             "bsns_year=? and status=? order by rcept_no desc limit 1",
-            (corp_code, bsns_year, STATUS_SUCCESS)).fetchone()
+            (corp_code, bsns_year, STATUS_SUCCESS),
+        ).fetchone()
         if latest is None:
             return ()
-        return tuple(row[0] for row in self.connection.execute(
-            "select row_json from fundamental_payload_rows where rcept_no=? "
-            "order by endpoint,ordinal", (latest[0],)).fetchall())
+        return tuple(
+            row[0]
+            for row in self.connection.execute(
+                "select row_json from fundamental_payload_rows where rcept_no=? "
+                "order by endpoint,ordinal",
+                (latest[0],),
+            ).fetchall()
+        )

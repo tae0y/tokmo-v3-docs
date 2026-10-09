@@ -10,11 +10,11 @@ reinterpreting session or calendar state; a missing or mismatched binding
 fails closed before provider I/O or an analysis transition.
 """
 
+import hashlib
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
-import hashlib
 from types import MappingProxyType
-from typing import Mapping
 
 from tokmo.values.cadence_policy import CadenceTickV1
 from tokmo.values.current_holdings import (
@@ -24,7 +24,10 @@ from tokmo.values.current_holdings import (
 )
 from tokmo.values.material_pack import canonical_encode
 from tokmo.values.session_gate import (
-    ENABLED_SESSION_KINDS, SESSION_REASON_TOKENS, Market, SessionVerdict,
+    ENABLED_SESSION_KINDS,
+    SESSION_REASON_TOKENS,
+    Market,
+    SessionVerdict,
 )
 
 MASK_DIGEST_DOMAIN = "tokmo-v3:open-market-mask"
@@ -35,8 +38,11 @@ class MaskBindingError(ValueError):
 
 
 def _aware(value: datetime, name: str) -> None:
-    if (not isinstance(value, datetime) or value.tzinfo is None
-            or value.utcoffset() is None):
+    if (
+        not isinstance(value, datetime)
+        or value.tzinfo is None
+        or value.utcoffset() is None
+    ):
         raise ValueError(f"{name} must be an aware datetime")
 
 
@@ -63,7 +69,9 @@ class MaskMarketEntryV1:
         if self.reason == "open" and self.session_start_utc is None:
             raise ValueError("open entry requires session boundaries")
         if self.session_start_utc is not None:
-            for boundary, name in zip(boundaries, ("session_start_utc", "session_end_utc")):
+            for boundary, name in zip(
+                boundaries, ("session_start_utc", "session_end_utc")
+            ):
                 _aware(boundary, name)
             if self.session_start_utc >= self.session_end_utc:
                 raise ValueError("session must have positive duration")
@@ -79,8 +87,12 @@ def _entry_payload(entry: MaskMarketEntryV1) -> dict:
     }
 
 
-def mask_digest_v1(policy_version: str, scheduled_for_utc: datetime, tick_id: int,
-                   entries: Mapping[Market, MaskMarketEntryV1]) -> str:
+def mask_digest_v1(
+    policy_version: str,
+    scheduled_for_utc: datetime,
+    tick_id: int,
+    entries: Mapping[Market, MaskMarketEntryV1],
+) -> str:
     payload = {
         "v": 1,
         "domain": MASK_DIGEST_DOMAIN,
@@ -95,12 +107,10 @@ def mask_digest_v1(policy_version: str, scheduled_for_utc: datetime, tick_id: in
             for market in sorted(Market, key=lambda item: item.value)
         },
         "markets": sorted(
-            market.value for market, entry in entries.items()
-            if entry.reason == "open"
+            market.value for market, entry in entries.items() if entry.reason == "open"
         ),
         "entries": {
-            market.value: _entry_payload(entry)
-            for market, entry in entries.items()
+            market.value: _entry_payload(entry) for market, entry in entries.items()
         },
     }
     return hashlib.sha256(canonical_encode(payload)).hexdigest()
@@ -135,10 +145,12 @@ class OpenMarketMaskV1:
         for market, entry in self.entries.items():
             if not isinstance(entry, MaskMarketEntryV1) or entry.market is not market:
                 raise ValueError("entry market identity mismatch")
-        frozen = MappingProxyType({
-            market: self.entries[market]
-            for market in sorted(Market, key=lambda item: item.value)
-        })
+        frozen = MappingProxyType(
+            {
+                market: self.entries[market]
+                for market in sorted(Market, key=lambda item: item.value)
+            }
+        )
         object.__setattr__(self, "entries", frozen)
         expected_markets = frozenset(
             market for market, entry in frozen.items() if entry.reason == "open"
@@ -146,7 +158,10 @@ class OpenMarketMaskV1:
         if type(self.markets) is not frozenset or self.markets != expected_markets:
             raise ValueError("mask markets must equal the open entries exactly")
         expected_digest = mask_digest_v1(
-            self.policy_version, self.scheduled_for_utc, self.tick_id, frozen,
+            self.policy_version,
+            self.scheduled_for_utc,
+            self.tick_id,
+            frozen,
         )
         if self.digest != expected_digest:
             raise ValueError("mask digest mismatch")
@@ -155,12 +170,20 @@ class OpenMarketMaskV1:
     def tick(self) -> CadenceTickV1:
         """The exact canonical tick carrier this mask is bound to."""
         return CadenceTickV1(
-            self.policy_version, self.scheduled_for_utc, self.tick_id,
+            self.policy_version,
+            self.scheduled_for_utc,
+            self.tick_id,
         )
 
 
-def build_open_market_mask(*, policy_version: str, scheduled_for_utc: datetime,
-                           tick_id: int, verdicts, local_dates) -> OpenMarketMaskV1:
+def build_open_market_mask(
+    *,
+    policy_version: str,
+    scheduled_for_utc: datetime,
+    tick_id: int,
+    verdicts,
+    local_dates,
+) -> OpenMarketMaskV1:
     """Build the tick's one mask from judged verdicts and market-local dates."""
     entries = {}
     for verdict in tuple(verdicts):
@@ -170,7 +193,9 @@ def build_open_market_mask(*, policy_version: str, scheduled_for_utc: datetime,
             raise ValueError("duplicate verdict market")
         session = verdict.session
         entries[verdict.market] = MaskMarketEntryV1(
-            verdict.market, local_dates[verdict.market], verdict.reason,
+            verdict.market,
+            local_dates[verdict.market],
+            verdict.reason,
             None if session is None else session.start_time,
             None if session is None else session.end_time,
         )
@@ -181,12 +206,18 @@ def build_open_market_mask(*, policy_version: str, scheduled_for_utc: datetime,
     )
     digest = mask_digest_v1(policy_version, scheduled_for_utc, tick_id, entries)
     return OpenMarketMaskV1(
-        policy_version, scheduled_for_utc, tick_id, markets, entries, digest,
+        policy_version,
+        scheduled_for_utc,
+        tick_id,
+        markets,
+        entries,
+        digest,
     )
 
 
-def require_mask_binding(mask, *, tick_id=None, policy_version=None,
-                         scheduled_for_utc=None, digest=None) -> OpenMarketMaskV1:
+def require_mask_binding(
+    mask, *, tick_id=None, policy_version=None, scheduled_for_utc=None, digest=None
+) -> OpenMarketMaskV1:
     """Fail closed unless ``mask`` is a real mask matching every given identity."""
     if not isinstance(mask, OpenMarketMaskV1):
         raise MaskBindingError("open-market mask required")
@@ -219,8 +250,8 @@ def require_tick_mask_binding(mask, tick) -> OpenMarketMaskV1:
     if mask.tick_id != tick.tick_id:
         raise MaskBindingError("mask tick identity mismatch")
     if mask.digest != mask_digest_v1(
-            mask.policy_version, mask.scheduled_for_utc, mask.tick_id,
-            mask.entries):
+        mask.policy_version, mask.scheduled_for_utc, mask.tick_id, mask.entries
+    ):
         raise MaskBindingError("mask digest mismatch")
     return mask
 
@@ -242,8 +273,9 @@ class OpenMarketHoldingsProjectionV1:
     unknown_symbols: frozenset[str]
 
 
-def project_open_market_holdings(state: CurrentHoldingsV1,
-                                 mask) -> OpenMarketHoldingsProjectionV1:
+def project_open_market_holdings(
+    state: CurrentHoldingsV1, mask
+) -> OpenMarketHoldingsProjectionV1:
     """Project the canonical snapshot onto the mask's exact open markets."""
     require_mask_binding(mask)
     if not isinstance(state, CurrentHoldingsV1):
@@ -262,5 +294,9 @@ def project_open_market_holdings(state: CurrentHoldingsV1,
             AccountHoldingsV1(account.account_scope, account.ordinal, tuple(kept))
         )
     return OpenMarketHoldingsProjectionV1(
-        mask.digest, mask.tick_id, tuple(accounts), mask.markets, frozenset(unknown),
+        mask.digest,
+        mask.tick_id,
+        tuple(accounts),
+        mask.markets,
+        frozenset(unknown),
     )

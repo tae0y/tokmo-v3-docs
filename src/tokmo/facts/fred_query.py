@@ -56,18 +56,27 @@ TRANSPORT_FAILURE_MAP = {
 
 def observation_limit(query: FredSeriesQueryV1) -> int:
     """A bounded limit sufficient for the requested closed monthly window."""
-    months = ((query.observation_end.year - query.observation_start.year) * 12
-              + query.observation_end.month - query.observation_start.month + 1)
+    months = (
+        (query.observation_end.year - query.observation_start.year) * 12
+        + query.observation_end.month
+        - query.observation_start.month
+        + 1
+    )
     return max(1, min(months, MAX_OBSERVATION_LIMIT))
 
 
 def build_series_observations_request(query: FredSeriesQueryV1) -> FredRequest:
     return FredRequest(
-        FredOperation.SERIES_OBSERVATIONS, series_id=query.series_id,
-        realtime_start=REALTIME_START, realtime_end=REALTIME_END,
+        FredOperation.SERIES_OBSERVATIONS,
+        series_id=query.series_id,
+        realtime_start=REALTIME_START,
+        realtime_end=REALTIME_END,
         observation_start=query.observation_start,
-        observation_end=query.observation_end, output_type=4,
-        limit=observation_limit(query), offset=0)
+        observation_end=query.observation_end,
+        output_type=4,
+        limit=observation_limit(query),
+        offset=0,
+    )
 
 
 class FredQueryAdapterV1:
@@ -94,25 +103,31 @@ class FredQueryAdapterV1:
         outcome = self._transport(request, api_key)
         code = getattr(outcome, "code", None)
         if code != "success":
-            return FredQueryFailureV1.for_code(TRANSPORT_FAILURE_MAP.get(
-                code, FredQueryFailureCodeV1.PROVIDER_CONTRACT))
+            return FredQueryFailureV1.for_code(
+                TRANSPORT_FAILURE_MAP.get(
+                    code, FredQueryFailureCodeV1.PROVIDER_CONTRACT
+                )
+            )
         try:
             page = parse_fred_response(request, getattr(outcome, "body", None))
         except ValueError:
-            return FredQueryFailureV1.for_code(
-                FredQueryFailureCodeV1.RESPONSE_CONTRACT)
+            return FredQueryFailureV1.for_code(FredQueryFailureCodeV1.RESPONSE_CONTRACT)
         if page.completeness is not PageCompleteness.COMPLETE or not page.rows:
             return FredQueryFailureV1.for_code(FredQueryFailureCodeV1.INCOMPLETE)
         try:
             observations = tuple(_observation(row) for row in page.rows)
         except ValueError:
-            return FredQueryFailureV1.for_code(
-                FredQueryFailureCodeV1.RESPONSE_CONTRACT)
+            return FredQueryFailureV1.for_code(FredQueryFailureCodeV1.RESPONSE_CONTRACT)
         return build_fred_series_fact_v1(
-            query_identity=query.query_identity, series_id=query.series_id,
-            observations=observations, fetched_at=self._clock(),
-            release_id=None, release_date=None, vintage_date=None,
-            completeness=FredCompletenessV1.COMPLETE)
+            query_identity=query.query_identity,
+            series_id=query.series_id,
+            observations=observations,
+            fetched_at=self._clock(),
+            release_id=None,
+            release_date=None,
+            vintage_date=None,
+            completeness=FredCompletenessV1.COMPLETE,
+        )
 
 
 def build_series_release_request(*, series_id: str) -> FredRequest:
@@ -121,9 +136,13 @@ def build_series_release_request(*, series_id: str) -> FredRequest:
 
 
 def build_release_dates_request(*, release_id: int) -> FredRequest:
-    return FredRequest(FredOperation.RELEASE_DATES, release_id=release_id,
-                       include_release_dates_with_no_data=False,
-                       limit=RELEASE_DATES_LIMIT, offset=0)
+    return FredRequest(
+        FredOperation.RELEASE_DATES,
+        release_id=release_id,
+        include_release_dates_with_no_data=False,
+        limit=RELEASE_DATES_LIMIT,
+        offset=0,
+    )
 
 
 def judge_release_dates_page_v1(page) -> str | None:
@@ -167,8 +186,7 @@ class FredScheduleAdapterV1:
             return page
         release_id = page.rows[0].get("id")
         if type(release_id) is not int or type(release_id) is bool or release_id <= 0:
-            return FredQueryFailureV1.for_code(
-                FredQueryFailureCodeV1.RESPONSE_CONTRACT)
+            return FredQueryFailureV1.for_code(FredQueryFailureCodeV1.RESPONSE_CONTRACT)
         return release_id
 
     def query_release_dates_v1(self, *, release_id: int) -> date | FredQueryFailureV1:
@@ -178,16 +196,13 @@ class FredScheduleAdapterV1:
         if not page.rows:
             # Nothing has been released yet for this release identity; this
             # closes the schedule with no further wire.
-            return FredQueryFailureV1.for_code(
-                FredQueryFailureCodeV1.NOT_YET_RELEASED)
+            return FredQueryFailureV1.for_code(FredQueryFailureCodeV1.NOT_YET_RELEASED)
         if judge_release_dates_page_v1(page) != DESC_PREFIX_COMPLETE:
-            return FredQueryFailureV1.for_code(
-                FredQueryFailureCodeV1.RESPONSE_CONTRACT)
+            return FredQueryFailureV1.for_code(FredQueryFailureCodeV1.RESPONSE_CONTRACT)
         try:
             return date.fromisoformat(page.rows[0]["date"])
         except (KeyError, TypeError, ValueError):
-            return FredQueryFailureV1.for_code(
-                FredQueryFailureCodeV1.RESPONSE_CONTRACT)
+            return FredQueryFailureV1.for_code(FredQueryFailureCodeV1.RESPONSE_CONTRACT)
 
     def _page(self, request: FredRequest):
         try:
@@ -197,13 +212,15 @@ class FredScheduleAdapterV1:
         outcome = self._transport(request, api_key)
         code = getattr(outcome, "code", None)
         if code != "success":
-            return FredQueryFailureV1.for_code(TRANSPORT_FAILURE_MAP.get(
-                code, FredQueryFailureCodeV1.PROVIDER_CONTRACT))
+            return FredQueryFailureV1.for_code(
+                TRANSPORT_FAILURE_MAP.get(
+                    code, FredQueryFailureCodeV1.PROVIDER_CONTRACT
+                )
+            )
         try:
             return parse_fred_response(request, getattr(outcome, "body", None))
         except ValueError:
-            return FredQueryFailureV1.for_code(
-                FredQueryFailureCodeV1.RESPONSE_CONTRACT)
+            return FredQueryFailureV1.for_code(FredQueryFailureCodeV1.RESPONSE_CONTRACT)
 
 
 class TerminalMonthGuardedPortV1:
@@ -233,20 +250,24 @@ class TerminalMonthGuardedPortV1:
         if not isinstance(outcome, FredSeriesFactV1):
             return outcome
         newest = outcome.observations[-1].observation_date
-        if (newest.year, newest.month) < (query.observation_end.year,
-                                          query.observation_end.month):
-            return FredQueryFailureV1.for_code(
-                FredQueryFailureCodeV1.NOT_YET_RELEASED)
-        if (newest.year, newest.month) > (query.observation_end.year,
-                                          query.observation_end.month):
-            return FredQueryFailureV1.for_code(
-                FredQueryFailureCodeV1.RESPONSE_CONTRACT)
+        if (newest.year, newest.month) < (
+            query.observation_end.year,
+            query.observation_end.month,
+        ):
+            return FredQueryFailureV1.for_code(FredQueryFailureCodeV1.NOT_YET_RELEASED)
+        if (newest.year, newest.month) > (
+            query.observation_end.year,
+            query.observation_end.month,
+        ):
+            return FredQueryFailureV1.for_code(FredQueryFailureCodeV1.RESPONSE_CONTRACT)
         return outcome
 
 
 def _observation(row: dict) -> FredObservationV1:
     return FredObservationV1(
-        date.fromisoformat(row["date"]), row["value"],
+        date.fromisoformat(row["date"]),
+        row["value"],
         FredValueStateV1(row["value_state"]),
         date.fromisoformat(row["realtime_start"]),
-        date.fromisoformat(row["realtime_end"]))
+        date.fromisoformat(row["realtime_end"]),
+    )

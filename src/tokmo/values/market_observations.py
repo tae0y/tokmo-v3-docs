@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 
-__all__ = ["WtiFact", "YieldCurveFact", "TossCurrentPriceFact"]
+__all__ = ["TossCurrentPriceFact", "WtiFact", "YieldCurveFact"]
 
 
 @dataclass(frozen=True)

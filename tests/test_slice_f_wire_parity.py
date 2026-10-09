@@ -1,11 +1,11 @@
 """F8 wire parity through the production Toss live transport entrypoints."""
 
-from dataclasses import dataclass
-from email.message import Message
 import io
 import urllib.parse
 import urllib.request
 import urllib.response
+from dataclasses import dataclass
+from email.message import Message
 
 import pytest
 
@@ -60,25 +60,37 @@ class RecordingHTTPSHandler(urllib.request.HTTPSHandler):
     def https_open(self, request):
         parts = urllib.parse.urlsplit(request.full_url)
         headers = {name.lower(): value for name, value in request.header_items()}
-        selected_headers = frozenset(headers) & frozenset({
-            "authorization", "accept-encoding", "content-type",
-            "x-tossinvest-account",
-        })
-        form = urllib.parse.parse_qs(
-            request.data.decode("ascii"), strict_parsing=True
-        ) if request.data is not None else {}
-        query = urllib.parse.parse_qs(
-            parts.query, keep_blank_values=True, strict_parsing=True
-        ) if parts.query else {}
-        self.requests.append(_RecordedRequest(
-            method=request.get_method(),
-            host=parts.hostname or "",
-            path=parts.path,
-            query={key: tuple(values) for key, values in query.items()},
-            header_names=selected_headers,
-            content_type=headers.get("content-type"),
-            form_keys=frozenset(form),
-        ))
+        selected_headers = frozenset(headers) & frozenset(
+            {
+                "authorization",
+                "accept-encoding",
+                "content-type",
+                "x-tossinvest-account",
+            }
+        )
+        form = (
+            urllib.parse.parse_qs(request.data.decode("ascii"), strict_parsing=True)
+            if request.data is not None
+            else {}
+        )
+        query = (
+            urllib.parse.parse_qs(
+                parts.query, keep_blank_values=True, strict_parsing=True
+            )
+            if parts.query
+            else {}
+        )
+        self.requests.append(
+            _RecordedRequest(
+                method=request.get_method(),
+                host=parts.hostname or "",
+                path=parts.path,
+                query={key: tuple(values) for key, values in query.items()},
+                header_names=selected_headers,
+                content_type=headers.get("content-type"),
+                form_keys=frozenset(form),
+            )
+        )
         return _Response()
 
 
@@ -100,10 +112,8 @@ class ScriptedHTTPSHandler(RecordingHTTPSHandler):
 def _redirect_response(url: str):
     headers = Message()
     headers["Location"] = "https://openapi.tossinvest.com/redirect-target"
-    response = urllib.response.addinfourl(
-        io.BytesIO(b""), headers, url, code=302
-    )
-    setattr(response, "msg", "Found")
+    response = urllib.response.addinfourl(io.BytesIO(b""), headers, url, code=302)
+    response.msg = "Found"
     return response
 
 
@@ -140,38 +150,118 @@ def _read_case(operation, **kwargs):
         return TossReadsLiveTransport(https_handler=handler), build_read_request(
             operation, token=_TOKEN, **kwargs
         )
+
     return build
 
 
 _CASES = (
-    pytest.param("TOKEN", _auth_case, "POST", "/oauth2/token", {}, False,
-                 frozenset({"grant_type", "client_id", "client_secret"}), id="TOKEN"),
-    pytest.param("ACCOUNTS", _accounts_case, "GET", "/api/v1/accounts", {}, False,
-                 frozenset(), id="ACCOUNTS"),
-    pytest.param("ACCOUNT_HOLDINGS", _holdings_case, "GET", "/api/v1/holdings", {}, True,
-                 frozenset(), id="ACCOUNT_HOLDINGS"),
-    pytest.param("PRICE_BATCH", _prices_case, "GET", "/api/v1/prices",
-                 {"symbols": ("005930,AAPL",)}, False, frozenset(), id="PRICE_BATCH"),
-    pytest.param("ORDERS_PAGE", _read_case(TossReadOperation.ORDERS,
-                 account_seq=_ACCOUNT, status="CLOSED"), "GET", "/api/v1/orders",
-                 {"status": ("CLOSED",)}, True, frozenset(), id="ORDERS_PAGE-no-cursor"),
-    pytest.param("ORDERS_PAGE", _read_case(TossReadOperation.ORDERS,
-                 account_seq=_ACCOUNT, status="CLOSED", cursor="cursor_2"), "GET",
-                 "/api/v1/orders", {"status": ("CLOSED",), "cursor": ("cursor_2",)},
-                 True, frozenset(), id="ORDERS_PAGE-cursor"),
-    pytest.param("ORDER_DETAIL", _read_case(TossReadOperation.ORDER_DETAIL,
-                 account_seq=_ACCOUNT, order_id="order-42"), "GET",
-                 "/api/v1/orders/order-42", {}, True, frozenset(), id="ORDER_DETAIL"),
-    pytest.param("CALENDAR_DAY_KR", _read_case(TossReadOperation.KR_MARKET_CALENDAR),
-                 "GET", "/api/v1/market-calendar/KR", {}, False, frozenset(),
-                 id="CALENDAR_DAY_KR-no-date"),
-    pytest.param("CALENDAR_DAY_KR", _read_case(TossReadOperation.KR_MARKET_CALENDAR,
-                 date="2026-07-30"), "GET", "/api/v1/market-calendar/KR",
-                 {"date": ("2026-07-30",)}, False, frozenset(),
-                 id="CALENDAR_DAY_KR-date"),
-    pytest.param("CALENDAR_DAY_US", _read_case(TossReadOperation.US_MARKET_CALENDAR,
-                 date="2026-07-30"), "GET", "/api/v1/market-calendar/US",
-                 {"date": ("2026-07-30",)}, False, frozenset(), id="CALENDAR_DAY_US-date"),
+    pytest.param(
+        "TOKEN",
+        _auth_case,
+        "POST",
+        "/oauth2/token",
+        {},
+        False,
+        frozenset({"grant_type", "client_id", "client_secret"}),
+        id="TOKEN",
+    ),
+    pytest.param(
+        "ACCOUNTS",
+        _accounts_case,
+        "GET",
+        "/api/v1/accounts",
+        {},
+        False,
+        frozenset(),
+        id="ACCOUNTS",
+    ),
+    pytest.param(
+        "ACCOUNT_HOLDINGS",
+        _holdings_case,
+        "GET",
+        "/api/v1/holdings",
+        {},
+        True,
+        frozenset(),
+        id="ACCOUNT_HOLDINGS",
+    ),
+    pytest.param(
+        "PRICE_BATCH",
+        _prices_case,
+        "GET",
+        "/api/v1/prices",
+        {"symbols": ("005930,AAPL",)},
+        False,
+        frozenset(),
+        id="PRICE_BATCH",
+    ),
+    pytest.param(
+        "ORDERS_PAGE",
+        _read_case(TossReadOperation.ORDERS, account_seq=_ACCOUNT, status="CLOSED"),
+        "GET",
+        "/api/v1/orders",
+        {"status": ("CLOSED",)},
+        True,
+        frozenset(),
+        id="ORDERS_PAGE-no-cursor",
+    ),
+    pytest.param(
+        "ORDERS_PAGE",
+        _read_case(
+            TossReadOperation.ORDERS,
+            account_seq=_ACCOUNT,
+            status="CLOSED",
+            cursor="cursor_2",
+        ),
+        "GET",
+        "/api/v1/orders",
+        {"status": ("CLOSED",), "cursor": ("cursor_2",)},
+        True,
+        frozenset(),
+        id="ORDERS_PAGE-cursor",
+    ),
+    pytest.param(
+        "ORDER_DETAIL",
+        _read_case(
+            TossReadOperation.ORDER_DETAIL, account_seq=_ACCOUNT, order_id="order-42"
+        ),
+        "GET",
+        "/api/v1/orders/order-42",
+        {},
+        True,
+        frozenset(),
+        id="ORDER_DETAIL",
+    ),
+    pytest.param(
+        "CALENDAR_DAY_KR",
+        _read_case(TossReadOperation.KR_MARKET_CALENDAR),
+        "GET",
+        "/api/v1/market-calendar/KR",
+        {},
+        False,
+        frozenset(),
+        id="CALENDAR_DAY_KR-no-date",
+    ),
+    pytest.param(
+        "CALENDAR_DAY_KR",
+        _read_case(TossReadOperation.KR_MARKET_CALENDAR, date="2026-07-30"),
+        "GET",
+        "/api/v1/market-calendar/KR",
+        {"date": ("2026-07-30",)},
+        False,
+        frozenset(),
+        id="CALENDAR_DAY_KR-date",
+    ),
+    pytest.param(
+        "CALENDAR_DAY_US",
+        _read_case(TossReadOperation.US_MARKET_CALENDAR, date="2026-07-30"),
+        "GET",
+        "/api/v1/market-calendar/US",
+        {"date": ("2026-07-30",)},
+        False,
+        frozenset(),
+        id="CALENDAR_DAY_US-date",
+    ),
 )
 
 
@@ -179,9 +269,7 @@ _TRANSPORT_CASES = (
     pytest.param(_auth_case, id="auth"),
     pytest.param(_accounts_case, id="data"),
     pytest.param(_prices_case, id="prices"),
-    pytest.param(
-        _read_case(TossReadOperation.KR_MARKET_CALENDAR), id="reads"
-    ),
+    pytest.param(_read_case(TossReadOperation.KR_MARKET_CALENDAR), id="reads"),
 )
 
 
@@ -189,7 +277,8 @@ _TRANSPORT_CASES = (
     "operation,build,method,path,query,account_required,form_keys", _CASES
 )
 def test_production_live_transport_wire_matches_closed_operation_mapping(
-        operation, build, method, path, query, account_required, form_keys):
+    operation, build, method, path, query, account_required, form_keys
+):
     handler = RecordingHTTPSHandler()
     transport, request = build(handler)
 
@@ -210,21 +299,24 @@ def test_production_live_transport_wire_matches_closed_operation_mapping(
     else:
         assert recorded.header_names == (
             frozenset({"authorization", "accept-encoding", "x-tossinvest-account"})
-            if account_required else frozenset({"authorization", "accept-encoding"})
+            if account_required
+            else frozenset({"authorization", "accept-encoding"})
         )
         assert recorded.content_type is None
         assert recorded.form_keys == frozenset()
 
     # The recording is structural: none of the private fixture values persist in it.
     rendered = repr(recorded)
-    assert all(secret not in rendered for secret in (
-        _TOKEN, _ACCOUNT, "fixture-client", "fixture-secret"
-    ))
+    assert all(
+        secret not in rendered
+        for secret in (_TOKEN, _ACCOUNT, "fixture-client", "fixture-secret")
+    )
 
 
 @pytest.mark.parametrize("build", _TRANSPORT_CASES)
 def test_production_live_transport_opens_once_without_redirect_or_retry(
-        build, monkeypatch):
+    build, monkeypatch
+):
     real_socket_calls = []
 
     def forbid_real_socket(*args, **kwargs):
@@ -234,18 +326,18 @@ def test_production_live_transport_opens_once_without_redirect_or_retry(
     monkeypatch.setattr("socket.create_connection", forbid_real_socket)
     monkeypatch.setattr("socket.getaddrinfo", forbid_real_socket)
 
-    redirect = ScriptedHTTPSHandler((
-        _redirect_response("https://openapi.tossinvest.com/source"),
-        _Response(),
-    ))
+    redirect = ScriptedHTTPSHandler(
+        (
+            _redirect_response("https://openapi.tossinvest.com/source"),
+            _Response(),
+        )
+    )
     transport, request = build(redirect)
     result = transport(request)
     assert result.code == "redirect"
     assert len(redirect.requests) == 1
 
-    timeout = ScriptedHTTPSHandler((
-        TimeoutError("synthetic timeout"), _Response()
-    ))
+    timeout = ScriptedHTTPSHandler((TimeoutError("synthetic timeout"), _Response()))
     transport, request = build(timeout)
     result = transport(request)
     assert result.code == "timeout"

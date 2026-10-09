@@ -12,11 +12,11 @@ replaces the per-tick advancing scheduled-slot cutoff, which permanently
 starved any row left unsent in its own tick (``created_at >= cutoff``).
 """
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import json
 import os
 import stat
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 GATE_FILE_NAME = "dialogue_activation.json"
@@ -39,8 +39,7 @@ def activation_from_payload(payload) -> DialogueActivationV1:
         return _DISABLED
     cutoff_raw = payload.get("cutoff")
     approved_by = payload.get("approved_by")
-    if type(cutoff_raw) is not str or type(approved_by) is not str \
-            or not approved_by:
+    if type(cutoff_raw) is not str or type(approved_by) is not str or not approved_by:
         return _DISABLED
     try:
         cutoff = datetime.fromisoformat(cutoff_raw.replace("Z", "+00:00"))
@@ -48,8 +47,7 @@ def activation_from_payload(payload) -> DialogueActivationV1:
         return _DISABLED
     if cutoff.tzinfo is None or cutoff.utcoffset() is None:
         return _DISABLED
-    return DialogueActivationV1(
-        True, cutoff.astimezone(timezone.utc), approved_by)
+    return DialogueActivationV1(True, cutoff.astimezone(UTC), approved_by)
 
 
 def read_dialogue_activation(path: Path) -> DialogueActivationV1:

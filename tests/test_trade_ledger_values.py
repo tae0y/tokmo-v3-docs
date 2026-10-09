@@ -5,7 +5,7 @@ workbook. Assertions follow the closed pilot plan: redacted representations,
 closed reason tokens, and the receipt count invariant on every receipt.
 """
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -19,8 +19,7 @@ from tokmo.values.trade_ledger import (
     TradeLedgerEvent,
 )
 
-
-NOW = datetime(2026, 7, 28, 1, 2, 3, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 28, 1, 2, 3, tzinfo=UTC)
 
 
 def event(**overrides):
@@ -67,25 +66,27 @@ def test_identity_labels_and_kind_and_reason_vocabularies_are_frozen():
     assert TRADE_LEDGER_SOURCE == "retirement_excel_v1"
     assert TRADE_LEDGER_ACCOUNT_SCOPE == "retirement_pension_1"
     assert EVENT_KINDS == frozenset({"EXECUTION", "CORRECTION"})
-    assert CLOSED_REASON_TOKENS == frozenset({
-        "invalid_batch",
-        "source_contract_violation",
-        "batch_identity_conflict",
-        "supersession_invalid",
-        "schema_mismatch",
-        "store_corrupt",
-        "store_locked",
-        "store_write_failed",
-        "store_read_failed",
-        "audit_write_failed",
-        "promotion_link_failed",
-        "promotion_recovery_required",
-        "candidate_missing",
-        "canonical_exists",
-        "wal_checkpoint_failed",
-        "sidecars_present",
-        "directory_mismatch",
-    })
+    assert CLOSED_REASON_TOKENS == frozenset(
+        {
+            "invalid_batch",
+            "source_contract_violation",
+            "batch_identity_conflict",
+            "supersession_invalid",
+            "schema_mismatch",
+            "store_corrupt",
+            "store_locked",
+            "store_write_failed",
+            "store_read_failed",
+            "audit_write_failed",
+            "promotion_link_failed",
+            "promotion_recovery_required",
+            "candidate_missing",
+            "canonical_exists",
+            "wal_checkpoint_failed",
+            "sidecars_present",
+            "directory_mismatch",
+        }
+    )
 
 
 def test_event_is_frozen_lossless_and_value_equal():
@@ -113,8 +114,15 @@ def test_event_repr_and_str_are_constant_redactions():
     )
     for rendered in (repr(unlinked), str(unlinked)):
         assert rendered == "<TradeLedgerEvent REDACTED>"
-    for leaked in ("row-000085", "매수정정*", "-2", "1250.5", "2026",
-                   "retirement_excel_v1", "retirement_pension_1"):
+    for leaked in (
+        "row-000085",
+        "매수정정*",
+        "-2",
+        "1250.5",
+        "2026",
+        "retirement_excel_v1",
+        "retirement_pension_1",
+    ):
         assert leaked not in repr(unlinked)
         assert leaked not in str(unlinked)
 
@@ -172,8 +180,13 @@ def test_receipt_status_and_reason_are_closed():
         receipt(reason="saved")
     assert str(saved_reason.value) == "receipt_reason_invalid"
     with pytest.raises(ValueError) as open_reason:
-        receipt(status="FAILED", inserted_count=0, new_candidate_count=0,
-                invalid_count=3, reason="because the row was odd")
+        receipt(
+            status="FAILED",
+            inserted_count=0,
+            new_candidate_count=0,
+            invalid_count=3,
+            reason="because the row was odd",
+        )
     assert str(open_reason.value) == "receipt_reason_invalid"
 
 

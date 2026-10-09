@@ -1,9 +1,9 @@
 """Slice 2 — Durable revision lifecycle tests (B2, m5, m6, M11, M12)."""
+
 from __future__ import annotations
 
 import hashlib
 import os
-import stat
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -11,16 +11,16 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from tokmo.records.pension_revisions import (
-    PensionRegistryStore,
-    PensionRegistryCorruptError,
     PENSION_REGISTRY_DDL_SHA256,
+    PensionRegistryCorruptError,
+    PensionRegistryStore,
 )
 from tokmo.values.current_holdings import HoldingItemV1
 from tokmo.values.pension_holdings import (
-    PensionHoldingsRevisionV1,
     PENSION_HOLDINGS_SCHEMA_VERSION,
-    pension_semantic_digest,
+    PensionHoldingsRevisionV1,
     pension_reconciliation_digest,
+    pension_semantic_digest,
 )
 
 _KST = ZoneInfo("Asia/Seoul")
@@ -158,7 +158,8 @@ class TestReminderEvents:
 
 class TestDDLChecksum:
     def test_ddl_sha256_constant_matches(self):
-        from tokmo.records.pension_revisions import _DDL_STATEMENTS, _ddl_sha256
+        from tokmo.records.pension_revisions import _ddl_sha256
+
         recomputed = _ddl_sha256()
         assert recomputed == PENSION_REGISTRY_DDL_SHA256
 
@@ -179,16 +180,27 @@ class TestCorruptStoreRefusal:
 
 def test_read_active_revision_ro_is_no_create_and_byte_stable(tmp_path):
     absent = tmp_path / "absent.sqlite3"
-    assert PensionRegistryStore(absent, clock=lambda: _NOW).read_active_revision_ro() is None
+    assert (
+        PensionRegistryStore(absent, clock=lambda: _NOW).read_active_revision_ro()
+        is None
+    )
     assert not absent.exists()
     store = _make_store(tmp_path)
     revision = _make_revision()
     store.create_candidate(revision)
     store.activate(revision.revision_id, approval_reason="test")
     path = tmp_path / "pension_registry.sqlite3"
-    before = (path.read_bytes(), path.stat().st_mtime_ns, {item.name for item in tmp_path.iterdir()})
+    before = (
+        path.read_bytes(),
+        path.stat().st_mtime_ns,
+        {item.name for item in tmp_path.iterdir()},
+    )
     assert store.read_active_revision_ro() == revision
-    assert (path.read_bytes(), path.stat().st_mtime_ns, {item.name for item in tmp_path.iterdir()}) == before
+    assert (
+        path.read_bytes(),
+        path.stat().st_mtime_ns,
+        {item.name for item in tmp_path.iterdir()},
+    ) == before
 
 
 @pytest.mark.parametrize("payload", [b"", b"not-sqlite"])
@@ -199,4 +211,8 @@ def test_read_active_revision_ro_corrupt_is_no_mutation(tmp_path, payload):
     before = (path.read_bytes(), path.stat().st_mtime_ns, tuple(tmp_path.iterdir()))
     with pytest.raises(PensionRegistryCorruptError):
         PensionRegistryStore(path, clock=lambda: _NOW).read_active_revision_ro()
-    assert (path.read_bytes(), path.stat().st_mtime_ns, tuple(tmp_path.iterdir())) == before
+    assert (
+        path.read_bytes(),
+        path.stat().st_mtime_ns,
+        tuple(tmp_path.iterdir()),
+    ) == before

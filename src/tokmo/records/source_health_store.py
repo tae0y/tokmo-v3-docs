@@ -2,11 +2,14 @@
 
 import hashlib
 import os
-from pathlib import Path
 import sqlite3
+from pathlib import Path
 
 from tokmo.records.private_sqlite import (
-    MIN_SQLITE_VERSION, connect_private, prepare_private_path, private_creation,
+    MIN_SQLITE_VERSION,
+    connect_private,
+    prepare_private_path,
+    private_creation,
     table_is_strict,
 )
 from tokmo.values.news_source_health import MAX_ATTEMPTS_PER_NOTIFICATION
@@ -80,20 +83,45 @@ CREATE UNIQUE INDEX notifications_dedupe_uq ON notifications(dedupe_key);
 """
 _TABLES = {"schema_meta", "source_health", "notifications"}
 _HEALTH_COLUMNS = (
-    "source", "state", "consecutive_failures", "consecutive_successes",
-    "last_tick_id", "last_outcome", "pending_failure_pairs",
-    "pending_fingerprint", "pending_fingerprint_ticks", "first_failure_at",
-    "incident_id", "incident_started_at", "incident_confirmed_at",
-    "incident_fingerprint", "incident_last_error", "incident_failing_ticks",
-    "incident_alert_delivered_at", "last_processed_slot_utc", "updated_at",
+    "source",
+    "state",
+    "consecutive_failures",
+    "consecutive_successes",
+    "last_tick_id",
+    "last_outcome",
+    "pending_failure_pairs",
+    "pending_fingerprint",
+    "pending_fingerprint_ticks",
+    "first_failure_at",
+    "incident_id",
+    "incident_started_at",
+    "incident_confirmed_at",
+    "incident_fingerprint",
+    "incident_last_error",
+    "incident_failing_ticks",
+    "incident_alert_delivered_at",
+    "last_processed_slot_utc",
+    "updated_at",
 )
 _NOTIFICATION_COLUMNS = (
-    "notification_id", "incident_id", "source", "kind", "dedupe_key",
-    "body_text", "created_at", "attempted_at", "settled_at", "status",
-    "attempt_count", "provider_message_id", "failure_reason",
+    "notification_id",
+    "incident_id",
+    "source",
+    "kind",
+    "dedupe_key",
+    "body_text",
+    "created_at",
+    "attempted_at",
+    "settled_at",
+    "status",
+    "attempt_count",
+    "provider_message_id",
+    "failure_reason",
 )
-_KIND_PRIORITY = ("CASE kind WHEN 'DEGRADED' THEN 0 WHEN 'FINGERPRINT_CHANGED'"
-                  " THEN 1 WHEN 'RECOVERED' THEN 2 ELSE 3 END")
+_KIND_PRIORITY = (
+    "CASE kind WHEN 'DEGRADED' THEN 0 WHEN 'FINGERPRINT_CHANGED'"
+    " THEN 1 WHEN 'RECOVERED' THEN 2 ELSE 3 END"
+)
 
 
 def _statements(script):
@@ -111,10 +139,11 @@ def _statements(script):
 def _ddl_sha256(connection):
     rows = connection.execute(
         "SELECT type,name,sql FROM sqlite_master WHERE sql IS NOT NULL "
-        "ORDER BY type,name").fetchall()
-    return hashlib.sha256(b"".join(
-        b"\0".join(value.encode() for value in row) + b"\n" for row in rows
-    )).hexdigest()
+        "ORDER BY type,name"
+    ).fetchall()
+    return hashlib.sha256(
+        b"".join(b"\0".join(value.encode() for value in row) + b"\n" for row in rows)
+    ).hexdigest()
 
 
 def _expected_digest(script):
@@ -132,16 +161,23 @@ _EXPECTED_DDL = _expected_digest(_SCHEMA)
 
 def _validate(connection):
     try:
-        tables = {row[0] for row in connection.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'")}
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
         meta = connection.execute(
             "SELECT schema_id,schema_version,ddl_sha256 FROM schema_meta "
-            "WHERE singleton=1").fetchone()
-        if (tables != _TABLES
-                or any(not table_is_strict(connection, table) for table in _TABLES)
-                or meta != (_SCHEMA_ID, 1, _EXPECTED_DDL)
-                or _ddl_sha256(connection) != _EXPECTED_DDL
-                or connection.execute("PRAGMA integrity_check").fetchone() != ("ok",)):
+            "WHERE singleton=1"
+        ).fetchone()
+        if (
+            tables != _TABLES
+            or any(not table_is_strict(connection, table) for table in _TABLES)
+            or meta != (_SCHEMA_ID, 1, _EXPECTED_DDL)
+            or _ddl_sha256(connection) != _EXPECTED_DDL
+            or connection.execute("PRAGMA integrity_check").fetchone() != ("ok",)
+        ):
             raise RuntimeError("schema_mismatch")
     except sqlite3.DatabaseError as error:
         raise RuntimeError("schema_mismatch") from error
@@ -150,7 +186,8 @@ def _validate(connection):
 def _verify_health_row(connection, row):
     stored = connection.execute(
         f"SELECT {','.join(_HEALTH_COLUMNS)} FROM source_health WHERE source=?",
-        (row["source"],)).fetchone()
+        (row["source"],),
+    ).fetchone()
     if stored != tuple(row[name] for name in _HEALTH_COLUMNS):
         raise RuntimeError("health_row_mismatch")
 
@@ -179,7 +216,8 @@ class SourceHealthStore:
                         connection.execute(statement)
                     connection.execute(
                         "INSERT INTO schema_meta VALUES(1,?,?,?,?)",
-                        (_SCHEMA_ID, 1, _ddl_sha256(connection), stamp))
+                        (_SCHEMA_ID, 1, _ddl_sha256(connection), stamp),
+                    )
                 connection.execute("COMMIT")
             _validate(connection)
             return connection
@@ -222,9 +260,11 @@ class SourceHealthStore:
     def read_health(self, source, *, now):
         def work(connection):
             stored = connection.execute(
-                f"SELECT {','.join(_HEALTH_COLUMNS)} FROM source_health "
-                "WHERE source=?", (source,)).fetchone()
+                f"SELECT {','.join(_HEALTH_COLUMNS)} FROM source_health WHERE source=?",
+                (source,),
+            ).fetchone()
             return None if stored is None else dict(zip(_HEALTH_COLUMNS, stored))
+
         return self._read(now, work)
 
     def read_notifications(self, incident_id, *, now):
@@ -232,8 +272,10 @@ class SourceHealthStore:
             rows = connection.execute(
                 f"SELECT {','.join(_NOTIFICATION_COLUMNS)} FROM notifications "
                 "WHERE incident_id=? ORDER BY created_at,notification_id",
-                (incident_id,)).fetchall()
+                (incident_id,),
+            ).fetchall()
             return tuple(dict(zip(_NOTIFICATION_COLUMNS, row)) for row in rows)
+
         return self._read(now, work)
 
     def commit_tick(self, row, *, mints, supersede_ids, now):
@@ -241,26 +283,41 @@ class SourceHealthStore:
             connection.execute(
                 f"INSERT OR REPLACE INTO source_health({','.join(_HEALTH_COLUMNS)}) "
                 f"VALUES({','.join('?' for _ in _HEALTH_COLUMNS)})",
-                tuple(row[name] for name in _HEALTH_COLUMNS))
+                tuple(row[name] for name in _HEALTH_COLUMNS),
+            )
             for notification_id in supersede_ids:
                 connection.execute(
                     "UPDATE notifications SET status='SUPERSEDED',settled_at=?,"
                     "failure_reason=NULL WHERE notification_id=? AND status IN "
-                    "('PENDING','ATTEMPTING','FAILED')", (now, notification_id))
+                    "('PENDING','ATTEMPTING','FAILED')",
+                    (now, notification_id),
+                )
             for record in mints:
                 connection.execute(
                     "INSERT OR IGNORE INTO notifications(notification_id,"
                     "incident_id,source,kind,dedupe_key,body_text,created_at,"
                     "status,attempt_count) VALUES(?,?,?,?,?,?,?,'PENDING',0)",
-                    tuple(record[name] for name in (
-                        "notification_id", "incident_id", "source", "kind",
-                        "dedupe_key", "body_text", "created_at")))
+                    tuple(
+                        record[name]
+                        for name in (
+                            "notification_id",
+                            "incident_id",
+                            "source",
+                            "kind",
+                            "dedupe_key",
+                            "body_text",
+                            "created_at",
+                        )
+                    ),
+                )
                 minted = connection.execute(
                     "SELECT count(*) FROM notifications WHERE dedupe_key=?",
-                    (record["dedupe_key"],)).fetchone()
+                    (record["dedupe_key"],),
+                ).fetchone()
                 if minted != (1,):
                     raise RuntimeError("notification_mint_mismatch")
             _verify_health_row(connection, row)
+
         self._mutate(now, work)
 
     def reconcile_delivery(self, *, stale_before, now):
@@ -268,48 +325,70 @@ class SourceHealthStore:
             connection.execute(
                 "UPDATE notifications SET status='UNKNOWN',settled_at=?,"
                 "failure_reason='attempt_stale_crash' WHERE status='ATTEMPTING' "
-                "AND attempted_at<?", (now, stale_before))
+                "AND attempted_at<?",
+                (now, stale_before),
+            )
             connection.execute(
                 "UPDATE notifications SET status='PENDING',attempted_at=NULL,"
                 "settled_at=NULL,failure_reason=NULL WHERE status='FAILED' "
-                "AND attempt_count<?", (MAX_ATTEMPTS_PER_NOTIFICATION,))
+                "AND attempt_count<?",
+                (MAX_ATTEMPTS_PER_NOTIFICATION,),
+            )
+
         self._mutate(now, work)
 
     def supersede_pending_before(self, before, *, now):
         """Retire unsent prior-night notices; preserve all history and attempts."""
+
         def work(connection):
             rows = connection.execute(
                 "SELECT notification_id FROM notifications WHERE created_at<? "
-                "AND status IN ('PENDING','FAILED')", (before,)).fetchall()
+                "AND status IN ('PENDING','FAILED')",
+                (before,),
+            ).fetchall()
             connection.execute(
                 "UPDATE notifications SET status='SUPERSEDED',settled_at=?,"
                 "failure_reason=NULL WHERE created_at<? "
-                "AND status IN ('PENDING','FAILED')", (now, before))
+                "AND status IN ('PENDING','FAILED')",
+                (now, before),
+            )
             return tuple(row[0] for row in rows)
+
         return self._mutate(now, work)
 
-    def claim_next(self, source, *, now, prepare=None,
-                   suppress_unseen_recovery=False):
+    def claim_next(self, source, *, now, prepare=None, suppress_unseen_recovery=False):
         def work(connection):
             found = connection.execute(
                 "SELECT notification_id FROM notifications WHERE source=? AND "
                 f"status='PENDING' ORDER BY {_KIND_PRIORITY},created_at,"
-                "notification_id LIMIT 1", (source,)).fetchone()
+                "notification_id LIMIT 1",
+                (source,),
+            ).fetchone()
             if found is None:
                 return None
-            candidate = dict(zip(_NOTIFICATION_COLUMNS, connection.execute(
-                f"SELECT {','.join(_NOTIFICATION_COLUMNS)} FROM notifications "
-                "WHERE notification_id=?", (found[0],)).fetchone()))
+            candidate = dict(
+                zip(
+                    _NOTIFICATION_COLUMNS,
+                    connection.execute(
+                        f"SELECT {','.join(_NOTIFICATION_COLUMNS)} FROM notifications "
+                        "WHERE notification_id=?",
+                        (found[0],),
+                    ).fetchone(),
+                )
+            )
             if suppress_unseen_recovery and candidate["kind"] == "RECOVERED":
                 notified = connection.execute(
                     "SELECT 1 FROM notifications WHERE incident_id=? "
                     "AND kind!='RECOVERED' AND status IN "
                     "('SENT','UNKNOWN','ATTEMPTING') LIMIT 1",
-                    (candidate["incident_id"],)).fetchone()
+                    (candidate["incident_id"],),
+                ).fetchone()
                 if notified is None:
                     connection.execute(
                         "UPDATE notifications SET status='SUPERSEDED',settled_at=? "
-                        "WHERE notification_id=?", (now, found[0]))
+                        "WHERE notification_id=?",
+                        (now, found[0]),
+                    )
                     return None
             body = candidate["body_text"] if prepare is None else prepare(candidate)
             if body is None:
@@ -318,38 +397,55 @@ class SourceHealthStore:
             connection.execute(
                 "UPDATE notifications SET status='ATTEMPTING',attempted_at=?,"
                 "attempt_count=attempt_count+1,body_text=? WHERE notification_id=?",
-                (now, body, found[0]))
+                (now, body, found[0]),
+            )
             claimed = connection.execute(
                 f"SELECT {','.join(_NOTIFICATION_COLUMNS)} FROM notifications "
-                "WHERE notification_id=?", (found[0],)).fetchone()
+                "WHERE notification_id=?",
+                (found[0],),
+            ).fetchone()
             return dict(zip(_NOTIFICATION_COLUMNS, claimed))
+
         return self._mutate(now, work)
 
-    def settle(self, notification_id, status, *, now, provider_message_id=None,
-               failure_reason=None):
+    def settle(
+        self,
+        notification_id,
+        status,
+        *,
+        now,
+        provider_message_id=None,
+        failure_reason=None,
+    ):
         def work(connection):
             row = connection.execute(
                 "SELECT kind,incident_id,source FROM notifications WHERE "
                 "notification_id=? AND status='ATTEMPTING'",
-                (notification_id,)).fetchone()
+                (notification_id,),
+            ).fetchone()
             if row is None:
                 raise RuntimeError("settle_requires_attempting_row")
             connection.execute(
                 "UPDATE notifications SET status=?,settled_at=?,"
                 "provider_message_id=?,failure_reason=? WHERE notification_id=?",
-                (status, now, provider_message_id, failure_reason,
-                 notification_id))
+                (status, now, provider_message_id, failure_reason, notification_id),
+            )
             if status == "SENT" and row[0] == "DEGRADED":
                 connection.execute(
                     "UPDATE source_health SET incident_alert_delivered_at=? "
                     "WHERE source=? AND incident_id=? AND "
-                    "incident_alert_delivered_at IS NULL", (now, row[2], row[1]))
+                    "incident_alert_delivered_at IS NULL",
+                    (now, row[2], row[1]),
+                )
+
         self._mutate(now, work)
 
     def pending_sources(self, *, now):
         def work(connection):
             rows = connection.execute(
                 "SELECT DISTINCT source FROM notifications WHERE "
-                "status='PENDING' ORDER BY source").fetchall()
+                "status='PENDING' ORDER BY source"
+            ).fetchall()
             return tuple(row[0] for row in rows)
+
         return self._read(now, work)

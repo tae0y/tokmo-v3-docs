@@ -1,14 +1,13 @@
 """Private, terminal-by-D Quant recurring receipt state machine."""
 
-from dataclasses import replace
-from datetime import date, datetime, timedelta, timezone
 import os
 import sqlite3
+from dataclasses import replace
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
-
-NOW = datetime(2026, 8, 14, 20, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 14, 20, 0, tzinfo=UTC)
 
 
 def _identity():
@@ -67,7 +66,9 @@ def _claimed_store(tmp_path):
     return store, identity, lease
 
 
-def test_receipt_store_has_exact_strict_private_schema_and_nonblocking_identity_lock(tmp_path):
+def test_receipt_store_has_exact_strict_private_schema_and_nonblocking_identity_lock(
+    tmp_path,
+):
     from tokmo.records.private_sqlite import assert_no_sidecars_after_close
     from tokmo.records.quant_recurring_receipts import QuantRecurringReceiptStore
 
@@ -101,7 +102,9 @@ def test_receipt_store_has_exact_strict_private_schema_and_nonblocking_identity_
     assert assert_no_sidecars_after_close(path) == []
 
 
-def test_terminal_transition_is_single_atomic_and_same_identity_is_never_reclaimed(tmp_path):
+def test_terminal_transition_is_single_atomic_and_same_identity_is_never_reclaimed(
+    tmp_path,
+):
     from tokmo.values.quant_recurring import QuantTerminalStateV1
 
     store, identity, lease = _claimed_store(tmp_path)
@@ -116,7 +119,10 @@ def test_terminal_transition_is_single_atomic_and_same_identity_is_never_reclaim
         due = store.read_due(identity.identity_digest)
         assert due.state is QuantTerminalStateV1.NO_PACK
         assert store.read_result(identity.identity_digest).symbols == (
-            "AAPL", "MSFT", "NVDA", "TSLA",
+            "AAPL",
+            "MSFT",
+            "NVDA",
+            "TSLA",
         )
         with pytest.raises(ValueError, match="terminal"):
             store.finish(
@@ -125,13 +131,16 @@ def test_terminal_transition_is_single_atomic_and_same_identity_is_never_reclaim
                 reason_code="again",
                 finished_at=NOW + timedelta(seconds=2),
             )
-        assert store.claim(
-            identity,
-            owner_invocation_id="invocation-1",
-            owner_lease_key=lease.key,
-            claimed_at=NOW + timedelta(seconds=3),
-            identity_lease=lease,
-        ).state is QuantTerminalStateV1.NO_PACK
+        assert (
+            store.claim(
+                identity,
+                owner_invocation_id="invocation-1",
+                owner_lease_key=lease.key,
+                claimed_at=NOW + timedelta(seconds=3),
+                identity_lease=lease,
+            ).state
+            is QuantTerminalStateV1.NO_PACK
+        )
     finally:
         lease.close()
 
@@ -150,7 +159,10 @@ def test_result_constraint_failure_rolls_back_result_and_terminal_update(tmp_pat
                 finished_at=NOW + timedelta(seconds=1),
                 result=invalid,
             )
-        assert store.read_due(identity.identity_digest).state is QuantTerminalStateV1.CLAIMED
+        assert (
+            store.read_due(identity.identity_digest).state
+            is QuantTerminalStateV1.CLAIMED
+        )
         assert store.read_result(identity.identity_digest) is None
     finally:
         lease.close()
@@ -182,22 +194,32 @@ def test_membership_plan_receipt_constraint_rolls_back_whole_transition(tmp_path
         lease.close()
 
 
-def test_stale_claim_reconciles_once_to_unknown_and_schema_conflict_fails_closed(tmp_path):
+def test_stale_claim_reconciles_once_to_unknown_and_schema_conflict_fails_closed(
+    tmp_path,
+):
     from tokmo.records.quant_recurring_receipts import QuantRecurringReceiptStore
     from tokmo.values.cadence_policy import CADENCE_QUANT_SHADOW_POLICY_V1
     from tokmo.values.quant_recurring import QuantTerminalStateV1
 
     store, identity, lease = _claimed_store(tmp_path)
     lease.close()
-    assert store.reconcile_stale(
-        now=NOW + timedelta(seconds=301),
-        policy=CADENCE_QUANT_SHADOW_POLICY_V1,
-    ) == 1
-    assert store.read_due(identity.identity_digest).state is QuantTerminalStateV1.UNKNOWN
-    assert store.reconcile_stale(
-        now=NOW + timedelta(seconds=602),
-        policy=CADENCE_QUANT_SHADOW_POLICY_V1,
-    ) == 0
+    assert (
+        store.reconcile_stale(
+            now=NOW + timedelta(seconds=301),
+            policy=CADENCE_QUANT_SHADOW_POLICY_V1,
+        )
+        == 1
+    )
+    assert (
+        store.read_due(identity.identity_digest).state is QuantTerminalStateV1.UNKNOWN
+    )
+    assert (
+        store.reconcile_stale(
+            now=NOW + timedelta(seconds=602),
+            policy=CADENCE_QUANT_SHADOW_POLICY_V1,
+        )
+        == 0
+    )
 
     connection = sqlite3.connect(store.path)
     try:

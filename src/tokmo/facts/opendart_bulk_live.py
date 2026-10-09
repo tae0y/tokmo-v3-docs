@@ -21,10 +21,13 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 class OpenDartBulkLiveTransport:
     def __init__(self, *, https_handler=None):
         self.opener = urllib.request.OpenerDirector()
-        for handler in (urllib.request.ProxyHandler({}),
-                        urllib.request.HTTPSHandler() if https_handler is None else https_handler,
-                        _NoRedirect(), urllib.request.HTTPDefaultErrorHandler(),
-                        urllib.request.HTTPErrorProcessor()):
+        for handler in (
+            urllib.request.ProxyHandler({}),
+            urllib.request.HTTPSHandler() if https_handler is None else https_handler,
+            _NoRedirect(),
+            urllib.request.HTTPDefaultErrorHandler(),
+            urllib.request.HTTPErrorProcessor(),
+        ):
             self.opener.add_handler(handler)
 
     def __call__(self, request: BulkRequest, api_key: str) -> bytes:
@@ -32,8 +35,12 @@ class OpenDartBulkLiveTransport:
             raise BulkTransportFailure("protocol_failure")
         pairs = (*request.query_pairs, ("crtfc_key", api_key))
         query = urllib.parse.urlencode(pairs)
-        wire = urllib.request.Request(f"https://{HOST}{PATH}?{query}", data=None,
-                                     method=METHOD, headers={"Accept-Encoding": "identity"})
+        wire = urllib.request.Request(
+            f"https://{HOST}{PATH}?{query}",
+            data=None,
+            method=METHOD,
+            headers={"Accept-Encoding": "identity"},
+        )
         try:
             with self.opener.open(wire, timeout=TIMEOUT_SECONDS) as response:
                 if response.status != 200:
@@ -46,15 +53,25 @@ class OpenDartBulkLiveTransport:
                     raise BulkTransportFailure("body_too_large")
                 return body
         except urllib.error.HTTPError as error:
-            if error.code in (401, 403): code = "auth_rejection"
-            elif error.code == 429: code = "http_429"
-            elif 500 <= error.code < 600: code = "http_5xx"
-            elif error.code in (301, 302, 303, 307, 308): code = "redirect"
-            elif 400 <= error.code < 500: code = "bad_request"
-            else: code = "protocol_failure"
+            if error.code in (401, 403):
+                code = "auth_rejection"
+            elif error.code == 429:
+                code = "http_429"
+            elif 500 <= error.code < 600:
+                code = "http_5xx"
+            elif error.code in (301, 302, 303, 307, 308):
+                code = "redirect"
+            elif 400 <= error.code < 500:
+                code = "bad_request"
+            else:
+                code = "protocol_failure"
             raise BulkTransportFailure(code) from None
         except urllib.error.URLError as error:
-            code = "timeout" if isinstance(getattr(error, "reason", None), TimeoutError) else "connection_failure"
+            code = (
+                "timeout"
+                if isinstance(getattr(error, "reason", None), TimeoutError)
+                else "connection_failure"
+            )
             raise BulkTransportFailure(code) from None
         except TimeoutError:
             raise BulkTransportFailure("timeout") from None

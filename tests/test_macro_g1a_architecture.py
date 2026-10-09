@@ -6,12 +6,8 @@ contain no forbidden tokens, and perform zero I/O during evaluation.
 
 import ast
 import re
-from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
-
-import pytest
 
 SRC_ROOT = Path(__file__).parents[1] / "src" / "tokmo"
 TESTS_ROOT = Path(__file__).parents[1] / "tests"
@@ -37,9 +33,7 @@ def _module_imports(path: Path) -> list[str]:
             imports.extend(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module:
             imports.append(node.module)
-            imports.extend(
-                f"{node.module}.{alias.name}" for alias in node.names
-            )
+            imports.extend(f"{node.module}.{alias.name}" for alias in node.names)
     return imports
 
 
@@ -50,6 +44,7 @@ def _is_values_internal(name: str) -> bool:
 # ==========================================================================
 # ARCH-01: G1-A values files import only tokmo.values.*
 # ==========================================================================
+
 
 def test_arch01_values_import_direction():
     for path in G1A_VALUES_FILES:
@@ -64,6 +59,7 @@ def test_arch01_values_import_direction():
 # ==========================================================================
 # ARCH-02: G1-A programs file imports only tokmo.values.*
 # ==========================================================================
+
 
 def test_arch02_programs_import_direction():
     for path in G1A_PROGRAMS_FILES:
@@ -80,16 +76,37 @@ def test_arch02_programs_import_direction():
 # ==========================================================================
 
 FORBIDDEN_TOP_LEVEL = {
-    "telegram", "telebot", "aiogram",
-    "openai", "anthropic", "google",
-    "boto3", "requests", "httpx", "aiohttp", "urllib3",
-    "websocket", "websockets", "ccxt", "ib_insync", "alpaca_trade_api",
+    "telegram",
+    "telebot",
+    "aiogram",
+    "openai",
+    "anthropic",
+    "google",
+    "boto3",
+    "requests",
+    "httpx",
+    "aiohttp",
+    "urllib3",
+    "websocket",
+    "websockets",
+    "ccxt",
+    "ib_insync",
+    "alpaca_trade_api",
 }
 
 FORBIDDEN_MODULE_PREFIXES = {
-    "urllib.request", "urllib.error", "http.client", "socket", "ssl",
-    "ftplib", "smtplib", "poplib", "imaplib", "telnetlib",
-    "socketserver", "xmlrpc",
+    "urllib.request",
+    "urllib.error",
+    "http.client",
+    "socket",
+    "ssl",
+    "ftplib",
+    "smtplib",
+    "poplib",
+    "imaplib",
+    "telnetlib",
+    "socketserver",
+    "xmlrpc",
 }
 
 
@@ -112,7 +129,11 @@ def test_arch03_no_forbidden_imports():
 # ==========================================================================
 
 FORBIDDEN_SOURCE_PATTERNS = (
-    "os.environ", "getenv(", "datetime.now(", "utcnow(", "urlopen(",
+    "os.environ",
+    "getenv(",
+    "datetime.now(",
+    "utcnow(",
+    "urlopen(",
 )
 
 
@@ -120,14 +141,13 @@ def test_arch04_no_forbidden_source_patterns():
     for path in G1A_ALL_SOURCE:
         text = path.read_text()
         for pattern in FORBIDDEN_SOURCE_PATTERNS:
-            assert pattern not in text, (
-                f"{path.name}: forbidden pattern {pattern!r}"
-            )
+            assert pattern not in text, f"{path.name}: forbidden pattern {pattern!r}"
 
 
 # ==========================================================================
 # ARCH-05: No http.client, socket, ssl, urllib.request in G1-A source (AST)
 # ==========================================================================
+
 
 def test_arch05_no_network_modules_in_ast():
     for path in G1A_ALL_SOURCE:
@@ -144,18 +164,31 @@ def test_arch05_no_network_modules_in_ast():
 # ==========================================================================
 
 ARCH06_FORBIDDEN_VOCAB = (
-    "매수", "매도", "목표가", "천장", "바닥",
-    "target price", "ceiling", "floor",
-    "buy", "sell", "order",
+    "매수",
+    "매도",
+    "목표가",
+    "천장",
+    "바닥",
+    "target price",
+    "ceiling",
+    "floor",
+    "buy",
+    "sell",
+    "order",
 )
 
 
 def _scan_pack_strings(pack) -> list[str]:
     """Collect all string fields from a pack for vocabulary scanning."""
     strings = [
-        pack.program_id, pack.program_version, pack.program_kind,
-        pack.formula_version, pack.coverage_reason,
-        pack.primary_state, pack.lifecycle_status, pack.lifecycle_reason,
+        pack.program_id,
+        pack.program_version,
+        pack.program_kind,
+        pack.formula_version,
+        pack.coverage_reason,
+        pack.primary_state,
+        pack.lifecycle_status,
+        pack.lifecycle_reason,
         pack.confidence_ceiling,
     ]
     for comp in pack.components:
@@ -166,13 +199,19 @@ def _scan_pack_strings(pack) -> list[str]:
     strings.extend(pack.limitations)
     # window_summary fields
     ws = pack.window_summary
-    strings.extend([
-        ws.as_of, ws.latest_common_session,
-        ws.kospi_latest_close, ws.proxy_latest_close,
-        ws.kospi_percentile or "", ws.proxy_percentile or "",
-        ws.foreign_rolling_flow_20 or "", ws.foreign_prior_flow_20 or "",
-        ws.fx_return_8 or "",
-    ])
+    strings.extend(
+        [
+            ws.as_of,
+            ws.latest_common_session,
+            ws.kospi_latest_close,
+            ws.proxy_latest_close,
+            ws.kospi_percentile or "",
+            ws.proxy_percentile or "",
+            ws.foreign_rolling_flow_20 or "",
+            ws.foreign_prior_flow_20 or "",
+            ws.fx_return_8 or "",
+        ]
+    )
     for sc in pack.symbol_contacts:
         strings.extend([sc.symbol, sc.role, sc.latest_session, sc.latest_close or ""])
     return strings
@@ -181,12 +220,15 @@ def _scan_pack_strings(pack) -> list[str]:
 def test_arch06_no_trading_vocabulary_in_t1_pack():
     """Scan T1 pack output for forbidden trading vocabulary."""
     import sys
+
     sys.path.insert(0, str(Path(__file__).parent))
-    from test_macro_divergence_analyzer import _t1_bundle, _core_lifecycle
+    from test_macro_divergence_analyzer import _core_lifecycle, _t1_bundle
+
     bundle, as_of = _t1_bundle()
     lifecycle = _core_lifecycle(as_of)
 
     from tokmo.programs.macro_divergence_analyzer import evaluate_macro_divergence
+
     pack = evaluate_macro_divergence(bundle, lifecycle=lifecycle)
 
     all_strings = _scan_pack_strings(pack)
@@ -200,12 +242,15 @@ def test_arch06_no_trading_vocabulary_in_t1_pack():
 
 def test_arch06_no_trading_vocabulary_in_must_not_fire_pack():
     import sys
+
     sys.path.insert(0, str(Path(__file__).parent))
-    from test_macro_divergence_analyzer import _must_not_fire_bundle, _core_lifecycle
+    from test_macro_divergence_analyzer import _core_lifecycle, _must_not_fire_bundle
+
     bundle, as_of = _must_not_fire_bundle()
     lifecycle = _core_lifecycle(as_of)
 
     from tokmo.programs.macro_divergence_analyzer import evaluate_macro_divergence
+
     pack = evaluate_macro_divergence(bundle, lifecycle=lifecycle)
 
     all_strings = _scan_pack_strings(pack)
@@ -222,7 +267,9 @@ def test_arch06_no_trading_vocabulary_in_must_not_fire_pack():
 # ==========================================================================
 
 ARCH07_PATTERNS = {
-    "credential": re.compile(r"(?i)(bearer|token|api[_-]?key|secret|password|passwd|authorization)"),
+    "credential": re.compile(
+        r"(?i)(bearer|token|api[_-]?key|secret|password|passwd|authorization)"
+    ),
     "url": re.compile(r"(?i)(https?://|www\.|\.com|\.kr|\.net)"),
     "path": re.compile(r"(/Users/|/home/|C:\\\\|~/|\.local/)"),
     # m7: add the two missing SDS pattern categories
@@ -234,13 +281,15 @@ ARCH07_PATTERNS = {
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 
 # Known SDS-defined long identifiers that are public enum values, not secrets
-_ARCH07_KNOWN_LONG_TOKENS = frozenset({
-    "OUTFLOW_EXHAUSTION_FX_PROXY_REVERSAL",
-    "INDEX_HIGH_FX_PROXY_HIGH",
-    "FOREIGN_OUTFLOW_CONFIRMATION",
-    "macro-divergence-v1",
-    "INDICATOR_INVESTOR_TRADING",
-})
+_ARCH07_KNOWN_LONG_TOKENS = frozenset(
+    {
+        "OUTFLOW_EXHAUSTION_FX_PROXY_REVERSAL",
+        "INDEX_HIGH_FX_PROXY_HIGH",
+        "FOREIGN_OUTFLOW_CONFIRMATION",
+        "macro-divergence-v1",
+        "INDICATOR_INVESTOR_TRADING",
+    }
+)
 
 
 def _scan_for_arch07(text: str) -> str | None:
@@ -262,12 +311,15 @@ def _scan_for_arch07(text: str) -> str | None:
 
 def test_arch07_no_privacy_leaks_in_t1_pack():
     import sys
+
     sys.path.insert(0, str(Path(__file__).parent))
-    from test_macro_divergence_analyzer import _t1_bundle, _core_lifecycle
+    from test_macro_divergence_analyzer import _core_lifecycle, _t1_bundle
+
     bundle, as_of = _t1_bundle()
     lifecycle = _core_lifecycle(as_of)
 
     from tokmo.programs.macro_divergence_analyzer import evaluate_macro_divergence
+
     pack = evaluate_macro_divergence(bundle, lifecycle=lifecycle)
 
     all_strings = _scan_pack_strings(pack)
@@ -278,12 +330,15 @@ def test_arch07_no_privacy_leaks_in_t1_pack():
 
 def test_arch07_no_privacy_leaks_in_t2_pack():
     import sys
+
     sys.path.insert(0, str(Path(__file__).parent))
-    from test_macro_divergence_analyzer import _t2_bundle, _core_lifecycle
+    from test_macro_divergence_analyzer import _core_lifecycle, _t2_bundle
+
     bundle, as_of = _t2_bundle()
     lifecycle = _core_lifecycle(as_of)
 
     from tokmo.programs.macro_divergence_analyzer import evaluate_macro_divergence
+
     pack = evaluate_macro_divergence(bundle, lifecycle=lifecycle)
 
     all_strings = _scan_pack_strings(pack)
@@ -295,12 +350,15 @@ def test_arch07_no_privacy_leaks_in_t2_pack():
 # m7: add T3 and MUST_NOT_FIRE pack scans
 def test_arch07_no_privacy_leaks_in_t3_pack():
     import sys
+
     sys.path.insert(0, str(Path(__file__).parent))
-    from test_macro_divergence_analyzer import _t3_bundle, _core_lifecycle
+    from test_macro_divergence_analyzer import _core_lifecycle, _t3_bundle
+
     bundle, as_of = _t3_bundle()
     lifecycle = _core_lifecycle(as_of)
 
     from tokmo.programs.macro_divergence_analyzer import evaluate_macro_divergence
+
     pack = evaluate_macro_divergence(bundle, lifecycle=lifecycle)
 
     all_strings = _scan_pack_strings(pack)
@@ -311,12 +369,15 @@ def test_arch07_no_privacy_leaks_in_t3_pack():
 
 def test_arch07_no_privacy_leaks_in_must_not_fire_pack():
     import sys
+
     sys.path.insert(0, str(Path(__file__).parent))
-    from test_macro_divergence_analyzer import _must_not_fire_bundle, _core_lifecycle
+    from test_macro_divergence_analyzer import _core_lifecycle, _must_not_fire_bundle
+
     bundle, as_of = _must_not_fire_bundle()
     lifecycle = _core_lifecycle(as_of)
 
     from tokmo.programs.macro_divergence_analyzer import evaluate_macro_divergence
+
     pack = evaluate_macro_divergence(bundle, lifecycle=lifecycle)
 
     all_strings = _scan_pack_strings(pack)
@@ -329,10 +390,13 @@ def test_arch07_no_privacy_leaks_in_must_not_fire_pack():
 # SPY-01: Analyzer does not open files during evaluation
 # ==========================================================================
 
+
 def test_spy01_no_file_io_during_evaluation():
     import sys
+
     sys.path.insert(0, str(Path(__file__).parent))
-    from test_macro_divergence_analyzer import _t1_bundle, _core_lifecycle
+    from test_macro_divergence_analyzer import _core_lifecycle, _t1_bundle
+
     bundle, as_of = _t1_bundle()
     lifecycle = _core_lifecycle(as_of)
 
@@ -342,8 +406,10 @@ def test_spy01_no_file_io_during_evaluation():
         raise AssertionError("file I/O during evaluate")
 
     # m7: patch both builtins.open and pathlib.Path.open
-    with patch("builtins.open", blocking_open), \
-         patch("pathlib.Path.open", blocking_open):
+    with (
+        patch("builtins.open", blocking_open),
+        patch("pathlib.Path.open", blocking_open),
+    ):
         pack = evaluate_macro_divergence(bundle, lifecycle=lifecycle)
         assert pack is not None
 
@@ -352,10 +418,13 @@ def test_spy01_no_file_io_during_evaluation():
 # SPY-02: Analyzer does not make network calls during evaluation
 # ==========================================================================
 
+
 def test_spy02_no_network_during_evaluation():
     import sys
+
     sys.path.insert(0, str(Path(__file__).parent))
-    from test_macro_divergence_analyzer import _t1_bundle, _core_lifecycle
+    from test_macro_divergence_analyzer import _core_lifecycle, _t1_bundle
+
     bundle, as_of = _t1_bundle()
     lifecycle = _core_lifecycle(as_of)
 
@@ -365,9 +434,11 @@ def test_spy02_no_network_during_evaluation():
         raise AssertionError("network during evaluate")
 
     # m7: add http.client.HTTPConnection to the patched network entry points
-    with patch("socket.socket", blocking_socket), \
-         patch("urllib.request.urlopen", blocking_socket), \
-         patch("http.client.HTTPConnection", blocking_socket):
+    with (
+        patch("socket.socket", blocking_socket),
+        patch("urllib.request.urlopen", blocking_socket),
+        patch("http.client.HTTPConnection", blocking_socket),
+    ):
         pack = evaluate_macro_divergence(bundle, lifecycle=lifecycle)
         assert pack is not None
 
@@ -376,11 +447,14 @@ def test_spy02_no_network_during_evaluation():
 # SPY-03: Analyzer does not access os.getenv during evaluation
 # ==========================================================================
 
+
 def test_spy03_no_getenv_during_evaluation():
     import os
     import sys
+
     sys.path.insert(0, str(Path(__file__).parent))
-    from test_macro_divergence_analyzer import _t1_bundle, _core_lifecycle
+    from test_macro_divergence_analyzer import _core_lifecycle, _t1_bundle
+
     bundle, as_of = _t1_bundle()
     lifecycle = _core_lifecycle(as_of)
 
@@ -397,6 +471,7 @@ def test_spy03_no_getenv_during_evaluation():
 # ==========================================================================
 # Additional architectural checks
 # ==========================================================================
+
 
 def test_no_subprocess_import():
     """G1-A must not import subprocess."""
@@ -438,8 +513,11 @@ def test_no_os_import_in_source():
 def test_g1a_does_not_import_facts_records_composition_runtime():
     """G1-A must not import from forbidden layers (§6.7)."""
     forbidden_prefixes = (
-        "tokmo.facts", "tokmo.records", "tokmo.composition",
-        "tokmo.runtime", "tokmo.observability",
+        "tokmo.facts",
+        "tokmo.records",
+        "tokmo.composition",
+        "tokmo.runtime",
+        "tokmo.observability",
     )
     for path in G1A_ALL_SOURCE:
         imports = _module_imports(path)

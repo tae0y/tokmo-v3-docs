@@ -22,15 +22,13 @@ Test matrix:
 6. Diagnostic full root hash changes but all changes attributed => PASS
 """
 
-from datetime import datetime, timezone
 import json
 import os
 import time
-
-import pytest
-
+from datetime import UTC, datetime
 
 # ── Test 1: No change => PASS ──────────────────────────────────────────
+
 
 def test_no_change_passes(tmp_path):
     from tokmo.programs.canary_safety_gate import CanarySafetyGate
@@ -56,6 +54,7 @@ def test_no_change_passes(tmp_path):
 
 
 # ── Test 2: Expected mutable change + protected unchanged => PASS ──────
+
 
 def test_expected_mutable_change_protected_unchanged_passes(tmp_path):
     from tokmo.programs.canary_safety_gate import CanarySafetyGate
@@ -95,6 +94,7 @@ def test_expected_mutable_change_protected_unchanged_passes(tmp_path):
 
 # ── Test 3: Protected path mutation => FAIL ────────────────────────────
 
+
 def test_protected_mutation_fails(tmp_path):
     from tokmo.programs.canary_safety_gate import CanarySafetyGate
 
@@ -124,6 +124,7 @@ def test_protected_mutation_fails(tmp_path):
 
 
 # ── Test 4: Unattributed change => FAIL ────────────────────────────────
+
 
 def test_unattributed_change_fails(tmp_path):
     from tokmo.programs.canary_safety_gate import CanarySafetyGate
@@ -156,6 +157,7 @@ def test_unattributed_change_fails(tmp_path):
 
 # ── Test 5: Both expected and protected change => FAIL (protected dom) ─
 
+
 def test_both_change_protected_dominates(tmp_path):
     from tokmo.programs.canary_safety_gate import CanarySafetyGate
 
@@ -182,6 +184,7 @@ def test_both_change_protected_dominates(tmp_path):
 
 
 # ── Test 6: Full root changed but all changes attributed => PASS ───────
+
 
 def test_full_root_diagnostic_changed_but_all_attributed_passes(tmp_path):
     from tokmo.programs.canary_safety_gate import CanarySafetyGate
@@ -225,6 +228,7 @@ def test_full_root_diagnostic_changed_but_all_attributed_passes(tmp_path):
 
 # ── Test 7: New file in expected-mutable dir => PASS (dir-level match) ─
 
+
 def test_new_file_under_expected_mutable_dir_passes(tmp_path):
     from tokmo.programs.canary_safety_gate import CanarySafetyGate
 
@@ -242,8 +246,7 @@ def test_new_file_under_expected_mutable_dir_passes(tmp_path):
 
     # Scheduler creates a new file under ops/
     (root / "ops" / "new_store.sqlite3").write_bytes(b"new")
-    os.utime(root / "ops" / "new_store.sqlite3",
-             ns=(time.time_ns(), time.time_ns()))
+    os.utime(root / "ops" / "new_store.sqlite3", ns=(time.time_ns(), time.time_ns()))
 
     result = gate.evaluate_post()
 
@@ -252,6 +255,7 @@ def test_new_file_under_expected_mutable_dir_passes(tmp_path):
 
 
 # ── Test 8: New unattributed file => FAIL ──────────────────────────────
+
 
 def test_new_unattributed_file_fails(tmp_path):
     from tokmo.programs.canary_safety_gate import CanarySafetyGate
@@ -279,6 +283,7 @@ def test_new_unattributed_file_fails(tmp_path):
 
 # ── Test 9: Empty root => PASS ─────────────────────────────────────────
 
+
 def test_empty_root_passes(tmp_path):
     from tokmo.programs.canary_safety_gate import CanarySafetyGate
 
@@ -299,6 +304,7 @@ def test_empty_root_passes(tmp_path):
 
 # ── Test 10: Nonexistent root => PASS (nothing to protect) ─────────────
 
+
 def test_nonexistent_root_passes(tmp_path):
     from tokmo.programs.canary_safety_gate import CanarySafetyGate
 
@@ -317,6 +323,7 @@ def test_nonexistent_root_passes(tmp_path):
 
 
 # ── Test 11: serialize/deserialize result (for evidence storage) ───────
+
 
 def test_result_to_dict_roundtrip(tmp_path):
     from tokmo.programs.canary_safety_gate import CanarySafetyGate
@@ -345,6 +352,7 @@ def test_result_to_dict_roundtrip(tmp_path):
 
 # ── Test 12: Default protected paths for tokmo-v3 canonical root ───────
 
+
 def test_default_protected_paths_are_predeclared():
     """The safety gate must ship with predeclared protected paths
     for the tokmo-v3 canonical root."""
@@ -371,13 +379,15 @@ def test_default_expected_mutable_paths_are_predeclared():
 
 # ── Test 13: No secrets/raw identifiers in evidence ────────────────────
 
+
 def test_no_secrets_in_result(tmp_path):
     from tokmo.programs.canary_safety_gate import CanarySafetyGate
 
     root = tmp_path / "canonical"
     (root / "stores").mkdir(parents=True)
     (root / "stores" / "latest_quotes.sqlite3").write_bytes(
-        b"account_seq=12345 token=abcdef")
+        b"account_seq=12345 token=abcdef"
+    )
 
     gate = CanarySafetyGate(
         root=root,
@@ -397,17 +407,20 @@ def test_no_secrets_in_result(tmp_path):
 
 # ── Test 14: Integration — run_canary_session with safety gate ─────────
 
+
 def test_run_canary_session_with_safety_gate_passes(tmp_path):
     """Integration: run_canary_session accepts safety gate params and
     returns all_ticks_complete when safety gate passes."""
     from tokmo.programs.pulse_canary import (
-        CanaryConfigV1, CanaryDepsV1, run_canary_session,
+        CanaryConfigV1,
+        CanaryDepsV1,
+        run_canary_session,
     )
     from tokmo.programs.pulse_quotes import PulseQuoteBatchOutcomeV1
     from tokmo.values.market_observations import TossCurrentPriceFact
     from tokmo.values.session_gate import Market
 
-    T0 = datetime(2026, 8, 11, 0, 0, tzinfo=timezone.utc)
+    T0 = datetime(2026, 8, 11, 0, 0, tzinfo=UTC)
 
     canonical = tmp_path / "canonical"
     (canonical / "stores").mkdir(parents=True)
@@ -416,25 +429,39 @@ def test_run_canary_session_with_safety_gate_passes(tmp_path):
     (canonical / "ops" / "ops_kernel.sqlite3").write_bytes(b"kernel")
 
     def quotes_fetch(market, symbols, *, bearer=None):
-        return PulseQuoteBatchOutcomeV1("success", tuple(
-            TossCurrentPriceFact(
-                source="toss-current-price-v1", symbol=sym,
-                last_price="50000", currency_raw="KRW",
-                timestamp=T0, fetched_at=T0,
-            ) for sym in symbols
-        ), ())
+        return PulseQuoteBatchOutcomeV1(
+            "success",
+            tuple(
+                TossCurrentPriceFact(
+                    source="toss-current-price-v1",
+                    symbol=sym,
+                    last_price="50000",
+                    currency_raw="KRW",
+                    timestamp=T0,
+                    fetched_at=T0,
+                )
+                for sym in symbols
+            ),
+            (),
+        )
 
     deps = CanaryDepsV1(
-        clock=lambda: T0, token_fetch=lambda: "token",
+        clock=lambda: T0,
+        token_fetch=lambda: "token",
         quotes_fetch=quotes_fetch,
         sleep_until=lambda t: None,
     )
     cfg = CanaryConfigV1(
-        market=Market.KR, symbol="005930",
-        max_ticks=5, max_provider_starts=10,
+        market=Market.KR,
+        symbol="005930",
+        max_ticks=5,
+        max_provider_starts=10,
     )
     result = run_canary_session(
-        root=tmp_path / "evidence", config=cfg, deps=deps, t0=T0,
+        root=tmp_path / "evidence",
+        config=cfg,
+        deps=deps,
+        t0=T0,
         canonical_root=canonical,
         protected_paths=("stores/latest_quotes.sqlite3",),
         expected_mutable_paths=("ops/ops_kernel.sqlite3",),
@@ -446,13 +473,15 @@ def test_run_canary_session_safety_gate_protected_mutation_fails(tmp_path):
     """Integration: if a protected path mutates during canary, the safety
     gate fails and stop_reason reflects it."""
     from tokmo.programs.pulse_canary import (
-        CanaryConfigV1, CanaryDepsV1, run_canary_session,
+        CanaryConfigV1,
+        CanaryDepsV1,
+        run_canary_session,
     )
     from tokmo.programs.pulse_quotes import PulseQuoteBatchOutcomeV1
     from tokmo.values.market_observations import TossCurrentPriceFact
     from tokmo.values.session_gate import Market
 
-    T0 = datetime(2026, 8, 11, 0, 0, tzinfo=timezone.utc)
+    T0 = datetime(2026, 8, 11, 0, 0, tzinfo=UTC)
 
     canonical = tmp_path / "canonical"
     (canonical / "stores").mkdir(parents=True)
@@ -462,28 +491,41 @@ def test_run_canary_session_safety_gate_protected_mutation_fails(tmp_path):
 
     def quotes_fetch(market, symbols, *, bearer=None):
         if not mutation_done["done"]:
-            (canonical / "stores" / "latest_quotes.sqlite3").write_bytes(
-                b"tampered")
+            (canonical / "stores" / "latest_quotes.sqlite3").write_bytes(b"tampered")
             mutation_done["done"] = True
-        return PulseQuoteBatchOutcomeV1("success", tuple(
-            TossCurrentPriceFact(
-                source="toss-current-price-v1", symbol=sym,
-                last_price="50000", currency_raw="KRW",
-                timestamp=T0, fetched_at=T0,
-            ) for sym in symbols
-        ), ())
+        return PulseQuoteBatchOutcomeV1(
+            "success",
+            tuple(
+                TossCurrentPriceFact(
+                    source="toss-current-price-v1",
+                    symbol=sym,
+                    last_price="50000",
+                    currency_raw="KRW",
+                    timestamp=T0,
+                    fetched_at=T0,
+                )
+                for sym in symbols
+            ),
+            (),
+        )
 
     deps = CanaryDepsV1(
-        clock=lambda: T0, token_fetch=lambda: "token",
+        clock=lambda: T0,
+        token_fetch=lambda: "token",
         quotes_fetch=quotes_fetch,
         sleep_until=lambda t: None,
     )
     cfg = CanaryConfigV1(
-        market=Market.KR, symbol="005930",
-        max_ticks=5, max_provider_starts=10,
+        market=Market.KR,
+        symbol="005930",
+        max_ticks=5,
+        max_provider_starts=10,
     )
     result = run_canary_session(
-        root=tmp_path / "evidence", config=cfg, deps=deps, t0=T0,
+        root=tmp_path / "evidence",
+        config=cfg,
+        deps=deps,
+        t0=T0,
         canonical_root=canonical,
         protected_paths=("stores/latest_quotes.sqlite3",),
         expected_mutable_paths=(),
@@ -495,13 +537,15 @@ def test_run_canary_session_safety_gate_concurrent_cadence_passes(tmp_path):
     """Integration: concurrent cadence-owned writes to expected_mutable
     paths do NOT cause failure — the original G2.5 false positive scenario."""
     from tokmo.programs.pulse_canary import (
-        CanaryConfigV1, CanaryDepsV1, run_canary_session,
+        CanaryConfigV1,
+        CanaryDepsV1,
+        run_canary_session,
     )
     from tokmo.programs.pulse_quotes import PulseQuoteBatchOutcomeV1
     from tokmo.values.market_observations import TossCurrentPriceFact
     from tokmo.values.session_gate import Market
 
-    T0 = datetime(2026, 8, 11, 0, 0, tzinfo=timezone.utc)
+    T0 = datetime(2026, 8, 11, 0, 0, tzinfo=UTC)
 
     canonical = tmp_path / "canonical"
     (canonical / "stores").mkdir(parents=True)
@@ -516,32 +560,52 @@ def test_run_canary_session_safety_gate_concurrent_cadence_passes(tmp_path):
         call_count["n"] += 1
         # Simulate concurrent cadence writing to its own stores
         (canonical / "ops" / "ops_kernel.sqlite3").write_bytes(
-            b"kernel-updated-%d" % call_count["n"])
+            b"kernel-updated-%d" % call_count["n"]
+        )
         (canonical / "ops" / "cadence_ticks.sqlite3").write_bytes(
-            b"ticks-updated-%d" % call_count["n"])
-        os.utime(canonical / "ops" / "ops_kernel.sqlite3",
-                 ns=(time.time_ns(), time.time_ns()))
-        os.utime(canonical / "ops" / "cadence_ticks.sqlite3",
-                 ns=(time.time_ns(), time.time_ns()))
-        return PulseQuoteBatchOutcomeV1("success", tuple(
-            TossCurrentPriceFact(
-                source="toss-current-price-v1", symbol=sym,
-                last_price="231500", currency_raw="KRW",
-                timestamp=T0, fetched_at=T0,
-            ) for sym in symbols
-        ), ())
+            b"ticks-updated-%d" % call_count["n"]
+        )
+        os.utime(
+            canonical / "ops" / "ops_kernel.sqlite3",
+            ns=(time.time_ns(), time.time_ns()),
+        )
+        os.utime(
+            canonical / "ops" / "cadence_ticks.sqlite3",
+            ns=(time.time_ns(), time.time_ns()),
+        )
+        return PulseQuoteBatchOutcomeV1(
+            "success",
+            tuple(
+                TossCurrentPriceFact(
+                    source="toss-current-price-v1",
+                    symbol=sym,
+                    last_price="231500",
+                    currency_raw="KRW",
+                    timestamp=T0,
+                    fetched_at=T0,
+                )
+                for sym in symbols
+            ),
+            (),
+        )
 
     deps = CanaryDepsV1(
-        clock=lambda: T0, token_fetch=lambda: "token",
+        clock=lambda: T0,
+        token_fetch=lambda: "token",
         quotes_fetch=quotes_fetch,
         sleep_until=lambda t: None,
     )
     cfg = CanaryConfigV1(
-        market=Market.KR, symbol="005930",
-        max_ticks=5, max_provider_starts=10,
+        market=Market.KR,
+        symbol="005930",
+        max_ticks=5,
+        max_provider_starts=10,
     )
     result = run_canary_session(
-        root=tmp_path / "evidence", config=cfg, deps=deps, t0=T0,
+        root=tmp_path / "evidence",
+        config=cfg,
+        deps=deps,
+        t0=T0,
         canonical_root=canonical,
         protected_paths=("stores/latest_quotes.sqlite3",),
         expected_mutable_paths=(

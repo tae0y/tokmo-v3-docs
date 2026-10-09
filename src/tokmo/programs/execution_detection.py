@@ -11,10 +11,10 @@ only, per-scope durable cursor/watermark, ORDERS_PAGE ≤2 and ORDER_DETAIL
 write path exists or can be expressed.
 """
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from types import MappingProxyType
-from typing import Callable, Mapping
 
 from tokmo.records.order_scan_state import (
     IncompleteRetryRow,
@@ -39,20 +39,26 @@ from tokmo.values.pulse_policy import (
     PulseTickV1,
 )
 from tokmo.values.session_gate import Market
-from tokmo.values.trade_ledger import ImportAuditMeta
 from tokmo.values.trade_event import (
     TradeEventTimesV1,
     trade_event_id,
 )
+from tokmo.values.trade_ledger import ImportAuditMeta
 
 LEDGER_SOURCE = "toss-orders-v1"
 IMPORTER_VERSION = "pulse-execution-v1"
 SCAN_WINDOW_DAYS = 7
 ORDERS_PAGE_LIMIT = 20
 
-_ACCEPTED = frozenset({
-    "FILLED", "CANCELED", "REJECTED", "REPLACED", "PARTIAL_FILLED",
-})
+_ACCEPTED = frozenset(
+    {
+        "FILLED",
+        "CANCELED",
+        "REJECTED",
+        "REPLACED",
+        "PARTIAL_FILLED",
+    }
+)
 _AMBIGUOUS = frozenset({"CANCEL_REJECTED", "REPLACE_REJECTED"})
 
 
@@ -127,27 +133,48 @@ def _map_failure(code: str) -> str:
     return "failed_provider_other"
 
 
-def run_pulse_execution(*, tick: PulseTickV1, holdings_reader: Callable,
-                        native_refs_reader: Callable,
-                        token_provider: Callable,
-                        orders_page_fetch: Callable,
-                        order_detail_fetch: Callable,
-                        ledger_store, scan_state_store,
-                        clock: Callable[[], datetime], now: datetime,
-                        wire_recorder: Callable) -> PulseExecutionStageResult:
+def run_pulse_execution(
+    *,
+    tick: PulseTickV1,
+    holdings_reader: Callable,
+    native_refs_reader: Callable,
+    token_provider: Callable,
+    orders_page_fetch: Callable,
+    order_detail_fetch: Callable,
+    ledger_store,
+    scan_state_store,
+    clock: Callable[[], datetime],
+    now: datetime,
+    wire_recorder: Callable,
+) -> PulseExecutionStageResult:
     if not isinstance(tick, PulseTickV1):
         raise ValueError("pulse execution stage requires a PulseTickV1")
 
-    def _result(status, reason, scope_status=None, inserted=(), duplicates=0,
-                conflicts=0, incomplete=0, completeness=None,
-                pagination=False, wires=0):
+    def _result(
+        status,
+        reason,
+        scope_status=None,
+        inserted=(),
+        duplicates=0,
+        conflicts=0,
+        incomplete=0,
+        completeness=None,
+        pagination=False,
+        wires=0,
+    ):
         return PulseExecutionStageResult(
-            status, reason, tick.tick_id,
+            status,
+            reason,
+            tick.tick_id,
             MappingProxyType(dict(scope_status or {})),
             len(inserted) if isinstance(inserted, (list, tuple)) else inserted,
-            duplicates, conflicts, incomplete,
+            duplicates,
+            conflicts,
+            incomplete,
             tuple(inserted) if isinstance(inserted, (list, tuple)) else (),
-            completeness, pagination, wires,
+            completeness,
+            pagination,
+            wires,
         )
 
     try:
@@ -161,14 +188,14 @@ def run_pulse_execution(*, tick: PulseTickV1, holdings_reader: Callable,
     except Exception:
         refs = None
     ref_scopes = frozenset() if refs is None else frozenset(refs.scopes())
-    profiles = derive_account_source_profiles(
-        holdings, native_ref_scopes=ref_scopes)
+    profiles = derive_account_source_profiles(holdings, native_ref_scopes=ref_scopes)
     scope_status = {}
     for profile in profiles:
         scope_status[profile.account_scope] = orders_scan_status(profile)
     target_scopes = list(toss_orders_target_scopes(profiles))
     obligated = [
-        profile.account_scope for profile in profiles
+        profile.account_scope
+        for profile in profiles
         if scope_status[profile.account_scope] != "NOT_APPLICABLE"
     ]
     for scope in obligated:
@@ -213,17 +240,27 @@ def run_pulse_execution(*, tick: PulseTickV1, holdings_reader: Callable,
             return "skip", None
         market = _order_market(order.currency)
         if market is None:
-            prior = {row.order_id
-                     for row in scan_state_store.read_market_pending(scope)}
-            scan_state_store.add_market_pending(MarketPendingRow(
-                scope, order.order_id, order.symbol, order.currency,
-                order.status, "market_resolution_pending", tick.tick_id,
-                timestamp,
-            ))
+            prior = {
+                row.order_id for row in scan_state_store.read_market_pending(scope)
+            }
+            scan_state_store.add_market_pending(
+                MarketPendingRow(
+                    scope,
+                    order.order_id,
+                    order.symbol,
+                    order.currency,
+                    order.status,
+                    "market_resolution_pending",
+                    tick.tick_id,
+                    timestamp,
+                )
+            )
             del prior
             return "pending", None
         fact = to_completed_execution(
-            order, account_scope=scope, classified_market=market,
+            order,
+            account_scope=scope,
+            classified_market=market,
             page_provenance_closed=True,
         )
         if isinstance(fact, ExecutionCompletenessViolation):
@@ -238,12 +275,20 @@ def run_pulse_execution(*, tick: PulseTickV1, holdings_reader: Callable,
                     order_id=order.order_id,
                 )
                 if detailed is not None:
-                    return _classify_and_convert(
-                        scope, detailed, allow_detail=False)
-            scan_state_store.add_incomplete_retry(IncompleteRetryRow(
-                scope, order.order_id, market, tick.tick_id, 1,
-                tick.tick_id, 0, now.date().isoformat(), None,
-            ))
+                    return _classify_and_convert(scope, detailed, allow_detail=False)
+            scan_state_store.add_incomplete_retry(
+                IncompleteRetryRow(
+                    scope,
+                    order.order_id,
+                    market,
+                    tick.tick_id,
+                    1,
+                    tick.tick_id,
+                    0,
+                    now.date().isoformat(),
+                    None,
+                )
+            )
             incomplete_count += 1
             return "incomplete", None
         scan_state_store.resolve_market_pending(scope, order.order_id)
@@ -257,11 +302,14 @@ def run_pulse_execution(*, tick: PulseTickV1, holdings_reader: Callable,
             return True
         before = {
             event.source_record_key: scan_state_store.read_ingest_audit(
-                (LEDGER_SOURCE, scope, event.source_record_key)) is not None
+                (LEDGER_SOURCE, scope, event.source_record_key)
+            )
+            is not None
             for event in events
         }
         receipt = ledger_store.append_batch(
-            events, import_audit=ImportAuditMeta(None, IMPORTER_VERSION))
+            events, import_audit=ImportAuditMeta(None, IMPORTER_VERSION)
+        )
         conflict_keys = set()
         if receipt.status != "SAVED":
             if receipt.reason != "batch_identity_conflict":
@@ -272,8 +320,8 @@ def run_pulse_execution(*, tick: PulseTickV1, holdings_reader: Callable,
             saved_any = False
             for event in remaining:
                 single = ledger_store.append_batch(
-                    (event,),
-                    import_audit=ImportAuditMeta(None, IMPORTER_VERSION))
+                    (event,), import_audit=ImportAuditMeta(None, IMPORTER_VERSION)
+                )
                 if single.status == "SAVED":
                     saved_any = True
                 else:
@@ -281,35 +329,49 @@ def run_pulse_execution(*, tick: PulseTickV1, holdings_reader: Callable,
             del saved_any
             if conflict_keys:
                 scan_state_store.add_quarantine_keys(
-                    scope, tuple(sorted(conflict_keys)),
-                    "batch_identity_conflict")
+                    scope, tuple(sorted(conflict_keys)), "batch_identity_conflict"
+                )
                 conflict_count += len(conflict_keys)
         for event, fact in pairs:
             key = event.source_record_key
             if key in conflict_keys:
                 continue
-            scan_state_store.write_ingest_audit(IngestAuditRow(
-                LEDGER_SOURCE, scope, key,
-                fact.filled_at.astimezone().isoformat(), tick.tick_id,
-                timestamp,
-            ))
+            scan_state_store.write_ingest_audit(
+                IngestAuditRow(
+                    LEDGER_SOURCE,
+                    scope,
+                    key,
+                    fact.filled_at.astimezone().isoformat(),
+                    tick.tick_id,
+                    timestamp,
+                )
+            )
             if before[key]:
                 duplicate_count += 1
                 continue
             stored_now = clock()
             event_id = trade_event_id(LEDGER_SOURCE, scope, key)
-            inserted_events.append(NewTradeExecutionV1(
-                event_id, scope, key, fact.symbol, fact.side, fact.currency,
-                fact.filled_quantity, fact.average_filled_price,
-                fact.filled_amount, fact.classified_market.value,
-                TradeEventTimesV1(
-                    filled_at=fact.filled_at,
-                    provider_observed_at=None,
-                    discovered_at=now,
-                    stored_at=stored_now,
-                    notified_at=None,
-                ),
-            ))
+            inserted_events.append(
+                NewTradeExecutionV1(
+                    event_id,
+                    scope,
+                    key,
+                    fact.symbol,
+                    fact.side,
+                    fact.currency,
+                    fact.filled_quantity,
+                    fact.average_filled_price,
+                    fact.filled_amount,
+                    fact.classified_market.value,
+                    TradeEventTimesV1(
+                        filled_at=fact.filled_at,
+                        provider_observed_at=None,
+                        discovered_at=now,
+                        stored_at=stored_now,
+                        notified_at=None,
+                    ),
+                )
+            )
         return True
 
     for scope in target_scopes:
@@ -320,16 +382,22 @@ def run_pulse_execution(*, tick: PulseTickV1, holdings_reader: Callable,
         state = scan_state_store.read_state(scope)
         cursor = None if state is None else state.pending_cursor
         watermark = None if state is None else state.watermark_date
-        window_from = (state.pending_window_from
-                       if state is not None and state.pending_cursor is not None
-                       and state.pending_window_from is not None
-                       else (watermark or (
-                           now.date() - timedelta(days=SCAN_WINDOW_DAYS)
-                       ).isoformat()))
-        window_to = (state.pending_window_to
-                     if state is not None and state.pending_cursor is not None
-                     and state.pending_window_to is not None
-                     else now.date().isoformat())
+        window_from = (
+            state.pending_window_from
+            if state is not None
+            and state.pending_cursor is not None
+            and state.pending_window_from is not None
+            else (
+                watermark or (now.date() - timedelta(days=SCAN_WINDOW_DAYS)).isoformat()
+            )
+        )
+        window_to = (
+            state.pending_window_to
+            if state is not None
+            and state.pending_cursor is not None
+            and state.pending_window_to is not None
+            else now.date().isoformat()
+        )
         scope_failed = False
         scope_orders = []
         scope_pagination = False
@@ -340,9 +408,12 @@ def run_pulse_execution(*, tick: PulseTickV1, holdings_reader: Callable,
             pages_used += 1
             try:
                 outcome = orders_page_fetch(
-                    account_scope=scope, native_ref=refs.reveal(scope),
-                    status="CLOSED", from_date=window_from,
-                    to_date=window_to, cursor=cursor,
+                    account_scope=scope,
+                    native_ref=refs.reveal(scope),
+                    status="CLOSED",
+                    from_date=window_from,
+                    to_date=window_to,
+                    cursor=cursor,
                     limit=ORDERS_PAGE_LIMIT,
                 )
             except Exception:
@@ -366,40 +437,62 @@ def run_pulse_execution(*, tick: PulseTickV1, holdings_reader: Callable,
             continue
         pairs = []
         for order in scope_orders:
-            kind, payload = _classify_and_convert(
-                scope, order, allow_detail=True)
+            kind, payload = _classify_and_convert(scope, order, allow_detail=True)
             if kind == "event":
                 pairs.append(payload)
             elif kind == "quarantine":
                 scan_state_store.add_quarantine_keys(
-                    scope, (order.order_id,), "ambiguous_status")
+                    scope, (order.order_id,), "ambiguous_status"
+                )
         if not _append_events(scope, pairs):
             continue
         if scope_pagination and cursor is not None:
             pagination_pending = True
-            scan_state_store.save_state(ScanStateV1(
-                scope, watermark, cursor, window_from, window_to,
-                None, False, None, False, timestamp,
-            ))
+            scan_state_store.save_state(
+                ScanStateV1(
+                    scope,
+                    watermark,
+                    cursor,
+                    window_from,
+                    window_to,
+                    None,
+                    False,
+                    None,
+                    False,
+                    timestamp,
+                )
+            )
         else:
-            scan_state_store.save_state(ScanStateV1(
-                scope, window_to, None, None, None,
-                None, False, None, False, timestamp,
-            ))
+            scan_state_store.save_state(
+                ScanStateV1(
+                    scope,
+                    window_to,
+                    None,
+                    None,
+                    None,
+                    None,
+                    False,
+                    None,
+                    False,
+                    timestamp,
+                )
+            )
         if scope_status.get(scope) == "SCAN_REQUIRED":
             scope_status[scope] = "scanned"
 
-    scanned = sum(1 for scope in obligated
-                  if scope_status.get(scope) == "scanned")
-    failed = sum(1 for scope in obligated
-                 if scope_status.get(scope) not in (
-                     "scanned", "deferred_page_budget"))
+    scanned = sum(1 for scope in obligated if scope_status.get(scope) == "scanned")
+    failed = sum(
+        1
+        for scope in obligated
+        if scope_status.get(scope) not in ("scanned", "deferred_page_budget")
+    )
     completeness = PulseScanCompletenessV1(
         obligated_scopes=len(obligated),
         scanned_scopes=scanned,
         failed_scopes=failed,
         not_applicable_scopes=sum(
-            1 for value in scope_status.values() if value == "NOT_APPLICABLE"),
+            1 for value in scope_status.values() if value == "NOT_APPLICABLE"
+        ),
     )
     if failed:
         status, reason = "partial", "partial_accounts"
@@ -408,7 +501,14 @@ def run_pulse_execution(*, tick: PulseTickV1, holdings_reader: Callable,
     else:
         status, reason = "saved", "saved"
     return _result(
-        status, reason, scope_status, inserted_events, duplicate_count,
-        conflict_count, incomplete_count, completeness, pagination_pending,
+        status,
+        reason,
+        scope_status,
+        inserted_events,
+        duplicate_count,
+        conflict_count,
+        incomplete_count,
+        completeness,
+        pagination_pending,
         wire_starts,
     )

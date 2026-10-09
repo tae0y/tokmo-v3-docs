@@ -22,21 +22,26 @@ source message; callback_data is short fixed grammar. Every user-facing
 string is masked: no account scope, native ref, token, or filesystem path.
 """
 
-from dataclasses import dataclass
-from functools import wraps
-from contextlib import contextmanager, closing
 import fcntl
-import sqlite3
-from decimal import Decimal, ROUND_HALF_UP
 import hashlib
 import os
+import sqlite3
 import stat
 import tempfile
-from datetime import datetime, timezone
+from collections.abc import Callable
+from contextlib import closing, contextmanager
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from decimal import ROUND_HALF_UP, Decimal
+from functools import wraps
 from pathlib import Path
-from typing import Callable
 from zoneinfo import ZoneInfo
 
+from tokmo.programs.trade_reason_seam import (
+    LedgerTradeV1,
+    _render_new_document,
+    reason_rejection,
+)
 from tokmo.records.durability import fsync_directory
 from tokmo.records.execution_dialogue_store import (
     DialogueStoreError,
@@ -46,7 +51,6 @@ from tokmo.records.playbook_identity import (
     instrument_document_path,
     read_instrument_name,
 )
-from tokmo.programs.trade_reason_seam import LedgerTradeV1, _render_new_document, reason_rejection
 from tokmo.values.instrument_display import display_or_symbol
 from tokmo.values.trade_event import (
     TradeEventEvaluationV1,
@@ -79,48 +83,75 @@ _CURRENCY_SYMBOLS = {"USD": "$", "KRW": "₩"}
 # Inline-keyboard grammar: callback_data is short, deterministic, and never
 # carries raw user text, account identity, a path, or a secret. Exactly one
 # button row per bubble (confirmed UI contract).
-from tokmo.values.callback_registry import (CB_PREVIEW_CANCEL,CB_PREVIEW_EDIT,CB_PREVIEW_OK,
-    CB_QUESTION_INPUT,CB_QUESTION_NONE,CB_QUESTION_YES,CB_RECEIPT_EDIT,NEWS_FEEDBACK_PREFIX)
-QUESTION_KEYBOARD = {"inline_keyboard": [[
-    {"text": "예", "callback_data": CB_QUESTION_YES},
-    {"text": "입력안함", "callback_data": CB_QUESTION_NONE},
-    {"text": "추가입력", "callback_data": CB_QUESTION_INPUT},
-]]}
+from tokmo.values.callback_registry import (
+    CB_PREVIEW_CANCEL,
+    CB_PREVIEW_EDIT,
+    CB_PREVIEW_OK,
+    CB_QUESTION_INPUT,
+    CB_QUESTION_NONE,
+    CB_QUESTION_YES,
+    CB_RECEIPT_EDIT,
+    NEWS_FEEDBACK_PREFIX,
+)
+
+QUESTION_KEYBOARD = {
+    "inline_keyboard": [
+        [
+            {"text": "예", "callback_data": CB_QUESTION_YES},
+            {"text": "입력안함", "callback_data": CB_QUESTION_NONE},
+            {"text": "추가입력", "callback_data": CB_QUESTION_INPUT},
+        ]
+    ]
+}
 # Retained for old in-flight bubbles only; nothing enqueues a new preview.
-PREVIEW_KEYBOARD = {"inline_keyboard": [[
-    {"text": "확인", "callback_data": CB_PREVIEW_OK},
-    {"text": "취소", "callback_data": CB_PREVIEW_CANCEL},
-    {"text": "수정", "callback_data": CB_PREVIEW_EDIT},
-]]}
+PREVIEW_KEYBOARD = {
+    "inline_keyboard": [
+        [
+            {"text": "확인", "callback_data": CB_PREVIEW_OK},
+            {"text": "취소", "callback_data": CB_PREVIEW_CANCEL},
+            {"text": "수정", "callback_data": CB_PREVIEW_EDIT},
+        ]
+    ]
+}
 # The receipt is an acknowledgement, not a question: one button, no 확인.
-RECEIPT_KEYBOARD = {"inline_keyboard": [[
-    {"text": "수정", "callback_data": CB_RECEIPT_EDIT},
-]]}
+RECEIPT_KEYBOARD = {
+    "inline_keyboard": [
+        [
+            {"text": "수정", "callback_data": CB_RECEIPT_EDIT},
+        ]
+    ]
+}
 _KEYBOARDS_BY_PROMPT_KIND = {
     "trade_reason_question": QUESTION_KEYBOARD,
     "conditional_fill_question": QUESTION_KEYBOARD,
     "trade_reason_preview": PREVIEW_KEYBOARD,
     "trade_reason_receipt": RECEIPT_KEYBOARD,
     "trade_reason_pending_receipt": RECEIPT_KEYBOARD,
-    "trade_reason_input_prompt": {"force_reply": True, "input_field_placeholder": "매매 사유를 입력해 주세요"},
+    "trade_reason_input_prompt": {
+        "force_reply": True,
+        "input_field_placeholder": "매매 사유를 입력해 주세요",
+    },
 }
 _RECEIPT_KINDS = ("trade_reason_receipt", "trade_reason_pending_receipt")
 _QUESTION_KINDS = ("trade_reason_question", "conditional_fill_question")
 _PREVIEW_QUESTION = "아래 원문을 플레이북 매매이력에 그대로 추가할까요?"
 _RECEIPT_SAVED_LINE = "플레이북에 매매 사유를 저장했어요."
 _RECEIPT_PENDING_LINE = (
-    "수량/가격 원장 확정 대기 중입니다. 확정되면 아래 내용을 그대로 "
-    "입력합니다.")
+    "수량/가격 원장 확정 대기 중입니다. 확정되면 아래 내용을 그대로 입력합니다."
+)
 _SAVE_FAILED_NOTICE = (
     "지금은 저장하지 못했습니다. 입력하신 원문은 그대로 보관돼 있습니다. "
-    "같은 내용을 다시 입력하지 않아도 됩니다.")
+    "같은 내용을 다시 입력하지 않아도 됩니다."
+)
 _INPUT_PROMPT_TEXT = (
     "이 메시지에 답장(reply)으로 남길 이유나 맥락을 자연어로 입력해 "
     "주세요. 입력한 원문은 그대로 저장되고, 저장 결과를 다시 알려 "
-    "드립니다.")
+    "드립니다."
+)
 _NO_RECOMMENDATION_GUIDE = (
     "추천문구가 없어 바로 추가할 원문이 없습니다. 질문의 '추가입력' "
-    "버튼으로 직접 입력해 주세요.")
+    "버튼으로 직접 입력해 주세요."
+)
 
 
 @dataclass(frozen=True)
@@ -167,6 +198,7 @@ def _serialized_dialogue(function):
     def wrapped(*args, **kwargs):
         with dialogue_processing_lock(kwargs["dialogue_store"]):
             return function(*args, **kwargs)
+
     return wrapped
 
 
@@ -181,15 +213,19 @@ def _ledger_reference(store, event):
             "SELECT event_id,instrument_raw,transaction_type_raw,quantity,"
             "unit_price,amount,currency_raw FROM trade_ledger_events "
             "WHERE source=? AND account_scope=? AND source_record_key=?",
-            (event["source"], event["account_scope"], event["source_record_key"])
+            (event["source"], event["account_scope"], event["source_record_key"]),
         ).fetchall()
     if len(rows) != 1:
         raise ValueError("ledger_match_missing")
     row = rows[0]
-    if (row[1:3] != (event["symbol"], event["side"])
-            or row[6] != event["currency"]
-            or any(Decimal(row[i]) != Decimal(event[field]) for i, field in
-                   ((3, "quantity"), (4, "unit_price"), (5, "amount")))):
+    if (
+        row[1:3] != (event["symbol"], event["side"])
+        or row[6] != event["currency"]
+        or any(
+            Decimal(row[i]) != Decimal(event[field])
+            for i, field in ((3, "quantity"), (4, "unit_price"), (5, "amount"))
+        )
+    ):
         raise ValueError("ledger_match_changed")
     return "trade_ledger_events#" + row[0]
 
@@ -202,7 +238,7 @@ def extract_reason_payload(raw: bytes) -> "bytes | None":
     """
     if type(raw) is not bytes or not raw.startswith(_REASON_MARKER):
         return None
-    payload = raw[len(_REASON_MARKER):]
+    payload = raw[len(_REASON_MARKER) :]
     if payload.startswith(b" "):
         payload = payload[1:]
     return payload if payload else None
@@ -218,14 +254,14 @@ def _kst(value: datetime) -> str:
 
 def _money(currency: str, value: str) -> str:
     """Two-decimal money, third decimal ROUND_HALF_UP (confirmed contract)."""
-    quantized = Decimal(value).quantize(
-        Decimal("0.01"), rounding=ROUND_HALF_UP)
+    quantized = Decimal(value).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     symbol = _CURRENCY_SYMBOLS.get(currency)
     return f"{symbol}{quantized}" if symbol else f"{currency} {quantized}"
 
 
-def instrument_display(playbook_root, *, account_scope: str, market: str,
-                       symbol: str) -> str:
+def instrument_display(
+    playbook_root, *, account_scope: str, market: str, symbol: str
+) -> str:
     """The one user-facing instrument rendering (2026-08-21 contract).
 
     The name comes from the canonical playbook document — the very record a
@@ -234,13 +270,17 @@ def instrument_display(playbook_root, *, account_scope: str, market: str,
     canonical symbol; nothing is ever translated or guessed.
     """
     return display_or_symbol(
-        market, symbol,
-        read_instrument_name(playbook_root, account_scope=account_scope,
-                             market=market, symbol=symbol))
+        market,
+        symbol,
+        read_instrument_name(
+            playbook_root, account_scope=account_scope, market=market, symbol=symbol
+        ),
+    )
 
 
-def build_trade_question_message(event, *, evaluation, playbook_root,
-                                 capture_path=None) -> str:
+def build_trade_question_message(
+    event, *, evaluation, playbook_root, capture_path=None
+) -> str:
     """The user-confirmed question contract (2026-08-19).
 
     Name-first title, execution side, quantity(ledger-raw)/money(2dp HALF_UP),
@@ -253,28 +293,43 @@ def build_trade_question_message(event, *, evaluation, playbook_root,
     times = event.times
     from tokmo.records.order_alert_identity import read_order_alert_name
     from tokmo.values.instrument_display import order_alert_title
+
     display = order_alert_title(
-        event.classified_market, event.symbol,
-        read_order_alert_name(playbook_root, account_scope=event.account_scope,
-            market=event.classified_market, symbol=event.symbol,
-            capture_path=capture_path))
+        event.classified_market,
+        event.symbol,
+        read_order_alert_name(
+            playbook_root,
+            account_scope=event.account_scope,
+            market=event.classified_market,
+            symbol=event.symbol,
+            capture_path=capture_path,
+        ),
+    )
     recommendation = None if evaluation is None else evaluation.prose
-    return "\n".join([
-        display,
-        f"{_side_kr(event.side)} 체결 확인",
-        (f"{event.filled_quantity}주  "
-         f"{_money(event.currency, event.average_filled_price)} = "
-         f"{_money(event.currency, event.filled_amount)}"),
-        f"체결 {_kst(times.filled_at)} / 확인 {_kst(times.discovered_at)}",
-        "추천 문구",
-        (_NO_RECOMMENDATION_TEXT if recommendation is None
-         else f"- {recommendation}"),
-        "이 메시지에 바로 답장하면 매매 사유를 저장해요. (추가입력 버튼 없이 가능)",
-    ])
+    return "\n".join(
+        [
+            display,
+            f"{_side_kr(event.side)} 체결 확인",
+            (
+                f"{event.filled_quantity}주  "
+                f"{_money(event.currency, event.average_filled_price)} = "
+                f"{_money(event.currency, event.filled_amount)}"
+            ),
+            f"체결 {_kst(times.filled_at)} / 확인 {_kst(times.discovered_at)}",
+            "추천 문구",
+            (
+                _NO_RECOMMENDATION_TEXT
+                if recommendation is None
+                else f"- {recommendation}"
+            ),
+            "이 메시지에 바로 답장하면 매매 사유를 저장해요. (추가입력 버튼 없이 가능)",
+        ]
+    )
 
 
-def build_reason_receipt_message(*, when: datetime, display: str,
-                                 payload: bytes, pending: bool = False) -> str:
+def build_reason_receipt_message(
+    *, when: datetime, display: str, payload: bytes, pending: bool = False
+) -> str:
     """The user-confirmed receipt contract (2026-08-21).
 
     Four parts and nothing else: the trade's KST instant with the instrument
@@ -288,27 +343,32 @@ def build_reason_receipt_message(*, when: datetime, display: str,
     return f"{_kst(when)} / {display}\n{statement}\n---\n{body}"
 
 
-def _flush_outbox(store: ExecutionDialogueStore, sender, *,
-                  activation_enabled: bool,
-                  send_eligible_after: datetime, limit: int | None = None) -> int:
+def _flush_outbox(
+    store: ExecutionDialogueStore,
+    sender,
+    *,
+    activation_enabled: bool,
+    send_eligible_after: datetime,
+    limit: int | None = None,
+) -> int:
     """Send PENDING rows once each; UNKNOWN/FAILED rows are never retried."""
     if not activation_enabled or sender is None:
         return 0
-    if (not isinstance(send_eligible_after, datetime)
-            or send_eligible_after.tzinfo is None
-            or send_eligible_after.utcoffset() is None):
+    if (
+        not isinstance(send_eligible_after, datetime)
+        or send_eligible_after.tzinfo is None
+        or send_eligible_after.utcoffset() is None
+    ):
         return 0
     try:
-        cutoff = send_eligible_after.astimezone(timezone.utc)
-        rows = store.list_outbox(
-            status="PENDING", send_eligible_after=cutoff)
+        cutoff = send_eligible_after.astimezone(UTC)
+        rows = store.list_outbox(status="PENDING", send_eligible_after=cutoff)
     except Exception:
         return 0
     send_calls = 0
     # Also exclude legacy queued submission notices, before applying the
     # batch limit so a retained row cannot starve actual executions.
-    rows = [row for row in rows
-            if row["prompt_kind"] != "conditional_fill_question"]
+    rows = [row for row in rows if row["prompt_kind"] != "conditional_fill_question"]
     for row in rows[:limit]:
         send_calls += 1
         markup = _KEYBOARDS_BY_PROMPT_KIND.get(row["prompt_kind"])
@@ -323,12 +383,10 @@ def _flush_outbox(store: ExecutionDialogueStore, sender, *,
         except Exception:
             store.mark_outbox(row["dedupe_key"], "FAILED")
             continue
-        store.mark_outbox(row["dedupe_key"], "SENT",
-                          telegram_message_id=message_id)
+        store.mark_outbox(row["dedupe_key"], "SENT", telegram_message_id=message_id)
         if row["prompt_kind"] == "trade_reason_question":
             try:
-                store.transition_event(
-                    row["trade_event_id"], TradeEventState.SENT)
+                store.transition_event(row["trade_event_id"], TradeEventState.SENT)
             except Exception:
                 pass
     return send_calls
@@ -338,20 +396,28 @@ def _material_sufficient(event, quote, playbook_root) -> bool:
     if quote is None or playbook_root is None:
         return False
     symbol_path = instrument_document_path(
-        playbook_root, account_scope=event.account_scope,
-        market=event.classified_market, symbol=event.symbol)
+        playbook_root,
+        account_scope=event.account_scope,
+        market=event.classified_market,
+        symbol=event.symbol,
+    )
     return symbol_path is not None and symbol_path.exists()
 
 
 @_serialized_dialogue
-def run_execution_dialogue(*, new_events, dialogue_store: ExecutionDialogueStore,
-                           quote_reader: Callable, playbook_root,
-                           ai_evaluator: "Callable | None",
-                           sender: "Callable | None",
-                           activation_enabled: bool,
-                           send_eligible_after: datetime,
-                           clock: Callable[[], datetime],
-                           now: datetime) -> DialogueStageResult:
+def run_execution_dialogue(
+    *,
+    new_events,
+    dialogue_store: ExecutionDialogueStore,
+    quote_reader: Callable,
+    playbook_root,
+    ai_evaluator: "Callable | None",
+    sender: "Callable | None",
+    activation_enabled: bool,
+    send_eligible_after: datetime,
+    clock: Callable[[], datetime],
+    now: datetime,
+) -> DialogueStageResult:
     del clock, now
     registered = 0
     duplicates = 0
@@ -363,16 +429,19 @@ def run_execution_dialogue(*, new_events, dialogue_store: ExecutionDialogueStore
         # triggered_order_id == source_record_key), then the defensive
         # scope+symbol+±25h fallback with the 0/1/2+ dispositions.
         merge_alert = dialogue_store.find_alert_by_triggered_order(
-            event.source_record_key)
+            event.source_record_key
+        )
         outcome = dialogue_store.register_event(
             event.trade_event_id,
             source="toss-orders-v1",
             account_scope=event.account_scope,
             source_record_key=event.source_record_key,
-            symbol=event.symbol, side=event.side,
+            symbol=event.symbol,
+            side=event.side,
             quantity=event.filled_quantity,
             unit_price=event.average_filled_price,
-            amount=event.filled_amount, currency=event.currency,
+            amount=event.filled_amount,
+            currency=event.currency,
             classified_market=event.classified_market,
             times=event.times,
         )
@@ -382,22 +451,27 @@ def run_execution_dialogue(*, new_events, dialogue_store: ExecutionDialogueStore
         registered += 1
         if merge_alert is None:
             candidates = dialogue_store.find_unmigrated_alerts_in_window(
-                account_scope=event.account_scope, symbol=event.symbol,
-                center=event.times.filled_at)
+                account_scope=event.account_scope,
+                symbol=event.symbol,
+                center=event.times.filled_at,
+            )
             if len(candidates) == 1:
                 merge_alert = candidates[0]
         if merge_alert is not None:
             # Submission was not a fill. Preserve pending reasons/reply links,
             # then enqueue this first evidence-backed execution exactly once.
             dialogue_store.backfill_migrated_event(
-                merge_alert["conditional_alert_id"], event.trade_event_id)
+                merge_alert["conditional_alert_id"], event.trade_event_id
+            )
         try:
             quote = quote_reader(event.symbol)
         except Exception:
             quote = None
         evaluation = None
-        if (_material_sufficient(event, quote, playbook_root)
-                and ai_evaluator is not None):
+        if (
+            _material_sufficient(event, quote, playbook_root)
+            and ai_evaluator is not None
+        ):
             payload = {
                 "trade_event_id": event.trade_event_id,
                 "symbol": event.symbol,
@@ -421,66 +495,91 @@ def run_execution_dialogue(*, new_events, dialogue_store: ExecutionDialogueStore
         if evaluation is not None:
             # The 예 button later adopts these exact bytes into the preview.
             dialogue_store.record_question_recommendation(
-                event.trade_event_id, evaluation.prose.encode())
+                event.trade_event_id, evaluation.prose.encode()
+            )
         message = build_trade_question_message(
-            event, evaluation=evaluation, playbook_root=playbook_root,
+            event,
+            evaluation=evaluation,
+            playbook_root=playbook_root,
             capture_path=dialogue_store.path.parent.parent
-            / "ops/quant-inputs/latest.json")
+            / "ops/quant-inputs/latest.json",
+        )
         dialogue_store.transition_event(
-            event.trade_event_id, TradeEventState.EVALUATED,
-            evaluation_policy_version=EVALUATION_POLICY_VERSION)
-        dialogue_store.transition_event(
-            event.trade_event_id, TradeEventState.ENQUEUED)
+            event.trade_event_id,
+            TradeEventState.EVALUATED,
+            evaluation_policy_version=EVALUATION_POLICY_VERSION,
+        )
+        dialogue_store.transition_event(event.trade_event_id, TradeEventState.ENQUEUED)
         key = dialogue_dedupe_key(
-            event.trade_event_id, "trade_reason_question", PROMPT_VERSION)
-        if dialogue_store.enqueue_outbox(
-                key, trade_event_id=event.trade_event_id,
+            event.trade_event_id, "trade_reason_question", PROMPT_VERSION
+        )
+        if (
+            dialogue_store.enqueue_outbox(
+                key,
+                trade_event_id=event.trade_event_id,
                 prompt_kind="trade_reason_question",
                 prompt_version=PROMPT_VERSION,
-                message_text=message) == "created":
+                message_text=message,
+            )
+            == "created"
+        ):
             enqueued += 1
-    send_calls = _flush_outbox(dialogue_store, sender,
-                               activation_enabled=activation_enabled,
-                               send_eligible_after=send_eligible_after)
+    send_calls = _flush_outbox(
+        dialogue_store,
+        sender,
+        activation_enabled=activation_enabled,
+        send_eligible_after=send_eligible_after,
+    )
     # Activation on with no sender composed (env absent): only the send
     # step is unavailable. Registration and enqueue above already ran, so
     # the once-only ``new_events`` are durably preserved as PENDING rows.
-    status = ("send_unavailable"
-              if activation_enabled and sender is None else "saved")
+    status = "send_unavailable" if activation_enabled and sender is None else "saved"
     return DialogueStageResult(
-        status, registered, duplicates, enqueued, ai_calls, send_calls)
+        status, registered, duplicates, enqueued, ai_calls, send_calls
+    )
 
 
 def _unbound_key(message_id: int) -> str:
-    pseudo = hashlib.sha256(
-        f"unbound-reconfirm-{message_id}".encode()).hexdigest()
-    return dialogue_dedupe_key(pseudo, "trade_reason_reconfirm",
-                               PROMPT_VERSION)
+    pseudo = hashlib.sha256(f"unbound-reconfirm-{message_id}".encode()).hexdigest()
+    return dialogue_dedupe_key(pseudo, "trade_reason_reconfirm", PROMPT_VERSION)
 
 
 def _entry_id(event: dict, inbound_message_id: int) -> str:
-    return (f"trade-{event['trade_event_id'][:8]}-{event['symbol'].lower()}"
-            f"-{event['side'].lower()}-{inbound_message_id}")
+    return (
+        f"trade-{event['trade_event_id'][:8]}-{event['symbol'].lower()}"
+        f"-{event['side'].lower()}-{inbound_message_id}"
+    )
 
 
-def _render_entry(event: dict, payload: bytes, *, entry_id: str,
-                  now: datetime, supersedes: "str | None" = None) -> str:
+def _render_entry(
+    event: dict,
+    payload: bytes,
+    *,
+    entry_id: str,
+    now: datetime,
+    supersedes: "str | None" = None,
+) -> str:
     recorded = now.astimezone(ZoneInfo(_KST))
     event_date = event["filled_at"].astimezone(ZoneInfo(_KST)).date()
-    summary = (f"{event['side']} {event['quantity']} {event['symbol']} @ "
-               f"{event['currency']} {event['unit_price']} = "
-               f"{event['amount']}, filled "
-               f"{event['filled_at'].isoformat()}")
-    heading = (f"### {recorded.date().isoformat()} — "
-               f"{_side_kr(event['side'])} ({event['quantity']}주 @ "
-               f"{event['currency']} {event['unit_price']})")
+    summary = (
+        f"{event['side']} {event['quantity']} {event['symbol']} @ "
+        f"{event['currency']} {event['unit_price']} = "
+        f"{event['amount']}, filled "
+        f"{event['filled_at'].isoformat()}"
+    )
+    heading = (
+        f"### {recorded.date().isoformat()} — "
+        f"{_side_kr(event['side'])} ({event['quantity']}주 @ "
+        f"{event['currency']} {event['unit_price']})"
+    )
     body = payload.decode("utf-8", errors="strict")
     # A correction is an appended, linked record — never a rewrite. The
     # superseded entry keeps its own USER_RAW block untouched; an entry is
     # superseded exactly when a later entry names it here, and the newest
     # entry (top of layer 3) is the current interpretation.
-    correction = ("" if supersedes is None
-                  else f"- `supersedes_entry_id`: `{supersedes}`\n")
+    correction = (
+        "" if supersedes is None else f"- `supersedes_entry_id`: `{supersedes}`\n"
+    )
     return (
         f'<a id="entry-{entry_id}"></a>\n'
         f"{heading}\n\n"
@@ -511,7 +610,8 @@ def _write_playbook_bytes_durable(path: Path, data: bytes) -> None:
     """
     mode = stat.S_IMODE(os.stat(path).st_mode) if path.exists() else 0o644
     descriptor, temporary = tempfile.mkstemp(
-        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )
     try:
         with os.fdopen(descriptor, "wb") as handle:
             handle.write(data)
@@ -528,10 +628,16 @@ def _write_playbook_bytes_durable(path: Path, data: bytes) -> None:
     fsync_directory(path.parent)
 
 
-def _perform_append(*, dialogue_store: ExecutionDialogueStore, event: dict,
-                    payload: bytes, inbound_message_id: int,
-                    playbook_root, playbook_validator: Callable,
-                    now: datetime) -> str:
+def _perform_append(
+    *,
+    dialogue_store: ExecutionDialogueStore,
+    event: dict,
+    payload: bytes,
+    inbound_message_id: int,
+    playbook_root,
+    playbook_validator: Callable,
+    now: datetime,
+) -> str:
     """Validator-guarded, byte-for-byte, top-of-layer-3 append (§22.2).
 
     Durable exactly-once: the deterministic entry anchor inside the
@@ -546,8 +652,11 @@ def _perform_append(*, dialogue_store: ExecutionDialogueStore, event: dict,
         return "playbook_missing"
     root = Path(playbook_root)
     path = instrument_document_path(
-        root, account_scope=event["account_scope"],
-        market=event["classified_market"], symbol=event["symbol"])
+        root,
+        account_scope=event["account_scope"],
+        market=event["classified_market"],
+        symbol=event["symbol"],
+    )
     if path is None or not root.is_dir():
         return "playbook_missing"
     rejection = reason_rejection(payload)
@@ -565,8 +674,7 @@ def _perform_append(*, dialogue_store: ExecutionDialogueStore, event: dict,
         return "read_failed"
     entry_id = _entry_id(event, inbound_message_id)
     anchor = f'<a id="entry-{entry_id}"></a>'
-    append_id = reason_append_id(
-        event["trade_event_id"], inbound_message_id)
+    append_id = reason_append_id(event["trade_event_id"], inbound_message_id)
     if anchor in original:
         # A prior attempt already landed these exact bytes durably (crash
         # between replace and claim): settle the claim and never rewrite —
@@ -582,8 +690,10 @@ def _perform_append(*, dialogue_store: ExecutionDialogueStore, event: dict,
             return "recovery_validator_failed"
         try:
             dialogue_store.record_reason_append(
-                append_id, trade_event_id=event["trade_event_id"],
-                inbound_message_id=inbound_message_id)
+                append_id,
+                trade_event_id=event["trade_event_id"],
+                inbound_message_id=inbound_message_id,
+            )
         except Exception:
             return "claim_failed"
         return "appended"
@@ -596,25 +706,37 @@ def _perform_append(*, dialogue_store: ExecutionDialogueStore, event: dict,
     # renders the identical bytes and converges on one entry.
     supersedes = None
     try:
-        prior = dialogue_store.read_latest_reason_append(
-            event["trade_event_id"])
+        prior = dialogue_store.read_latest_reason_append(event["trade_event_id"])
     except Exception:
         prior = None
-    if prior is not None \
-            and prior["inbound_message_id"] != inbound_message_id:
+    if prior is not None and prior["inbound_message_id"] != inbound_message_id:
         supersedes = _entry_id(event, prior["inbound_message_id"])
-    entry = _render_entry(event, payload, entry_id=entry_id, now=now,
-                          supersedes=supersedes)
+    entry = _render_entry(
+        event, payload, entry_id=entry_id, now=now, supersedes=supersedes
+    )
     if creating:
         trade = LedgerTradeV1(
-            event["trade_event_id"], event["account_scope"],
-            event["classified_market"], event["symbol"], event["side"],
-            event["quantity"], event["unit_price"], event["amount"],
-            event["currency"], event["filled_at"].date(), event["filled_at"])
+            event["trade_event_id"],
+            event["account_scope"],
+            event["classified_market"],
+            event["symbol"],
+            event["side"],
+            event["quantity"],
+            event["unit_price"],
+            event["amount"],
+            event["currency"],
+            event["filled_at"].date(),
+            event["filled_at"],
+        )
         updated = _render_new_document(
-            trade, entry=entry, entry_id=entry_id, instrument_name=None,
-            hermes_interpretation=None, user_thesis=None,
-            day=now.astimezone(ZoneInfo(_KST)).date().isoformat())
+            trade,
+            entry=entry,
+            entry_id=entry_id,
+            instrument_name=None,
+            hermes_interpretation=None,
+            user_thesis=None,
+            day=now.astimezone(ZoneInfo(_KST)).date().isoformat(),
+        )
         path.parent.mkdir(parents=True, exist_ok=True)
     else:
         head, _, tail = original.partition(_LAYER3_HEADING)
@@ -649,8 +771,10 @@ def _perform_append(*, dialogue_store: ExecutionDialogueStore, event: dict,
         return "validator_failed_after"
     try:
         claim = dialogue_store.record_reason_append(
-            append_id, trade_event_id=event["trade_event_id"],
-            inbound_message_id=inbound_message_id)
+            append_id,
+            trade_event_id=event["trade_event_id"],
+            inbound_message_id=inbound_message_id,
+        )
     except Exception:
         return "claim_failed"
     # "duplicate" here repairs claim-first residue: the bytes now exist.
@@ -659,17 +783,22 @@ def _perform_append(*, dialogue_store: ExecutionDialogueStore, event: dict,
 
 
 @_serialized_dialogue
-def consume_inbound(*, dialogue_store: ExecutionDialogueStore,
-                    updates_provider: Callable, playbook_root,
-                    playbook_validator: Callable,
-                    sender: "Callable | None" = None,
-                    callback_ack: "Callable | None" = None,
-                    news_callback_handler: "Callable | None" = None,
-                    activation_enabled: bool,
-                    send_eligible_after: datetime,
-                    clock: Callable[[], datetime],
-                    now: datetime, retry_pending: bool = True,
-                    outbox_limit: int | None = None) -> InboundStageResult:
+def consume_inbound(
+    *,
+    dialogue_store: ExecutionDialogueStore,
+    updates_provider: Callable,
+    playbook_root,
+    playbook_validator: Callable,
+    sender: "Callable | None" = None,
+    callback_ack: "Callable | None" = None,
+    news_callback_handler: "Callable | None" = None,
+    activation_enabled: bool,
+    send_eligible_after: datetime,
+    clock: Callable[[], datetime],
+    now: datetime,
+    retry_pending: bool = True,
+    outbox_limit: int | None = None,
+) -> InboundStageResult:
     """One bounded getUpdates consumption pass (§22.3): ≤1 poll per tick.
 
     Two phases: the bounded sweep settles bytes the user already submitted
@@ -696,53 +825,72 @@ def consume_inbound(*, dialogue_store: ExecutionDialogueStore,
             bound = "0" * 64
         else:
             key = dialogue_instance_dedupe_key(
-                event_id, "trade_reason_reconfirm", PROMPT_VERSION, str(message_id))
+                event_id, "trade_reason_reconfirm", PROMPT_VERSION, str(message_id)
+            )
             bound = event_id
-        text = (note or "어느 체결에 대한 답인지 확인이 필요합니다. 봇 질문 "
-                "메시지에 답장(reply)으로 다시 보내 주세요.")
-        if dialogue_store.enqueue_outbox(
-                key, trade_event_id=bound,
+        text = (
+            note
+            or "어느 체결에 대한 답인지 확인이 필요합니다. 봇 질문 "
+            "메시지에 답장(reply)으로 다시 보내 주세요."
+        )
+        if (
+            dialogue_store.enqueue_outbox(
+                key,
+                trade_event_id=bound,
                 prompt_kind="trade_reason_reconfirm",
                 prompt_version=PROMPT_VERSION,
-                message_text=text) == "created":
+                message_text=text,
+            )
+            == "created"
+        ):
             reconfirms += 1
 
     def _receipt_key(event_id, provider_update_id, *, pending):
-        kind = ("trade_reason_pending_receipt" if pending
-                else "trade_reason_receipt")
+        kind = "trade_reason_pending_receipt" if pending else "trade_reason_receipt"
         return dialogue_instance_dedupe_key(
-            event_id, kind, PROMPT_VERSION, str(provider_update_id))
+            event_id, kind, PROMPT_VERSION, str(provider_update_id)
+        )
 
-    def _enqueue_receipt(*, event_id, provider_update_id, when, display,
-                         payload, pending):
+    def _enqueue_receipt(
+        *, event_id, provider_update_id, when, display, payload, pending
+    ):
         nonlocal receipts
-        kind = ("trade_reason_pending_receipt" if pending
-                else "trade_reason_receipt")
+        kind = "trade_reason_pending_receipt" if pending else "trade_reason_receipt"
         text = build_reason_receipt_message(
-            when=when, display=display, payload=payload, pending=pending)
-        if dialogue_store.enqueue_outbox(
+            when=when, display=display, payload=payload, pending=pending
+        )
+        if (
+            dialogue_store.enqueue_outbox(
                 _receipt_key(event_id, provider_update_id, pending=pending),
-                trade_event_id=event_id, prompt_kind=kind,
+                trade_event_id=event_id,
+                prompt_kind=kind,
                 prompt_version=PROMPT_VERSION,
-                message_text=text) == "created":
+                message_text=text,
+            )
+            == "created"
+        ):
             receipts += 1
 
     def _open_input_prompt(event_id, update_id):
         nonlocal input_prompts
         key = dialogue_instance_dedupe_key(
-            event_id, "trade_reason_input_prompt", PROMPT_VERSION,
-            str(update_id))
-        if dialogue_store.enqueue_outbox(
-                key, trade_event_id=event_id,
+            event_id, "trade_reason_input_prompt", PROMPT_VERSION, str(update_id)
+        )
+        if (
+            dialogue_store.enqueue_outbox(
+                key,
+                trade_event_id=event_id,
                 prompt_kind="trade_reason_input_prompt",
                 prompt_version=PROMPT_VERSION,
-                message_text=_INPUT_PROMPT_TEXT) == "created":
+                message_text=_INPUT_PROMPT_TEXT,
+            )
+            == "created"
+        ):
             input_prompts += 1
 
     def _close_no_append(event_id):
         try:
-            dialogue_store.transition_event(
-                event_id, TradeEventState.ANSWERED)
+            dialogue_store.transition_event(event_id, TradeEventState.ANSWERED)
         except (TradeEventTransitionError, DialogueStoreError):
             # A conditional-fill question uses its alert id until the regular
             # order migrates. Declining it is still a valid terminal UI action
@@ -758,8 +906,9 @@ def consume_inbound(*, dialogue_store: ExecutionDialogueStore,
         # Pre-button pending rows carry no payload: re-read the bytes from
         # the recorded inbound '추가:' message.
         original = dialogue_store.read_inbound(pending["provider_update_id"])
-        return None if original is None else extract_reason_payload(
-            original["raw_text"])
+        return (
+            None if original is None else extract_reason_payload(original["raw_text"])
+        )
 
     def _settle_pending(pending, *, notify_ledger_wait):
         """The single exactly-once settle path for submitted bytes."""
@@ -779,18 +928,26 @@ def consume_inbound(*, dialogue_store: ExecutionDialogueStore,
             if dialogue_store.read_conditional_alert(event_id) is not None:
                 if notify_ledger_wait:
                     _reconfirm(
-                        pending["inbound_message_id"], event_id,
-                        note=("수량/가격 원장 확정 대기 중입니다. 원장 반영 "
-                              "후 입력하신 원문이 자동으로 저장됩니다."))
+                        pending["inbound_message_id"],
+                        event_id,
+                        note=(
+                            "수량/가격 원장 확정 대기 중입니다. 원장 반영 "
+                            "후 입력하신 원문이 자동으로 저장됩니다."
+                        ),
+                    )
                 return
             append_failures += 1
             dialogue_store.delete_pending_append(event_id)
             return
         result = _perform_append(
-            dialogue_store=dialogue_store, event=event, payload=payload,
+            dialogue_store=dialogue_store,
+            event=event,
+            payload=payload,
             inbound_message_id=pending["inbound_message_id"],
             playbook_root=playbook_root,
-            playbook_validator=playbook_validator, now=now)
+            playbook_validator=playbook_validator,
+            now=now,
+        )
         if result != "appended":
             # Closed failure token: the pending row survives so a later retry
             # converges through the deterministic anchor. No receipt is ever
@@ -798,8 +955,9 @@ def consume_inbound(*, dialogue_store: ExecutionDialogueStore,
             append_failures += 1
             attempts = dialogue_store.bump_pending_append_attempt(event_id)
             failure_reasons.append(result)
-            _reconfirm(pending["inbound_message_id"], event_id,
-                       note=_SAVE_FAILED_NOTICE)
+            _reconfirm(
+                pending["inbound_message_id"], event_id, note=_SAVE_FAILED_NOTICE
+            )
             return
         appends += 1
         # Receipt first, pending row second: if the enqueue fails the row
@@ -811,9 +969,14 @@ def consume_inbound(*, dialogue_store: ExecutionDialogueStore,
             provider_update_id=pending["provider_update_id"],
             when=event["filled_at"],
             display=instrument_display(
-                playbook_root, account_scope=event["account_scope"],
-                market=event["classified_market"], symbol=event["symbol"]),
-            payload=payload, pending=False)
+                playbook_root,
+                account_scope=event["account_scope"],
+                market=event["classified_market"],
+                symbol=event["symbol"],
+            ),
+            payload=payload,
+            pending=False,
+        )
         dialogue_store.delete_pending_append(event_id)
         _close_no_append(event_id)
 
@@ -824,30 +987,44 @@ def consume_inbound(*, dialogue_store: ExecutionDialogueStore,
         at any point leaves them recoverable and the bounded sweep converges
         on exactly one entry.
         """
-        alert = (None if dialogue_store.read_event(event_id) is not None
-                 else dialogue_store.read_conditional_alert(event_id))
+        alert = (
+            None
+            if dialogue_store.read_event(event_id) is not None
+            else dialogue_store.read_conditional_alert(event_id)
+        )
         dialogue_store.create_pending_append(
-            trade_event_id=event_id, provider_update_id=update_id,
+            trade_event_id=event_id,
+            provider_update_id=update_id,
             inbound_message_id=inbound_message_id,
             preview_dedupe_key=_receipt_key(
-                event_id, update_id, pending=alert is not None),
-            payload=payload, save_intent=True)
+                event_id, update_id, pending=alert is not None
+            ),
+            payload=payload,
+            save_intent=True,
+        )
         if alert is not None:
             # Pre-ledger: no trade exists to save against, and none is
             # fabricated. The receipt says exactly that and still offers 수정.
             _enqueue_receipt(
-                event_id=event_id, provider_update_id=update_id,
+                event_id=event_id,
+                provider_update_id=update_id,
                 when=alert["detected_at"],
                 display=instrument_display(
-                    playbook_root, account_scope=alert["account_scope"],
-                    market=alert["market_class"], symbol=alert["symbol"]),
-                payload=payload, pending=True)
+                    playbook_root,
+                    account_scope=alert["account_scope"],
+                    market=alert["market_class"],
+                    symbol=alert["symbol"],
+                ),
+                payload=payload,
+                pending=True,
+            )
             return
-        _settle_pending(dialogue_store.read_pending_append(event_id),
-                        notify_ledger_wait=False)
+        _settle_pending(
+            dialogue_store.read_pending_append(event_id), notify_ledger_wait=False
+        )
 
     # Phase 1: bounded sweep of already-submitted bytes.
-    for pending in (dialogue_store.list_pending_appends() if retry_pending else ()):
+    for pending in dialogue_store.list_pending_appends() if retry_pending else ():
         if not pending["save_intent"]:
             continue  # legacy preview handshake: waits for its own 확인
         if pending["attempts"] >= PENDING_APPEND_MAX_ATTEMPTS:
@@ -875,9 +1052,12 @@ def consume_inbound(*, dialogue_store: ExecutionDialogueStore,
             message_id = update["message_id"]
             data = update["data"]
             outcome = dialogue_store.record_inbound(
-                provider_update_id=update_id, message_id=message_id,
-                reply_to_message_id=message_id, raw_text=data.encode(),
-                next_offset=update_id + 1)
+                provider_update_id=update_id,
+                message_id=message_id,
+                reply_to_message_id=message_id,
+                raw_text=data.encode(),
+                next_offset=update_id + 1,
+            )
             if outcome == "duplicate":
                 continue
             if data.startswith(NEWS_FEEDBACK_PREFIX):
@@ -896,15 +1076,14 @@ def consume_inbound(*, dialogue_store: ExecutionDialogueStore,
                 elif data == CB_QUESTION_INPUT:
                     _open_input_prompt(event_id, update_id)
                 elif data == CB_QUESTION_YES:
-                    recommendation = \
-                        dialogue_store.read_question_recommendation(event_id)
+                    recommendation = dialogue_store.read_question_recommendation(
+                        event_id
+                    )
                     if recommendation is None:
-                        _reconfirm(message_id, event_id,
-                                   note=_NO_RECOMMENDATION_GUIDE)
+                        _reconfirm(message_id, event_id, note=_NO_RECOMMENDATION_GUIDE)
                     else:
                         # Adoption is a submission: it saves immediately.
-                        _save_reason(event_id, recommendation, update_id,
-                                     message_id)
+                        _save_reason(event_id, recommendation, update_id, message_id)
                 # Any other q1: token (an older grammar) is safely ignored.
             elif bound["prompt_kind"] in _RECEIPT_KINDS:
                 if data == CB_RECEIPT_EDIT:
@@ -914,28 +1093,33 @@ def consume_inbound(*, dialogue_store: ExecutionDialogueStore,
             elif bound["prompt_kind"] == "trade_reason_preview":
                 # Abolished flow; still honoured for bubbles already sent.
                 pending = dialogue_store.find_pending_append_by_preview(
-                    bound["dedupe_key"])
+                    bound["dedupe_key"]
+                )
                 if data == CB_PREVIEW_OK:
                     if pending is not None:
                         _settle_pending(pending, notify_ledger_wait=True)
                 elif data == CB_PREVIEW_CANCEL:
                     if pending is not None:
-                        dialogue_store.delete_pending_append(
-                            pending["trade_event_id"])
+                        dialogue_store.delete_pending_append(pending["trade_event_id"])
                 elif data == CB_PREVIEW_EDIT:
                     if pending is not None:
-                        dialogue_store.delete_pending_append(
-                            pending["trade_event_id"])
+                        dialogue_store.delete_pending_append(pending["trade_event_id"])
                     _open_input_prompt(event_id, update_id)
             continue
         message_id = update["message_id"]
         reply_to = update.get("reply_to_message_id")
-        raw = update["text"].encode() if isinstance(update["text"], str) \
+        raw = (
+            update["text"].encode()
+            if isinstance(update["text"], str)
             else update["text"]
+        )
         outcome = dialogue_store.record_inbound(
-            provider_update_id=update_id, message_id=message_id,
-            reply_to_message_id=reply_to, raw_text=raw,
-            next_offset=update_id + 1)
+            provider_update_id=update_id,
+            message_id=message_id,
+            reply_to_message_id=reply_to,
+            raw_text=raw,
+            next_offset=update_id + 1,
+        )
         if outcome == "duplicate":
             continue
         if reply_to is None:
@@ -947,22 +1131,29 @@ def consume_inbound(*, dialogue_store: ExecutionDialogueStore,
             continue
         event_id = bound["trade_event_id"]
         text = raw.decode("utf-8", errors="replace")
-        if (bound["prompt_kind"] == "trade_reason_input_prompt"
-                or bound["prompt_kind"] in _QUESTION_KINDS):
+        if (
+            bound["prompt_kind"] == "trade_reason_input_prompt"
+            or bound["prompt_kind"] in _QUESTION_KINDS
+        ):
             if text == _DECLINE_TEXT:
                 _close_no_append(event_id)
                 continue
             if reason_rejection(raw):
-                _reconfirm(message_id, event_id, note="저장할 매매 사유를 글로 입력해 주세요.")
+                _reconfirm(
+                    message_id, event_id, note="저장할 매매 사유를 글로 입력해 주세요."
+                )
                 continue
             # The exact reply to the input prompt IS the raw payload: the
             # whole message, byte for byte, no marker grammar required.
-            payload = (extract_reason_payload(raw) or raw) if bound["prompt_kind"] in _QUESTION_KINDS else raw
+            payload = (
+                (extract_reason_payload(raw) or raw)
+                if bound["prompt_kind"] in _QUESTION_KINDS
+                else raw
+            )
             _save_reason(event_id, payload, update_id, message_id)
             continue
         if bound["prompt_kind"] == "trade_reason_preview":
-            pending = dialogue_store.find_pending_append_by_preview(
-                bound["dedupe_key"])
+            pending = dialogue_store.find_pending_append_by_preview(bound["dedupe_key"])
             if pending is None or text not in _CONFIRM_TEXTS:
                 _reconfirm(message_id, event_id)
                 continue
@@ -975,15 +1166,33 @@ def consume_inbound(*, dialogue_store: ExecutionDialogueStore,
         payload = extract_reason_payload(raw)
         if payload is None:
             _reconfirm(
-                message_id, event_id,
-                note=("플레이북에 남기려면 '추가: …' 형식으로, 남기지 "
-                      "않으려면 '추가하지 않음'으로 답해 주세요."))
+                message_id,
+                event_id,
+                note=(
+                    "플레이북에 남기려면 '추가: …' 형식으로, 남기지 "
+                    "않으려면 '추가하지 않음'으로 답해 주세요."
+                ),
+            )
             continue
         _save_reason(event_id, payload, update_id, message_id)
 
-    send_calls = _flush_outbox(dialogue_store, sender,
-                               activation_enabled=activation_enabled,
-                               send_eligible_after=send_eligible_after, limit=outbox_limit)
+    send_calls = _flush_outbox(
+        dialogue_store,
+        sender,
+        activation_enabled=activation_enabled,
+        send_eligible_after=send_eligible_after,
+        limit=outbox_limit,
+    )
     return InboundStageResult(
-        "saved" if not append_failures else "degraded", 1, len(updates), previews, reconfirms, appends,
-        append_failures, send_calls, input_prompts, receipts, tuple(failure_reasons))
+        "saved" if not append_failures else "degraded",
+        1,
+        len(updates),
+        previews,
+        reconfirms,
+        appends,
+        append_failures,
+        send_calls,
+        input_prompts,
+        receipts,
+        tuple(failure_reasons),
+    )

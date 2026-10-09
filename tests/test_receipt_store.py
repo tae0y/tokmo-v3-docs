@@ -1,26 +1,35 @@
 from dataclasses import FrozenInstanceError
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
-from tokmo.records.receipt_store import ReceiptCorruptError, ReceiptStore, with_preserved_last_success
+from tokmo.records.receipt_store import (
+    ReceiptCorruptError,
+    ReceiptStore,
+    with_preserved_last_success,
+)
 from tokmo.values.material_pack import JobKind
 from tokmo.values.receipt_v1 import (
     AttemptStatus,
-    AttemptV1, CompletenessV1,
+    AttemptV1,
+    CompletenessV1,
     LastSuccessV1,
     MarketFreshness,
     ReceiptV1,
 )
 
-NOW = datetime(2026, 7, 30, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 30, tzinfo=UTC)
 
 
 def saved_receipt():
     success = LastSuccessV1(1, "packs/quotes/1.json", "a" * 64, NOW, NOW)
     return ReceiptV1(
-        1, JobKind.QUOTES, AttemptV1(1, AttemptStatus.SAVED, "saved", NOW),
-        success, {"KR": MarketFreshness("KR", "fresh", 1, NOW)}, None,
+        1,
+        JobKind.QUOTES,
+        AttemptV1(1, AttemptStatus.SAVED, "saved", NOW),
+        success,
+        {"KR": MarketFreshness("KR", "fresh", 1, NOW)},
+        None,
     )
 
 
@@ -60,8 +69,12 @@ def test_receipt_reason_tokens_are_closed_and_open_is_rejected():
     receipt = saved_receipt()
     with pytest.raises(ValueError):
         ReceiptV1(
-            True, receipt.job, receipt.attempt, receipt.last_success,
-            dict(receipt.markets), receipt.completeness,
+            True,
+            receipt.job,
+            receipt.attempt,
+            receipt.last_success,
+            dict(receipt.markets),
+            receipt.completeness,
         )
 
 
@@ -87,9 +100,12 @@ def test_receipt_reader_maps_deep_json_recursion_to_typed_corrupt(tmp_path):
 def test_trades_receipt_round_trips_exact_five_field_completeness(tmp_path):
     completeness = CompletenessV1(3, 1, True, 2, 4)
     receipt = ReceiptV1(
-        1, JobKind.TRADES,
+        1,
+        JobKind.TRADES,
         AttemptV1(9, AttemptStatus.FAILED, "failed_store", NOW),
-        None, {}, completeness,
+        None,
+        {},
+        completeness,
     )
     store = ReceiptStore(tmp_path / "trades.json", clock=lambda: NOW)
     store.replace(receipt)

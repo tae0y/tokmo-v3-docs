@@ -9,11 +9,23 @@ from tokmo.observability import TracerLogger
 from tokmo.records.decision_journal import DecisionJournal
 from tokmo.records.fact_store import FactStore
 from tokmo.values import (
-    DecisionRecord, KrxDailyTradeFact, OpenDartDisclosureFact, SaveResult, SaveStatus,
-    SecFilingFact, UnavailableFact, WtiFact,
+    DecisionRecord,
+    KrxDailyTradeFact,
+    OpenDartDisclosureFact,
+    SaveResult,
+    SaveStatus,
+    SecFilingFact,
+    UnavailableFact,
+    WtiFact,
 )
 
-FactResult = WtiFact | SecFilingFact | OpenDartDisclosureFact | KrxDailyTradeFact | UnavailableFact
+FactResult = (
+    WtiFact
+    | SecFilingFact
+    | OpenDartDisclosureFact
+    | KrxDailyTradeFact
+    | UnavailableFact
+)
 
 POLICY_VERSION = "tracer1-v1"
 
@@ -43,10 +55,16 @@ class AuditJournalError(RuntimeError):
         super().__init__("journal_append_failed")
 
 
-def run_tracer(fact_result: FactResult, *,
-               store: FactStore, journal: DecisionJournal,
-               clock: Clock, id_factory: IdFactory, run_id: str,
-               logger: TracerLogger | None = None) -> ProgramResult:
+def run_tracer(
+    fact_result: FactResult,
+    *,
+    store: FactStore,
+    journal: DecisionJournal,
+    clock: Clock,
+    id_factory: IdFactory,
+    run_id: str,
+    logger: TracerLogger | None = None,
+) -> ProgramResult:
     decided_at = clock()
     decision_id = id_factory()
 
@@ -76,14 +94,27 @@ def run_tracer(fact_result: FactResult, *,
     except OSError as exc:
         if logger is not None:
             with contextlib.suppress(Exception):
-                logger.error(run_id=run_id, stage="journal", action=action,
-                             reason="journal_append_failed",
-                             source=fact_result.source, decision_id=decision_id)
+                logger.error(
+                    run_id=run_id,
+                    stage="journal",
+                    action=action,
+                    reason="journal_append_failed",
+                    source=fact_result.source,
+                    decision_id=decision_id,
+                )
         raise AuditJournalError(action=action, decision_id=decision_id) from exc
 
     if logger is not None:
-        save_failed = save_result is not None and save_result.status is SaveStatus.FAILED
+        save_failed = (
+            save_result is not None and save_result.status is SaveStatus.FAILED
+        )
         emit = logger.error if save_failed else logger.info
-        emit(run_id=run_id, stage="decision", action=action, reason=reason,
-             source=fact_result.source, decision_id=decision_id)
+        emit(
+            run_id=run_id,
+            stage="decision",
+            action=action,
+            reason=reason,
+            source=fact_result.source,
+            decision_id=decision_id,
+        )
     return ProgramResult(fact_result, save_result, decision)

@@ -1,10 +1,14 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
-from tokmo.values.ops_tick import TICK_SECONDS, tick_id_from_epoch_seconds, tick_id_from_utc
+from tokmo.values.ops_tick import (
+    TICK_SECONDS,
+    tick_id_from_epoch_seconds,
+    tick_id_from_utc,
+)
 
 
 def test_tick_identity_is_five_minute_floor_for_all_collector_offsets():
-    boundary = datetime(2026, 7, 30, 0, 0, tzinfo=timezone.utc)
+    boundary = datetime(2026, 7, 30, 0, 0, tzinfo=UTC)
     expected = int(boundary.timestamp()) // 300
 
     assert TICK_SECONDS == 300

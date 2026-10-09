@@ -41,11 +41,25 @@ def test_bounded_strategy_parser_uses_scalar_text_not_yaml_indentation(tmp_path)
 def test_trade_json_account_mapping_and_legacy_key(tmp_path):
     mod = load_module()
     source = tmp_path / "trade_history.json"
-    source.write_text(json.dumps([{
-        "date": "2026-07-09", "type": "매도", "name": "ETF",
-        "ticker": "490090.KS", "quantity": 1, "avg_price": 100,
-        "total": 100, "reason": "추천 기록 원문", "account": "퇴직연금",
-    }], ensure_ascii=False), encoding="utf-8")
+    source.write_text(
+        json.dumps(
+            [
+                {
+                    "date": "2026-07-09",
+                    "type": "매도",
+                    "name": "ETF",
+                    "ticker": "490090.KS",
+                    "quantity": 1,
+                    "avg_price": 100,
+                    "total": 100,
+                    "reason": "추천 기록 원문",
+                    "account": "퇴직연금",
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
     rows, source_sha = mod.parse_trade_reasons(source)
     assert rows[0].scope == "retirement"
     assert rows[0].payload == "추천 기록 원문"
@@ -56,11 +70,25 @@ def test_trade_json_account_mapping_and_legacy_key(tmp_path):
 def test_unknown_account_is_unresolved_not_personal(tmp_path):
     mod = load_module()
     source = tmp_path / "trade_history.json"
-    source.write_text(json.dumps([{
-        "date": "2026-07-09", "type": "매수", "name": "ETF",
-        "ticker": "490090.KS", "quantity": 1, "avg_price": 100,
-        "total": 100, "reason": "원문", "account": "다른계좌",
-    }], ensure_ascii=False), encoding="utf-8")
+    source.write_text(
+        json.dumps(
+            [
+                {
+                    "date": "2026-07-09",
+                    "type": "매수",
+                    "name": "ETF",
+                    "ticker": "490090.KS",
+                    "quantity": 1,
+                    "avg_price": 100,
+                    "total": 100,
+                    "reason": "원문",
+                    "account": "다른계좌",
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
     rows, _ = mod.parse_trade_reasons(source)
     assert rows[0].scope is None
 
@@ -68,10 +96,36 @@ def test_unknown_account_is_unresolved_not_personal(tmp_path):
 def test_live_verified_legacy_codes_map_to_current_toss_identity(tmp_path):
     mod = load_module()
     source = tmp_path / "trade_history.json"
-    source.write_text(json.dumps([
-        {"date": "2026-07-09", "type": "매수", "name": "KODEX 현대차로보틱스밸류체인Top2플러스", "ticker": "465110.KS", "quantity": 1, "avg_price": 100, "total": 100, "reason": "원문1", "account": "퇴직연금"},
-        {"date": "2026-07-09", "type": "매수", "name": "SOL 화장품TOP3플러스", "ticker": "479850.KS", "quantity": 1, "avg_price": 100, "total": 100, "reason": "원문2", "account": "퇴직연금"},
-    ], ensure_ascii=False), encoding="utf-8")
+    source.write_text(
+        json.dumps(
+            [
+                {
+                    "date": "2026-07-09",
+                    "type": "매수",
+                    "name": "KODEX 현대차로보틱스밸류체인Top2플러스",
+                    "ticker": "465110.KS",
+                    "quantity": 1,
+                    "avg_price": 100,
+                    "total": 100,
+                    "reason": "원문1",
+                    "account": "퇴직연금",
+                },
+                {
+                    "date": "2026-07-09",
+                    "type": "매수",
+                    "name": "SOL 화장품TOP3플러스",
+                    "ticker": "479850.KS",
+                    "quantity": 1,
+                    "avg_price": 100,
+                    "total": 100,
+                    "reason": "원문2",
+                    "account": "퇴직연금",
+                },
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
     rows, _ = mod.parse_trade_reasons(source)
     assert [(r.code, r.name) for r in rows] == [
         ("0204D0", "KODEX 현대차로보틱스밸류체인TOP3플러스"),
@@ -86,7 +140,9 @@ def test_live_verified_legacy_codes_map_to_current_toss_identity(tmp_path):
 def test_preview_is_sanitized_on_stdout_but_contains_private_payload(tmp_path, capsys):
     mod = load_module()
     preview = tmp_path / "preview.json"
-    mod.write_preview(preview, [{"path": "retirement/KR/490090.md", "payload": "비밀 원문"}])
+    mod.write_preview(
+        preview, [{"path": "retirement/KR/490090.md", "payload": "비밀 원문"}]
+    )
     assert "비밀 원문" in preview.read_text(encoding="utf-8")
     captured = capsys.readouterr().out
     assert "비밀 원문" not in captured

@@ -1,19 +1,18 @@
 """Private SQLite latest-state storage for typed current-price facts."""
 
-from collections.abc import Callable
-from contextlib import contextmanager
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
 import os
-from pathlib import Path
 import re
 import sqlite3
 import stat
 import threading
+from collections.abc import Callable
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
+from pathlib import Path
 
 from tokmo.values import TossCurrentPriceFact, canonical_decimal
-
 
 LATEST_QUOTE_SCHEMA_VERSION = 1
 MIN_SQLITE_VERSION = (3, 37, 0)
@@ -107,11 +106,7 @@ def _valid_price(value: object) -> bool:
         return False
     try:
         number = Decimal(value)
-        return (
-            number.is_finite()
-            and number >= 0
-            and canonical_decimal(number) == value
-        )
+        return number.is_finite() and number >= 0 and canonical_decimal(number) == value
     except (InvalidOperation, ValueError):
         return False
 
@@ -169,9 +164,7 @@ class LatestQuoteStore:
         self._clock = clock
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(
-            self._path, timeout=1.0, isolation_level=None
-        )
+        connection = sqlite3.connect(self._path, timeout=1.0, isolation_level=None)
         try:
             connection.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
             mode = connection.execute("PRAGMA journal_mode=DELETE").fetchone()
@@ -208,9 +201,7 @@ class LatestQuoteStore:
         )
 
     def _schema_metadata_valid(self, connection: sqlite3.Connection) -> bool:
-        tables = {
-            row[1]: row for row in connection.execute("PRAGMA table_list")
-        }
+        tables = {row[1]: row for row in connection.execute("PRAGMA table_list")}
         if (
             tables.get("latest_quotes", (None,) * 6)[5] != 1
             or tables.get("storage_metadata", (None,) * 6)[5] != 1
@@ -220,15 +211,13 @@ class LatestQuoteStore:
             return False
         if self._columns(connection, "storage_metadata") != _METADATA_COLUMNS:
             return False
-        if connection.execute(
-            "SELECT key, value FROM storage_metadata"
-        ).fetchall() != [("latest_quote_schema_version", "1")]:
+        if connection.execute("SELECT key, value FROM storage_metadata").fetchall() != [
+            ("latest_quote_schema_version", "1")
+        ]:
             return False
         return True
 
-    def _schema_constraints_valid(
-        self, connection: sqlite3.Connection
-    ) -> bool:
+    def _schema_constraints_valid(self, connection: sqlite3.Connection) -> bool:
         connection.execute("SAVEPOINT validate_latest_quote_schema")
         valid = True
         baseline = (
@@ -294,7 +283,7 @@ class LatestQuoteStore:
         try:
             stored_at = self._clock()
         except BaseException:
-            stored_at = datetime.min.replace(tzinfo=timezone.utc)
+            stored_at = datetime.min.replace(tzinfo=UTC)
             return _failure("invalid_batch", stored_at)
         if not _aware(stored_at) or not _valid_batch(facts):
             return _failure("invalid_batch", stored_at)
@@ -313,7 +302,10 @@ class LatestQuoteStore:
             try:
                 if not existed or was_empty:
                     self._initialize(connection)
-                    if hasattr(os, "getuid") and self._path.stat().st_uid == os.getuid():
+                    if (
+                        hasattr(os, "getuid")
+                        and self._path.stat().st_uid == os.getuid()
+                    ):
                         os.chmod(self._path, 0o600)
                 connection.execute("BEGIN IMMEDIATE")
                 try:
@@ -330,7 +322,8 @@ class LatestQuoteStore:
                     source = facts[0].source
                     placeholders = ",".join("?" for _ in facts)
                     existing = {
-                        row[0] for row in connection.execute(
+                        row[0]
+                        for row in connection.execute(
                             f"SELECT symbol FROM latest_quotes "
                             f"WHERE source=? AND symbol IN ({placeholders})",
                             (source, *(fact.symbol for fact in facts)),
@@ -342,7 +335,8 @@ class LatestQuoteStore:
                             fact.symbol,
                             fact.last_price,
                             fact.currency_raw,
-                            None if fact.timestamp is None
+                            None
+                            if fact.timestamp is None
                             else fact.timestamp.isoformat(),
                             fact.fetched_at.isoformat(),
                             stored_at.isoformat(),
@@ -463,8 +457,9 @@ class LatestQuoteStore:
             )
             raise LatestQuoteStoreReadError(reason) from None
 
-    def read_latest_with_stored_at(self, *, source: str,
-                                   symbols: tuple[str, ...]) -> tuple[dict, ...]:
+    def read_latest_with_stored_at(
+        self, *, source: str, symbols: tuple[str, ...]
+    ) -> tuple[dict, ...]:
         """Consumer view preserving provider, fetch, and storage instants."""
         facts = self.read_latest(source=source, symbols=symbols)
         try:
@@ -472,20 +467,25 @@ class LatestQuoteStore:
             with self._connect() as connection:
                 rows = connection.execute(
                     "SELECT symbol, stored_at FROM latest_quotes WHERE source=? "
-                    f"AND symbol IN ({placeholders})", (source, *symbols),
+                    f"AND symbol IN ({placeholders})",
+                    (source, *symbols),
                 ).fetchall()
             stored = {row[0]: row[1] for row in rows}
             if set(stored) != set(symbols):
                 raise LatestQuoteStoreReadError("missing_latest_quote")
-            return tuple({
-                "symbol": fact.symbol,
-                "last_price": fact.last_price,
-                "currency_raw": fact.currency_raw,
-                "provider_timestamp": (None if fact.timestamp is None
-                                       else fact.timestamp.isoformat()),
-                "fetched_at": fact.fetched_at.isoformat(),
-                "stored_at": stored[fact.symbol],
-            } for fact in facts)
+            return tuple(
+                {
+                    "symbol": fact.symbol,
+                    "last_price": fact.last_price,
+                    "currency_raw": fact.currency_raw,
+                    "provider_timestamp": (
+                        None if fact.timestamp is None else fact.timestamp.isoformat()
+                    ),
+                    "fetched_at": fact.fetched_at.isoformat(),
+                    "stored_at": stored[fact.symbol],
+                }
+                for fact in facts
+            )
         except LatestQuoteStoreReadError:
             raise
         except sqlite3.DatabaseError as error:

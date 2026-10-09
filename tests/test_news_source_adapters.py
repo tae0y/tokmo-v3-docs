@@ -1,10 +1,10 @@
 """Source-specific NEWS connector contracts added after the v0.2 expansion."""
 
-from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
-from email.message import Message
 import json
 import sqlite3
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, timedelta
+from email.message import Message
 from urllib.error import HTTPError
 
 from tokmo.facts.bbc_news_live import BbcBusinessConnector, BbcBusinessRequest
@@ -17,19 +17,27 @@ from tokmo.facts.finnhub_news_live import (
 )
 from tokmo.facts.google_news import parse_google_news_rss
 from tokmo.facts.google_news_live import GoogleNewsConnector, GoogleNewsQuery
-from tokmo.facts.jtbc_news_live import JtbcBreakingConnector, JtbcBreakingRequest
 from tokmo.facts.investing_news_live import (
-    InvestingAnalystConnector, InvestingAnalystRequest,
+    InvestingAnalystConnector,
+    InvestingAnalystRequest,
 )
+from tokmo.facts.jtbc_news_live import JtbcBreakingConnector, JtbcBreakingRequest
+from tokmo.facts.naver_news import build_naver_news_request
 from tokmo.facts.naver_news_live import NaverNewsConnector, NaverNewsCredentials
 from tokmo.facts.news_http import (
-    ClosedNewsGet, NewsHttpResponse, NewsHttpTransport, _NoRedirect,
+    ClosedNewsGet,
+    NewsHttpResponse,
+    NewsHttpTransport,
+    _NoRedirect,
 )
-from tokmo.facts.yonhap_news_live import YonhapFeed, YonhapNewsConnector, YonhapNewsRequest
-from tokmo.facts.naver_news import build_naver_news_request
+from tokmo.facts.yonhap_news_live import (
+    YonhapFeed,
+    YonhapNewsConnector,
+    YonhapNewsRequest,
+)
 from tokmo.values.news_connectors import NewsFetchStatus
 
-NOW = datetime(2026, 8, 2, 9, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 2, 9, 0, tzinfo=UTC)
 
 
 def test_google_rss_preserves_aggregator_and_publisher_provenance():
@@ -65,7 +73,10 @@ def test_google_rss_rejects_missing_publisher_but_drops_insecure_metadata_url():
     <source url="http://publisher.example">Publisher</source>
     </item></channel></rss>"""
 
-    assert parse_google_news_rss(missing, observed_at=NOW).status is NewsFetchStatus.CONTRACT_MISMATCH
+    assert (
+        parse_google_news_rss(missing, observed_at=NOW).status
+        is NewsFetchStatus.CONTRACT_MISMATCH
+    )
     result = parse_google_news_rss(insecure, observed_at=NOW)
     assert result.status is NewsFetchStatus.COLLECTED
     assert result.items[0].publisher_name == "Publisher"
@@ -73,12 +84,17 @@ def test_google_rss_rejects_missing_publisher_but_drops_insecure_metadata_url():
 
 
 def test_google_rss_rejects_dtd_and_entity_declarations():
-    body = b'<!DOCTYPE rss [<!ENTITY x "EXPANDED">]><rss><channel><item>' \
-           b'<guid>g</guid><title>&x;</title><link>https://news.google.com/rss/articles/x</link>' \
-           b'<pubDate>Sun, 02 Aug 2026 08:30:00 GMT</pubDate>' \
-           b'<source url="https://publisher.example">Publisher</source>' \
-           b'</item></channel></rss>'
-    assert parse_google_news_rss(body, observed_at=NOW).status is NewsFetchStatus.CONTRACT_MISMATCH
+    body = (
+        b'<!DOCTYPE rss [<!ENTITY x "EXPANDED">]><rss><channel><item>'
+        b"<guid>g</guid><title>&x;</title><link>https://news.google.com/rss/articles/x</link>"
+        b"<pubDate>Sun, 02 Aug 2026 08:30:00 GMT</pubDate>"
+        b'<source url="https://publisher.example">Publisher</source>'
+        b"</item></channel></rss>"
+    )
+    assert (
+        parse_google_news_rss(body, observed_at=NOW).status
+        is NewsFetchStatus.CONTRACT_MISMATCH
+    )
 
 
 @dataclass
@@ -100,7 +116,8 @@ def test_investing_live_adapter_owns_fixed_kr_rss_path():
     http = FakeHttp(NewsHttpResponse(NewsFetchStatus.COLLECTED, 200, body))
 
     result = InvestingAnalystConnector(http).fetch(
-        InvestingAnalystRequest(), observed_at=NOW)
+        InvestingAnalystRequest(), observed_at=NOW
+    )
 
     assert result.status is NewsFetchStatus.COLLECTED
     assert http.requests[0].host == "kr.investing.com"
@@ -127,19 +144,32 @@ def test_bbc_connector_accepts_current_feed_size_above_30_items():
 
 def test_bbc_connector_deduplicates_section_repeats_and_title_only_variants():
     def item(guid, title="same", description="same description"):
-        return (f"<item><guid>{guid}</guid><title>{title}</title>"
-                f"<link>https://www.bbc.co.uk/news/articles/x?at_medium=RSS</link>"
-                f"<description>{description}</description>"
-                f"<pubDate>Sun, 02 Aug 2026 08:30:00 GMT</pubDate></item>").encode()
-    duplicate = b"<rss><channel>" + item("https://www.bbc.co.uk/news/articles/x#0") \
-        + item("https://www.bbc.co.uk/news/articles/x#3") + b"</channel></rss>"
-    title_variant = b"<rss><channel>" + item("g0", "short title") \
-        + item("g1", "expanded title") + b"</channel></rss>"
+        return (
+            f"<item><guid>{guid}</guid><title>{title}</title>"
+            f"<link>https://www.bbc.co.uk/news/articles/x?at_medium=RSS</link>"
+            f"<description>{description}</description>"
+            f"<pubDate>Sun, 02 Aug 2026 08:30:00 GMT</pubDate></item>"
+        ).encode()
 
-    exact = BbcBusinessConnector(FakeHttp(NewsHttpResponse(
-        NewsFetchStatus.COLLECTED, 200, duplicate))).fetch(BbcBusinessRequest(), observed_at=NOW)
-    variant = BbcBusinessConnector(FakeHttp(NewsHttpResponse(
-        NewsFetchStatus.COLLECTED, 200, title_variant))).fetch(BbcBusinessRequest(), observed_at=NOW)
+    duplicate = (
+        b"<rss><channel>"
+        + item("https://www.bbc.co.uk/news/articles/x#0")
+        + item("https://www.bbc.co.uk/news/articles/x#3")
+        + b"</channel></rss>"
+    )
+    title_variant = (
+        b"<rss><channel>"
+        + item("g0", "short title")
+        + item("g1", "expanded title")
+        + b"</channel></rss>"
+    )
+
+    exact = BbcBusinessConnector(
+        FakeHttp(NewsHttpResponse(NewsFetchStatus.COLLECTED, 200, duplicate))
+    ).fetch(BbcBusinessRequest(), observed_at=NOW)
+    variant = BbcBusinessConnector(
+        FakeHttp(NewsHttpResponse(NewsFetchStatus.COLLECTED, 200, title_variant))
+    ).fetch(BbcBusinessRequest(), observed_at=NOW)
 
     assert exact.status is NewsFetchStatus.COLLECTED
     assert len(exact.items) == 1
@@ -150,15 +180,23 @@ def test_bbc_connector_deduplicates_section_repeats_and_title_only_variants():
 
 def test_bbc_connector_rejects_non_title_drift_for_same_canonical_url():
     def item(guid, description):
-        return (f"<item><guid>{guid}</guid><title>same</title>"
-                f"<link>https://www.bbc.co.uk/news/articles/x?at_medium=RSS</link>"
-                f"<description>{description}</description>"
-                f"<pubDate>Sun, 02 Aug 2026 08:30:00 GMT</pubDate></item>").encode()
-    drift = b"<rss><channel>" + item("g0", "first description") \
-        + item("g1", "changed description") + b"</channel></rss>"
+        return (
+            f"<item><guid>{guid}</guid><title>same</title>"
+            f"<link>https://www.bbc.co.uk/news/articles/x?at_medium=RSS</link>"
+            f"<description>{description}</description>"
+            f"<pubDate>Sun, 02 Aug 2026 08:30:00 GMT</pubDate></item>"
+        ).encode()
 
-    rejected = BbcBusinessConnector(FakeHttp(NewsHttpResponse(
-        NewsFetchStatus.COLLECTED, 200, drift))).fetch(BbcBusinessRequest(), observed_at=NOW)
+    drift = (
+        b"<rss><channel>"
+        + item("g0", "first description")
+        + item("g1", "changed description")
+        + b"</channel></rss>"
+    )
+
+    rejected = BbcBusinessConnector(
+        FakeHttp(NewsHttpResponse(NewsFetchStatus.COLLECTED, 200, drift))
+    ).fetch(BbcBusinessRequest(), observed_at=NOW)
 
     assert rejected.status is NewsFetchStatus.CONTRACT_MISMATCH
 
@@ -183,21 +221,37 @@ def test_closed_news_get_hides_query_and_headers_and_transport_rejects_unknown_h
 
 def test_news_http_redirect_handler_never_builds_a_followup_request():
     handler = _NoRedirect()
-    assert handler.redirect_request(
-        object(), None, 302, "Found", {}, "https://evil.example/stolen",
-    ) is None
+    assert (
+        handler.redirect_request(
+            object(),
+            None,
+            302,
+            "Found",
+            {},
+            "https://evil.example/stolen",
+        )
+        is None
+    )
 
 
 class _Response:
     def __init__(self, body=b"ok", status=200, headers=None):
         self.body, self.status, self.headers = body, status, headers or {}
-    def __enter__(self): return self
-    def __exit__(self, *args): return False
-    def read(self, limit): return self.body[:limit]
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def read(self, limit):
+        return self.body[:limit]
 
 
 class _Opener:
-    def __init__(self, result): self.result, self.calls = result, 0
+    def __init__(self, result):
+        self.result, self.calls = result, 0
+
     def open(self, request, timeout):
         self.calls += 1
         if isinstance(self.result, BaseException):
@@ -208,38 +262,62 @@ class _Opener:
 def test_news_http_wire_maps_redirect_caps_encoding_auth_and_crlf_without_retry():
     request = ClosedNewsGet("allowed.example", "/feed")
     cases = (
-        (HTTPError("https://allowed.example/feed", 302, "Found", Message(), None),
-         NewsFetchStatus.TRANSPORT_FAILURE),
+        (
+            HTTPError("https://allowed.example/feed", 302, "Found", Message(), None),
+            NewsFetchStatus.TRANSPORT_FAILURE,
+        ),
         (_Response(b"x" * 1_048_577), NewsFetchStatus.CONTRACT_MISMATCH),
-        (_Response(headers={"Content-Length": "1048577"}),
-         NewsFetchStatus.CONTRACT_MISMATCH),
-        (_Response(headers={"Content-Length": "not-a-number"}),
-         NewsFetchStatus.CONTRACT_MISMATCH),
-        (_Response(headers={"Content-Encoding": "gzip"}),
-         NewsFetchStatus.CONTRACT_MISMATCH),
-        (HTTPError("https://allowed.example/feed", 429, "Rate", Message(), None),
-         NewsFetchStatus.RATE_LIMITED),
-        (HTTPError("https://allowed.example/feed", 401, "Auth", Message(), None),
-         NewsFetchStatus.CONFIG_UNAVAILABLE),
-        (HTTPError("https://allowed.example/feed", 403, "Auth", Message(), None),
-         NewsFetchStatus.CONFIG_UNAVAILABLE),
+        (
+            _Response(headers={"Content-Length": "1048577"}),
+            NewsFetchStatus.CONTRACT_MISMATCH,
+        ),
+        (
+            _Response(headers={"Content-Length": "not-a-number"}),
+            NewsFetchStatus.CONTRACT_MISMATCH,
+        ),
+        (
+            _Response(headers={"Content-Encoding": "gzip"}),
+            NewsFetchStatus.CONTRACT_MISMATCH,
+        ),
+        (
+            HTTPError("https://allowed.example/feed", 429, "Rate", Message(), None),
+            NewsFetchStatus.RATE_LIMITED,
+        ),
+        (
+            HTTPError("https://allowed.example/feed", 401, "Auth", Message(), None),
+            NewsFetchStatus.CONFIG_UNAVAILABLE,
+        ),
+        (
+            HTTPError("https://allowed.example/feed", 403, "Auth", Message(), None),
+            NewsFetchStatus.CONFIG_UNAVAILABLE,
+        ),
     )
     for wire_result, expected in cases:
         opener = _Opener(wire_result)
         transport = NewsHttpTransport(
-            allowed_hosts=frozenset({"allowed.example"}), opener=opener)
+            allowed_hosts=frozenset({"allowed.example"}), opener=opener
+        )
         assert transport.get(request).status is expected
         assert opener.calls == 1
     happy = _Opener(_Response(b"ok", headers={"Content-Length": "2"}))
-    assert NewsHttpTransport(
-        allowed_hosts=frozenset({"allowed.example"}), opener=happy,
-    ).get(request).status is NewsFetchStatus.COLLECTED
+    assert (
+        NewsHttpTransport(
+            allowed_hosts=frozenset({"allowed.example"}),
+            opener=happy,
+        )
+        .get(request)
+        .status
+        is NewsFetchStatus.COLLECTED
+    )
     assert happy.calls == 1
     opener = _Opener(_Response())
     transport = NewsHttpTransport(
-        allowed_hosts=frozenset({"allowed.example"}), opener=opener)
-    assert transport.get(ClosedNewsGet("allowed.example", "/x\r\nInjected: yes")).status \
+        allowed_hosts=frozenset({"allowed.example"}), opener=opener
+    )
+    assert (
+        transport.get(ClosedNewsGet("allowed.example", "/x\r\nInjected: yes")).status
         is NewsFetchStatus.CONTRACT_MISMATCH
+    )
     assert opener.calls == 0
 
 
@@ -258,7 +336,12 @@ def test_google_connector_owns_keyword_query_and_uses_google_parser():
     request = http.requests[0]
     assert request.host == "news.google.com"
     assert request.path == "/rss/search"
-    assert request.query == (("q", "SK하이닉스"), ("hl", "ko"), ("gl", "KR"), ("ceid", "KR:ko"))
+    assert request.query == (
+        ("q", "SK하이닉스"),
+        ("hl", "ko"),
+        ("gl", "KR"),
+        ("ceid", "KR:ko"),
+    )
 
 
 def test_yonhap_and_jtbc_are_separate_fixed_feed_connectors():
@@ -288,46 +371,68 @@ def test_bbc_naver_and_finnhub_connectors_own_distinct_request_contracts():
     <link>https://www.bbc.com/news/articles/x</link>
     <pubDate>Sun, 02 Aug 2026 08:30:00 GMT</pubDate></item></channel></rss>"""
     bbc_http = FakeHttp(NewsHttpResponse(NewsFetchStatus.COLLECTED, 200, rss))
-    assert BbcBusinessConnector(bbc_http).fetch(
-        BbcBusinessRequest(), observed_at=NOW
-    ).status is NewsFetchStatus.COLLECTED
+    assert (
+        BbcBusinessConnector(bbc_http)
+        .fetch(BbcBusinessRequest(), observed_at=NOW)
+        .status
+        is NewsFetchStatus.COLLECTED
+    )
     assert bbc_http.requests[0].host == "feeds.bbci.co.uk"
 
     naver_body = b'{"items":[]}'
     naver_http = FakeHttp(NewsHttpResponse(NewsFetchStatus.COLLECTED, 200, naver_body))
     naver_credentials = NaverNewsCredentials("client-id-123", "client-secret-123")
     naver = NaverNewsConnector(naver_http, naver_credentials)
-    assert naver.fetch(
-        build_naver_news_request("SK하이닉스"), observed_at=NOW
-    ).status is NewsFetchStatus.EMPTY
+    assert (
+        naver.fetch(build_naver_news_request("SK하이닉스"), observed_at=NOW).status
+        is NewsFetchStatus.EMPTY
+    )
     assert naver_http.requests[0].host == "openapi.naver.com"
     assert {key for key, _ in naver_http.requests[0].headers} == {
-        "Accept", "X-Naver-Client-Id", "X-Naver-Client-Secret"
+        "Accept",
+        "X-Naver-Client-Id",
+        "X-Naver-Client-Secret",
     }
     assert "client-secret-123" not in repr(naver_credentials)
 
     finnhub_body = b"[]"
-    finnhub_http = FakeHttp(NewsHttpResponse(NewsFetchStatus.COLLECTED, 200, finnhub_body))
+    finnhub_http = FakeHttp(
+        NewsHttpResponse(NewsFetchStatus.COLLECTED, 200, finnhub_body)
+    )
     finnhub_credentials = FinnhubNewsCredentials("finnhub-key-123")
     company = FinnhubCompanyNewsConnector(finnhub_http, finnhub_credentials)
     request = FinnhubCompanyNewsRequest("AAPL", date(2026, 8, 1), date(2026, 8, 2))
     assert company.fetch(request, observed_at=NOW).status is NewsFetchStatus.EMPTY
     assert finnhub_http.requests[0].path == "/api/v1/company-news"
     assert {key for key, _ in finnhub_http.requests[0].query} == {
-        "symbol", "from", "to", "token"
+        "symbol",
+        "from",
+        "to",
+        "token",
     }
-    market_http = FakeHttp(NewsHttpResponse(NewsFetchStatus.COLLECTED, 200, finnhub_body))
+    market_http = FakeHttp(
+        NewsHttpResponse(NewsFetchStatus.COLLECTED, 200, finnhub_body)
+    )
     market = FinnhubMarketNewsConnector(market_http, finnhub_credentials)
-    assert market.fetch(FinnhubMarketNewsRequest(), observed_at=NOW).status is NewsFetchStatus.EMPTY
+    assert (
+        market.fetch(FinnhubMarketNewsRequest(), observed_at=NOW).status
+        is NewsFetchStatus.EMPTY
+    )
     assert market_http.requests[0].path == "/api/v1/news"
     assert "finnhub-key-123" not in repr(finnhub_credentials)
 
 
 def _finnhub_row(source):
     return {
-        "category": "company", "datetime": 1754121600, "headline": "Chip ramp",
-        "id": 7001, "image": "", "related": "NVDA", "source": source,
-        "summary": "capacity up", "url": "https://finnhub.example/story-7001",
+        "category": "company",
+        "datetime": 1754121600,
+        "headline": "Chip ramp",
+        "id": 7001,
+        "image": "",
+        "related": "NVDA",
+        "source": source,
+        "summary": "capacity up",
+        "url": "https://finnhub.example/story-7001",
     }
 
 
@@ -336,13 +441,15 @@ def test_finnhub_parser_maps_raw_source_to_publisher_name():
     from tokmo.facts.finnhub_news import parse_finnhub_news
 
     named = parse_finnhub_news(
-        json.dumps([_finnhub_row("MarketWatch")]).encode(), observed_at=NOW)
+        json.dumps([_finnhub_row("MarketWatch")]).encode(), observed_at=NOW
+    )
     assert named.status is NewsFetchStatus.COLLECTED
     assert named.items[0].publisher_name == "MarketWatch"
     assert named.items[0].publisher_site_url is None
 
     unnamed = parse_finnhub_news(
-        json.dumps([_finnhub_row("")]).encode(), observed_at=NOW)
+        json.dumps([_finnhub_row("")]).encode(), observed_at=NOW
+    )
     assert unnamed.status is NewsFetchStatus.COLLECTED
     assert unnamed.items[0].publisher_name is None
 
@@ -355,28 +462,36 @@ def test_finnhub_refetch_revises_null_publisher_name_with_evidence(tmp_path):
     from tokmo.programs.news_intake import persist_news_result
     from tokmo.values.external_news import SaveOutcome
     from tokmo.values.news_connectors import (
-        FINNHUB_COMPANY_NEWS, NewsConnectorItem, NewsFetchResult,
+        FINNHUB_COMPANY_NEWS,
+        NewsConnectorItem,
+        NewsFetchResult,
     )
 
     path = tmp_path / "private" / "external.sqlite3"
     bootstrap_external_news(path, now=NOW)
     historical = NewsConnectorItem(
         canonical_url="https://finnhub.example/story-7001",
-        title="Chip ramp", observed_at=NOW, source_article_id="7001",
+        title="Chip ramp",
+        observed_at=NOW,
+        source_article_id="7001",
         summary_text="capacity up",
-        published_at=datetime(2025, 8, 2, 8, 0, tzinfo=timezone.utc),
+        published_at=datetime(2025, 8, 2, 8, 0, tzinfo=UTC),
     )
     first = persist_news_result(
-        path, FINNHUB_COMPANY_NEWS,
+        path,
+        FINNHUB_COMPANY_NEWS,
         NewsFetchResult(NewsFetchStatus.COLLECTED, (historical,)),
-        target_ref="symbol:NVDA")[0]
+        target_ref="symbol:NVDA",
+    )[0]
     assert first.outcome is SaveOutcome.INSERTED
 
     refetched = parse_finnhub_news(
         json.dumps([_finnhub_row("MarketWatch")]).encode(),
-        observed_at=NOW + timedelta(minutes=15))
+        observed_at=NOW + timedelta(minutes=15),
+    )
     revised = persist_news_result(
-        path, FINNHUB_COMPANY_NEWS, refetched, target_ref="symbol:NVDA")[0]
+        path, FINNHUB_COMPANY_NEWS, refetched, target_ref="symbol:NVDA"
+    )[0]
 
     assert revised.outcome is SaveOutcome.DUPLICATE
     assert revised.news_document_id == first.news_document_id

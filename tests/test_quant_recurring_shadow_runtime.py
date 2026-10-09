@@ -1,18 +1,17 @@
 """Same-tick fresh assembly, bounded candles, and degraded Quant settlement."""
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
-
 from test_quant_recurring_membership_runtime import (
     NOW,
     SYMBOLS,
-    _Executor,
-    _SettlementExecutor,
     _context,
     _deps,
+    _Executor,
+    _SettlementExecutor,
 )
 
 
@@ -28,14 +27,16 @@ def _write_holdings(root, captured_at):
     scope = "toss-acct-" + "9" * 24
     state = CurrentHoldingsV1(
         1,
-        (AccountHoldingsV1(
-            scope,
-            1,
-            tuple(
-                HoldingItemV1(symbol, "1", "100", "USD", "US", None)
-                for symbol in SYMBOLS
+        (
+            AccountHoldingsV1(
+                scope,
+                1,
+                tuple(
+                    HoldingItemV1(symbol, "1", "100", "USD", "US", None)
+                    for symbol in SYMBOLS
+                ),
             ),
-        ),),
+        ),
         True,
         captured_at,
         {scope: AccountScopeIdentityV1(scope, "personal", 1, None)},
@@ -54,10 +55,8 @@ def _material(symbol, year=2025, period_end=date(2025, 12, 31)):
         StatementScope,
     )
 
-    metric = MetricEvidence(Decimal("100"), "x", "USD", MetricSelection.EXACT)
-    shares = MetricEvidence(
-        Decimal("10"), "shares", "shares", MetricSelection.EXACT
-    )
+    metric = MetricEvidence(Decimal(100), "x", "USD", MetricSelection.EXACT)
+    shares = MetricEvidence(Decimal(10), "shares", "shares", MetricSelection.EXACT)
     return OfficialFundamentalMaterialV1(
         "sec",
         symbol,
@@ -70,7 +69,7 @@ def _material(symbol, year=2025, period_end=date(2025, 12, 31)):
         period_end,
         f"f-{symbol}-{year}",
         "2026-01-01",
-        datetime(2026, 1, 2, tzinfo=timezone.utc),
+        datetime(2026, 1, 2, tzinfo=UTC),
         None,
         "us-gaap",
         "2025",
@@ -83,7 +82,7 @@ def _material(symbol, year=2025, period_end=date(2025, 12, 31)):
         shares,
         "a",
         "b",
-        datetime(2026, 1, 1, tzinfo=timezone.utc),
+        datetime(2026, 1, 1, tzinfo=UTC),
         NOW + timedelta(minutes=1),
     )
 
@@ -95,10 +94,17 @@ def _candle_rows(*, count, end_date):
     cursor = end_date
     while len(rows) < count:
         if cursor.weekday() < 5:
-            rows.append(Candle(
-                datetime.combine(cursor, datetime.min.time(), timezone.utc),
-                "10", "11", "9", "10", "1000", "USD",
-            ))
+            rows.append(
+                Candle(
+                    datetime.combine(cursor, datetime.min.time(), UTC),
+                    "10",
+                    "11",
+                    "9",
+                    "10",
+                    "1000",
+                    "USD",
+                )
+            )
         cursor -= timedelta(days=1)
     return tuple(rows)
 
@@ -147,9 +153,7 @@ def _shadow_deps(*, page1_count=199):
             rows = _candle_rows(count=page1_count, end_date=date(2026, 8, 13))
         else:
             rows = _candle_rows(count=50, end_date=before.date())
-        return SimpleNamespace(
-            code="success", value=SimpleNamespace(candles=rows)
-        )
+        return SimpleNamespace(code="success", value=SimpleNamespace(candles=rows))
 
     return SimpleNamespace(
         clock=lambda: NOW + timedelta(minutes=1),
@@ -158,7 +162,9 @@ def _shadow_deps(*, page1_count=199):
     )
 
 
-def test_missing_fundamental_store_is_truthful_no_pack_with_zero_candle_starts(tmp_path):
+def test_missing_fundamental_store_is_truthful_no_pack_with_zero_candle_starts(
+    tmp_path,
+):
     from tokmo.programs.quant_recurring_shadow import run_quant_recurring_shadow
     from tokmo.values.cadence_policy import CADENCE_QUANT_SHADOW_POLICY_V1
     from tokmo.values.quant_recurring import QuantTerminalStateV1
@@ -213,7 +219,8 @@ def test_absent_fresh_holdings_settles_no_pack_without_token_or_candles(tmp_path
 
 
 def test_fresh_four_member_success_uses_four_page1_starts_and_produces_no_ranks(
-    monkeypatch, tmp_path,
+    monkeypatch,
+    tmp_path,
 ):
     import tokmo.programs.quant_recurring_shadow as module
     from tokmo.programs.quant_multifactor_core import MIN_COHORT
@@ -284,7 +291,8 @@ def test_fresh_four_member_success_uses_four_page1_starts_and_produces_no_ranks(
 
 
 def test_full_page1_requests_exactly_one_page2_per_symbol_and_reuses_token(
-    monkeypatch, tmp_path,
+    monkeypatch,
+    tmp_path,
 ):
     import tokmo.programs.quant_recurring_shadow as module
     from tokmo.values.cadence_policy import CADENCE_QUANT_SHADOW_POLICY_V1
@@ -313,7 +321,14 @@ def test_full_page1_requests_exactly_one_page2_per_symbol_and_reuses_token(
     assert status == "ok"
     assert len(executor.starts) == 8
     assert [identity.rsplit(":", 1)[1] for _, identity in executor.starts] == [
-        "1", "2", "1", "2", "1", "2", "1", "2",
+        "1",
+        "2",
+        "1",
+        "2",
+        "1",
+        "2",
+        "1",
+        "2",
     ]
     assert token.calls == 1
 
@@ -347,9 +362,7 @@ def test_candle_error_response_settles_wire_failed(monkeypatch, tmp_path):
     )
 
     assert (status, reason) == ("skipped", "candle_unavailable")
-    assert executor.settlements == [
-        ("candles:qt:US:AAA:2026-08-13:1", "FAILED")
-    ]
+    assert executor.settlements == [("candles:qt:US:AAA:2026-08-13:1", "FAILED")]
 
 
 def test_third_symbol_page1_failure_counts_all_started_pages(monkeypatch, tmp_path):
@@ -392,7 +405,9 @@ def test_third_symbol_page1_failure_counts_all_started_pages(monkeypatch, tmp_pa
     assert result.candle_page1_starts == 3
     assert result.candle_page2_starts == 0
     assert [settlement for _, settlement in executor.settlements] == [
-        "SUCCEEDED", "SUCCEEDED", "FAILED",
+        "SUCCEEDED",
+        "SUCCEEDED",
+        "FAILED",
     ]
 
 
@@ -418,7 +433,8 @@ def test_ninth_quant_candle_is_refused_before_executor_callback(tmp_path):
 
 
 def test_holdings_captured_before_membership_or_token_failure_spends_zero_candles(
-    monkeypatch, tmp_path,
+    monkeypatch,
+    tmp_path,
 ):
     import tokmo.programs.quant_recurring_shadow as module
     from tokmo.values.cadence_policy import CADENCE_QUANT_SHADOW_POLICY_V1
@@ -463,7 +479,9 @@ def test_holdings_captured_before_membership_or_token_failure_spends_zero_candle
 
 
 def test_whole_tick_membership_candles_and_receipt_share_exactly_one_date(
-    monkeypatch, capsys, tmp_path,
+    monkeypatch,
+    capsys,
+    tmp_path,
 ):
     import tokmo.programs.quant_recurring_shadow as module
     from tokmo.records.quant_recurring_receipts import QuantRecurringReceiptStore
@@ -477,9 +495,7 @@ def test_whole_tick_membership_candles_and_receipt_share_exactly_one_date(
         ),
     )
     context = _context()
-    receipts = QuantRecurringReceiptStore(
-        tmp_path / "ops" / "quant_recurring.sqlite3"
-    )
+    receipts = QuantRecurringReceiptStore(tmp_path / "ops" / "quant_recurring.sqlite3")
     executor = _Executor()
     membership = module.run_quant_membership_acquisition(
         root=tmp_path,

@@ -1,16 +1,17 @@
-from datetime import datetime, timezone
 import fcntl
 import os
+from datetime import UTC, datetime
+
 import pytest
+from test_analysis_pipeline import glm_ok, sol_ok
+from test_candidate_builder import _barrier
 
 from tokmo.programs.analysis_pipeline import run_analysis_pipeline
 from tokmo.records.ops_kernel import OpsKernelStore
 from tokmo.values.analysis_contracts import AnalysisRunState
-from test_analysis_pipeline import glm_ok, sol_ok
-from test_candidate_builder import _barrier
 from tokmo.values.portfolio_scope import resolve_account_scope_pattern
 
-NOW = datetime(2026, 7, 30, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 30, tzinfo=UTC)
 
 
 def test_sixty_tick_local_cadence_is_bounded_and_deterministic(tmp_path):
@@ -19,9 +20,15 @@ def test_sixty_tick_local_cadence_is_bounded_and_deterministic(tmp_path):
     for tick_id in range(10, 70):
         barrier = _barrier(tick=tick_id)
         outcome = run_analysis_pipeline(
-            tick=barrier, barrier=barrier, store=store, run_lock_path=lock,
+            tick=barrier,
+            barrier=barrier,
+            store=store,
+            run_lock_path=lock,
             invocation_id_factory=lambda tick_id=tick_id: f"{tick_id:032x}",
-            glm_call=glm_ok, sol_call=sol_ok, now=NOW, clock=lambda: NOW,
+            glm_call=glm_ok,
+            sol_call=sol_ok,
+            now=NOW,
+            clock=lambda: NOW,
             resolve_scope=resolve_account_scope_pattern,
         )
         assert outcome.state is AnalysisRunState.COMPLETED
@@ -38,9 +45,15 @@ def test_public_pipeline_lock_contention_has_zero_store_writes(tmp_path):
         fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         barrier = _barrier()
         outcome = run_analysis_pipeline(
-            tick=barrier, barrier=barrier, store=store, run_lock_path=lock,
+            tick=barrier,
+            barrier=barrier,
+            store=store,
+            run_lock_path=lock,
             invocation_id_factory=lambda: "a" * 32,
-            glm_call=glm_ok, sol_call=sol_ok, now=NOW, clock=lambda: NOW,
+            glm_call=glm_ok,
+            sol_call=sol_ok,
+            now=NOW,
+            clock=lambda: NOW,
         )
         assert outcome.state is AnalysisRunState.LOCK_CONTENDED
         assert store.read_manifest_summary(10) is None
@@ -86,7 +99,13 @@ def _install_crash(store, method_name, *, after=False, injected=None):
     ),
 )
 def test_te12_public_crash_reopen_matrix_rows(
-    tmp_path, monkeypatch, row_id, method_name, after, injected, model_exit,
+    tmp_path,
+    monkeypatch,
+    row_id,
+    method_name,
+    after,
+    injected,
+    model_exit,
 ):
     store = OpsKernelStore(tmp_path / "ops" / "kernel.sqlite3")
     barrier = _barrier()
@@ -94,6 +113,7 @@ def test_te12_public_crash_reopen_matrix_rows(
 
     if row_id == "4":
         import tokmo.programs.analysis_pipeline as module
+
         original_build = module.build_candidates
         fired = {"value": False}
 
@@ -106,7 +126,10 @@ def test_te12_public_crash_reopen_matrix_rows(
         monkeypatch.setattr(module, "build_candidates", crash_build)
     elif method_name is not None:
         _install_crash(
-            store, method_name, after=after, injected=injected,
+            store,
+            method_name,
+            after=after,
+            injected=injected,
         )
 
     def glm(body):
@@ -115,6 +138,7 @@ def test_te12_public_crash_reopen_matrix_rows(
             raise RuntimeError("matrix crash")
         if model_exit == "timeout":
             from tokmo.values.analysis_contracts import ProviderExit
+
             return ProviderExit.TIMEOUT, None
         return glm_ok(body)
 
@@ -124,27 +148,41 @@ def test_te12_public_crash_reopen_matrix_rows(
 
     invocation = (
         (lambda: (_ for _ in ()).throw(RuntimeError("matrix crash")))
-        if row_id == "1" else (lambda: "a" * 32)
+        if row_id == "1"
+        else (lambda: "a" * 32)
     )
     with pytest.raises(RuntimeError, match="matrix crash|injected"):
         run_analysis_pipeline(
-            tick=barrier, barrier=barrier, store=store,
+            tick=barrier,
+            barrier=barrier,
+            store=store,
             run_lock_path=tmp_path / "run" / "analysis.lock",
-            invocation_id_factory=invocation, glm_call=glm, sol_call=sol,
-            now=NOW, clock=lambda: NOW,
+            invocation_id_factory=invocation,
+            glm_call=glm,
+            sol_call=sol,
+            now=NOW,
+            clock=lambda: NOW,
         )
 
     reopened = OpsKernelStore(tmp_path / "ops" / "kernel.sqlite3")
     outcome = run_analysis_pipeline(
-        tick=barrier, barrier=barrier, store=reopened,
+        tick=barrier,
+        barrier=barrier,
+        store=reopened,
         run_lock_path=tmp_path / "run" / "analysis.lock",
         invocation_id_factory=lambda: "b" * 32,
         glm_call=(
-            (lambda _body: (_ for _ in ()).throw(
-                AssertionError("durable model ownership forbids recall")
-            )) if row_id in {"9", "10", "11", "12", "13"} else glm_ok
+            (
+                lambda _body: (_ for _ in ()).throw(
+                    AssertionError("durable model ownership forbids recall")
+                )
+            )
+            if row_id in {"9", "10", "11", "12", "13"}
+            else glm_ok
         ),
-        sol_call=sol_ok, now=NOW, clock=lambda: NOW,
+        sol_call=sol_ok,
+        now=NOW,
+        clock=lambda: NOW,
     )
     assert outcome.state is AnalysisRunState.COMPLETED
     candidates = reopened.read_manifest_candidates(10)
@@ -156,29 +194,39 @@ def test_te12_public_crash_reopen_matrix_rows(
 
 @pytest.mark.parametrize("row_id", ("2u", "3"))
 def test_te12_public_crash_reopen_matrix_past_candidate_rows(
-    tmp_path, row_id,
+    tmp_path,
+    row_id,
 ):
     store = OpsKernelStore(tmp_path / "ops" / "kernel.sqlite3")
     first = _barrier(tick=10)
     if row_id == "2u":
         with pytest.raises(RuntimeError, match="owner crash"):
             run_analysis_pipeline(
-                tick=first, barrier=first, store=store,
+                tick=first,
+                barrier=first,
+                store=store,
                 run_lock_path=tmp_path / "run" / "analysis.lock",
                 invocation_id_factory=lambda: "a" * 32,
                 glm_call=lambda _body: (_ for _ in ()).throw(
                     RuntimeError("owner crash")
                 ),
-                sol_call=sol_ok, now=NOW, clock=lambda: NOW,
+                sol_call=sol_ok,
+                now=NOW,
+                clock=lambda: NOW,
             )
     else:
         _install_crash(store, "plan_analysis_batches")
         with pytest.raises(RuntimeError, match="matrix crash"):
             run_analysis_pipeline(
-                tick=first, barrier=first, store=store,
+                tick=first,
+                barrier=first,
+                store=store,
                 run_lock_path=tmp_path / "run" / "analysis.lock",
                 invocation_id_factory=lambda: "a" * 32,
-                glm_call=glm_ok, sol_call=sol_ok, now=NOW, clock=lambda: NOW,
+                glm_call=glm_ok,
+                sol_call=sol_ok,
+                now=NOW,
+                clock=lambda: NOW,
             )
 
     reopened = OpsKernelStore(tmp_path / "ops" / "kernel.sqlite3")
@@ -186,26 +234,33 @@ def test_te12_public_crash_reopen_matrix_past_candidate_rows(
     second = _barrier(tick=11)
     with pytest.raises(RuntimeError, match="matrix crash"):
         run_analysis_pipeline(
-            tick=second, barrier=second, store=reopened,
+            tick=second,
+            barrier=second,
+            store=reopened,
             run_lock_path=tmp_path / "run" / "analysis.lock",
             invocation_id_factory=lambda: "b" * 32,
             glm_call=lambda _body: (_ for _ in ()).throw(
                 AssertionError("past candidate must settle before model work")
             ),
-            sol_call=sol_ok, now=NOW, clock=lambda: NOW,
+            sol_call=sol_ok,
+            now=NOW,
+            clock=lambda: NOW,
         )
 
     final_store = OpsKernelStore(tmp_path / "ops" / "kernel.sqlite3")
     outcome = run_analysis_pipeline(
-        tick=second, barrier=second, store=final_store,
+        tick=second,
+        barrier=second,
+        store=final_store,
         run_lock_path=tmp_path / "run" / "analysis.lock",
         invocation_id_factory=lambda: "c" * 32,
-        glm_call=glm_ok, sol_call=sol_ok, now=NOW, clock=lambda: NOW,
+        glm_call=glm_ok,
+        sol_call=sol_ok,
+        now=NOW,
+        clock=lambda: NOW,
     )
     assert outcome.state is AnalysisRunState.COMPLETED
     old = final_store.read_manifest_candidates(10)
     assert old and all(row.state.value != "PENDING" for row in old)
     old_dispositions = final_store.read_dispositions_for_tick(10)
-    assert len(old_dispositions) == len({
-        row.candidate_id for row in old_dispositions
-    })
+    assert len(old_dispositions) == len({row.candidate_id for row in old_dispositions})

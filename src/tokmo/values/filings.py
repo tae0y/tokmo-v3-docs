@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from datetime import date, datetime
 
-__all__ = ["SecFilingFact", "OpenDartDisclosureFact"]
+__all__ = ["OpenDartDisclosureFact", "SecFilingFact"]
 
 
 @dataclass(frozen=True)

@@ -2,23 +2,34 @@ import json
 import os
 import stat
 import urllib.error
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from email.message import Message
 
 import pytest
 
 from tokmo.composition import (
-    MAX_ATTEMPTS, STATE_NAME, LiveRunError, run_live, setup_live,
+    MAX_ATTEMPTS,
+    STATE_NAME,
+    LiveRunError,
+    run_live,
+    setup_live,
 )
 from tokmo.facts.eia import (
-    REQUEST_TIMEOUT_SECONDS, WTI_QUERY_MULTIMAP, _LiveTransportFailure,
-    _LiveTransportSuccess, build_wti_request,
+    REQUEST_TIMEOUT_SECONDS,
+    WTI_QUERY_MULTIMAP,
+    _LiveTransportFailure,
+    _LiveTransportSuccess,
+    build_wti_request,
 )
 from tokmo.facts.eia_live import (
-    EIA_HOST, EIA_PATH, MAX_BODY_BYTES, EiaLiveTransport, build_live_opener,
+    EIA_HOST,
+    EIA_PATH,
+    MAX_BODY_BYTES,
+    EiaLiveTransport,
+    build_live_opener,
 )
 
-NOW = datetime(2026, 7, 27, 1, 2, 3, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 27, 1, 2, 3, tzinfo=UTC)
 SECRET = "fixture-secret-never-print"
 BODY = b'{"response":{"data":[{"period":"2026-07-24","series":"RWTC","value":"78.42","units":"$/BBL"}]}}'
 
@@ -34,8 +45,11 @@ def prepare(home):
 def invoke(home, transport, now=NOW):
     ids = iter(["record", "decision"])
     return run_live(
-        home=home, transport=transport, clock=lambda: now,
-        id_factory=ids.__next__, run_id="run",
+        home=home,
+        transport=transport,
+        clock=lambda: now,
+        id_factory=ids.__next__,
+        run_id="run",
     )
 
 
@@ -59,7 +73,9 @@ def test_setup_is_network_zero_idempotent_and_only_modes_tokmo_dirs(tmp_path):
         local_parent / "share" / "tokmo-v3",
     ):
         assert stat.S_IMODE(path.stat().st_mode) == 0o700
-    assert stat.S_IMODE((config_parent / "tokmo-v3" / STATE_NAME).stat().st_mode) == 0o600
+    assert (
+        stat.S_IMODE((config_parent / "tokmo-v3" / STATE_NAME).stat().st_mode) == 0o600
+    )
 
 
 def test_success_uses_same_tracer_path_and_stops_future_calls(tmp_path):
@@ -72,7 +88,10 @@ def test_success_uses_same_tracer_path_and_stops_future_calls(tmp_path):
 
     result = invoke(tmp_path, transport)
     assert (result.code, result.decision_action, result.decision_reason) == (
-        "success", "SAVE", "saved")
+        "success",
+        "SAVE",
+        "saved",
+    )
     assert len(calls) == 1
     assert state(state_path)["success"] is True
     assert (tmp_path / ".local" / "share" / "tokmo-v3" / "facts.json").exists()
@@ -106,7 +125,9 @@ def test_spacing_blocks_without_call_and_allows_at_five_seconds(tmp_path):
         invoke(tmp_path, transport)
     calls = []
     with pytest.raises(LiveRunError, match="not_due"):
-        invoke(tmp_path, lambda request: calls.append(request), NOW + timedelta(seconds=4))
+        invoke(
+            tmp_path, lambda request: calls.append(request), NOW + timedelta(seconds=4)
+        )
     assert calls == []
     with pytest.raises(LiveRunError, match="timeout"):
         invoke(tmp_path, transport, NOW + timedelta(seconds=5))
@@ -121,11 +142,15 @@ def test_ceiling_is_eleven_started_and_twelfth_is_network_zero(tmp_path):
     os.chmod(state_path, 0o600)
     calls = []
     with pytest.raises(LiveRunError, match="ceiling_exhausted"):
-        invoke(tmp_path, lambda request: calls.append(request), NOW + timedelta(seconds=5))
+        invoke(
+            tmp_path, lambda request: calls.append(request), NOW + timedelta(seconds=5)
+        )
     assert calls == []
 
 
-@pytest.mark.parametrize("content", [b"{", b"[]", b'{"total_started":0}', b"x" * 20_000])
+@pytest.mark.parametrize(
+    "content", [b"{", b"[]", b'{"total_started":0}', b"x" * 20_000]
+)
 def test_malformed_state_fails_closed_with_no_network(tmp_path, content):
     state_path = prepare(tmp_path)
     state_path.write_bytes(content)
@@ -151,8 +176,11 @@ def test_request_repr_and_artifacts_never_contain_key(tmp_path):
     state_path = prepare(tmp_path)
     with pytest.raises(LiveRunError):
         invoke(tmp_path, lambda _: _LiveTransportFailure("auth_rejection"))
-    artifacts = [path for path in tmp_path.rglob("*") if path.is_file()
-                 and path.name != "tokmo.env"]
+    artifacts = [
+        path
+        for path in tmp_path.rglob("*")
+        if path.is_file() and path.name != "tokmo.env"
+    ]
     assert artifacts
     assert all(SECRET.encode() not in path.read_bytes() for path in artifacts)
     assert SECRET not in state_path.read_text()
@@ -214,15 +242,16 @@ def test_transport_makes_exact_official_get_once():
 
 def urllib_parse_pairs(url):
     import urllib.parse
+
     return urllib.parse.parse_qsl(urllib.parse.urlsplit(url).query)
 
 
 def test_opener_has_empty_proxy_policy_and_redirects_are_not_followed():
     opener = build_live_opener()
-    assert not any(handler.__class__.__name__ == "ProxyHandler"
-                   for handler in opener.handlers)
-    redirect = urllib.error.HTTPError(
-        "masked", 302, "masked", Message(), None)
+    assert not any(
+        handler.__class__.__name__ == "ProxyHandler" for handler in opener.handlers
+    )
+    redirect = urllib.error.HTTPError("masked", 302, "masked", Message(), None)
     transport = EiaLiveTransport()
     transport.opener = CapturingOpener(redirect)
     assert transport(build_wti_request(api_key=SECRET)).code == "redirect"

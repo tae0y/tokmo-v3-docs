@@ -11,7 +11,7 @@ No migration is needed because CalendarLookaheadStoreV1 is a separate
 private store with its own schema.
 """
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING
 
 from tokmo.records.calendar_lookahead import (
@@ -21,10 +21,9 @@ from tokmo.records.calendar_lookahead import (
     verify_against_current_cache,
 )
 from tokmo.values._primitives import MISSING
-from tokmo.values.session_gate import ENABLED_SESSION_KINDS, Market
+from tokmo.values.session_gate import Market
 from tokmo.values.toss_market_calendar import (
     CalendarSession,
-    IntegratedHour,
     KrMarketDay,
     UsMarketDay,
 )
@@ -56,7 +55,7 @@ def _to_utc(value: datetime) -> datetime:
     """Ensure aware UTC."""
     if value.tzinfo is None or value.utcoffset() is None:
         raise LookaheadWriterError("calendar session time must be aware")
-    return value.astimezone(timezone.utc)
+    return value.astimezone(UTC)
 
 
 def _safe_date_iso(day, label: str) -> str:
@@ -76,12 +75,17 @@ def _session_from_calendar(kind: str, session: CalendarSession) -> LookaheadSess
     if not isinstance(session, CalendarSession):
         raise LookaheadWriterError(f"missing {kind} session")
     return LookaheadSessionV1(
-        kind, _to_utc(session.start_time), _to_utc(session.end_time))
+        kind, _to_utc(session.start_time), _to_utc(session.end_time)
+    )
 
 
-def _day_from_us(day: UsMarketDay, trade_date: str,
-                 source_trade_date: str, provenance: str,
-                 fetched_at: datetime) -> LookaheadDayV1:
+def _day_from_us(
+    day: UsMarketDay,
+    trade_date: str,
+    source_trade_date: str,
+    provenance: str,
+    fetched_at: datetime,
+) -> LookaheadDayV1:
     if not isinstance(day, UsMarketDay):
         raise LookaheadWriterError("invalid US market day")
     if day.date is MISSING or type(day.date) is not date:
@@ -96,14 +100,22 @@ def _day_from_us(day: UsMarketDay, trade_date: str,
     if not sessions:
         raise LookaheadWriterError("US market day has no sessions")
     return LookaheadDayV1(
-        Market.US, trade_date, source_trade_date, tuple(sessions),
-        fetched_at, provenance,
+        Market.US,
+        trade_date,
+        source_trade_date,
+        tuple(sessions),
+        fetched_at,
+        provenance,
     )
 
 
-def _day_from_kr(day: KrMarketDay, trade_date: str,
-                 source_trade_date: str, provenance: str,
-                 fetched_at: datetime) -> LookaheadDayV1:
+def _day_from_kr(
+    day: KrMarketDay,
+    trade_date: str,
+    source_trade_date: str,
+    provenance: str,
+    fetched_at: datetime,
+) -> LookaheadDayV1:
     if not isinstance(day, KrMarketDay):
         raise LookaheadWriterError("invalid KR market day")
     if day.date is MISSING or type(day.date) is not date:
@@ -121,8 +133,12 @@ def _day_from_kr(day: KrMarketDay, trade_date: str,
     if not sessions:
         raise LookaheadWriterError("KR market day has no sessions")
     return LookaheadDayV1(
-        Market.KR, trade_date, source_trade_date, tuple(sessions),
-        fetched_at, provenance,
+        Market.KR,
+        trade_date,
+        source_trade_date,
+        tuple(sessions),
+        fetched_at,
+        provenance,
     )
 
 
@@ -160,20 +176,25 @@ def write_lookahead_from_calendar(
         converter = _day_from_kr
 
     today_day = converter(
-        response_today, _safe_date_iso(response_today, "today"),
-        _safe_date_iso(response_today, "today"), receipt_identity, fetched_at,
+        response_today,
+        _safe_date_iso(response_today, "today"),
+        _safe_date_iso(response_today, "today"),
+        receipt_identity,
+        fetched_at,
     )
 
     days = [today_day]
 
     if response_next is not None:
         next_day = converter(
-            response_next, _safe_date_iso(response_next, "next"),
-            _safe_date_iso(response_next, "next"), receipt_identity, fetched_at,
+            response_next,
+            _safe_date_iso(response_next, "next"),
+            _safe_date_iso(response_next, "next"),
+            receipt_identity,
+            fetched_at,
         )
         if next_day.trade_date <= today_day.trade_date:
-            raise LookaheadWriterError(
-                "next business day must advance past today")
+            raise LookaheadWriterError("next business day must advance past today")
         days.append(next_day)
 
     # Verify each day against the current cache entry (if same trade_date)

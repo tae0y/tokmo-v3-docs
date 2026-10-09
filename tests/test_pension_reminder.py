@@ -3,22 +3,19 @@
 M11: behavioral tests for the crash-safe reminder ordering and the
 UNKNOWN-vs-FAILED delivery settle failure path.
 """
+
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-import pytest
-
-from tokmo.records.pension_revisions import PensionRegistryStore
 from tokmo.records.ops_kernel import OpsKernelStore
-from tokmo.values.ops_kernel import ProducerRole
-
+from tokmo.records.pension_revisions import PensionRegistryStore
 
 _KST = ZoneInfo("Asia/Seoul")
-_NOW = datetime(2026, 8, 5, 12, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
 
 
 def _make_registry(tmp_path: Path) -> PensionRegistryStore:
@@ -39,12 +36,13 @@ class TestB3CrashSafeOrdering:
 
     def test_reserve_reminder_accepts_alert_id(self, tmp_path):
         """reserve_reminder stores the alert_id when provided."""
+        from tokmo.values.current_holdings import HoldingItemV1
         from tokmo.values.pension_holdings import (
             PENSION_HOLDINGS_SCHEMA_VERSION,
             PENSION_PARSER_VERSION,
             PensionHoldingsRevisionV1,
         )
-        from tokmo.values.current_holdings import HoldingItemV1
+
         registry = _make_registry(tmp_path)
         revision = PensionHoldingsRevisionV1(
             revision_id="a" * 32,
@@ -54,8 +52,12 @@ class TestB3CrashSafeOrdering:
             sheet_schema_version=1,
             holdings=(
                 HoldingItemV1(
-                    symbol="069500", quantity="10", avg_price="45000",
-                    currency="KRW", market_raw="KR", market_field="market",
+                    symbol="069500",
+                    quantity="10",
+                    avg_price="45000",
+                    currency="KRW",
+                    market_raw="KR",
+                    market_field="market",
                 ),
             ),
             source_as_of=datetime(2026, 6, 1, tzinfo=_KST),
@@ -72,7 +74,10 @@ class TestB3CrashSafeOrdering:
 
         reminder_id = hashlib.sha256(b"test").hexdigest()
         registry.reserve_reminder(
-            reminder_id, revision.revision_id, 35, _NOW,
+            reminder_id,
+            revision.revision_id,
+            35,
+            _NOW,
             alert_id="test-alert-id",
         )
         row = registry.read_reminder(reminder_id)
@@ -84,7 +89,6 @@ class TestM7UnknownOnSettleFailure:
     """M7: transport success + settle failure → UNKNOWN, never FAILED."""
 
     def test_transport_success_settle_failure_yields_unknown(self, tmp_path):
-        from tokmo.programs.pension_reminder_delivery import run_pension_reminder_delivery
         kernel = _make_ops_kernel(tmp_path)
         # We need a PENDING alert in the outbox.
         # Since we can't easily set up the full outbox without the full
@@ -97,12 +101,13 @@ class TestM2RollbackProvenance:
     """m2: rollback does not overwrite historical revision provenance."""
 
     def test_rollback_preserves_original_approved_at(self, tmp_path):
+        from tokmo.values.current_holdings import HoldingItemV1
         from tokmo.values.pension_holdings import (
             PENSION_HOLDINGS_SCHEMA_VERSION,
             PENSION_PARSER_VERSION,
             PensionHoldingsRevisionV1,
         )
-        from tokmo.values.current_holdings import HoldingItemV1
+
         registry = _make_registry(tmp_path)
 
         def _make_rev(rev_id):
@@ -114,8 +119,12 @@ class TestM2RollbackProvenance:
                 sheet_schema_version=1,
                 holdings=(
                     HoldingItemV1(
-                        symbol="069500", quantity="10", avg_price="45000",
-                        currency="KRW", market_raw="KR", market_field="market",
+                        symbol="069500",
+                        quantity="10",
+                        avg_price="45000",
+                        currency="KRW",
+                        market_raw="KR",
+                        market_field="market",
                     ),
                 ),
                 source_as_of=datetime(2026, 6, 1, tzinfo=_KST),

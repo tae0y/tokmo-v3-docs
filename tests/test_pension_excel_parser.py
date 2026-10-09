@@ -1,9 +1,9 @@
 """Slice 1 — Excel parser and privacy tests (M1, M2, m1, m3, m6)."""
+
 from __future__ import annotations
 
 import io
 import os
-import stat
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -13,16 +13,14 @@ import openpyxl
 import pytest
 
 from tokmo.facts.pension_excel import (
+    WORKBOOK_MAX_ZIP_ENTRIES,
     PensionExcelParseError,
     parse_pension_excel,
-    WORKBOOK_MAX_BYTES,
-    WORKBOOK_MAX_ZIP_ENTRIES,
 )
 from tokmo.values.pension_holdings import (
     PENSION_HOLDINGS_SCHEMA_VERSION,
     PensionHoldingsRevisionV1,
 )
-from tokmo.values.current_holdings import HoldingItemV1
 
 _KST = ZoneInfo("Asia/Seoul")
 _NOW = datetime(2026, 8, 5, 12, 0, tzinfo=_KST)
@@ -41,8 +39,15 @@ def _make_workbook(
         ws = wb.create_sheet()
     ws.title = sheet_name
 
-    headers = ["instrument_name", "symbol", "market", "currency",
-               "quantity", "average_cost", "source_as_of"]
+    headers = [
+        "instrument_name",
+        "symbol",
+        "market",
+        "currency",
+        "quantity",
+        "average_cost",
+        "source_as_of",
+    ]
     if extra_columns:
         headers += list(extra_columns.keys())
     for c, h in enumerate(headers, 1):
@@ -78,15 +83,19 @@ class TestParserBasics:
             {
                 "instrument_name": "SOL AI반도체TOP2플러스",
                 "symbol": "0167A0",
-                "market": "KR", "currency": "KRW",
-                "quantity": 100, "average_cost": 10000.50,
+                "market": "KR",
+                "currency": "KRW",
+                "quantity": 100,
+                "average_cost": 10000.50,
                 "source_as_of": datetime(2026, 7, 1, tzinfo=_KST),
             },
             {
                 "instrument_name": "Apple Inc",
                 "symbol": "AAPL",
-                "market": "US", "currency": "USD",
-                "quantity": 50, "average_cost": 150.00,
+                "market": "US",
+                "currency": "USD",
+                "quantity": 50,
+                "average_cost": 150.00,
                 "source_as_of": datetime(2026, 7, 1, tzinfo=_KST),
             },
         ]
@@ -104,13 +113,17 @@ class TestParserBasics:
 
     def test_leading_zero_kr_symbol_preserved(self, tmp_path):
         """1.1: Leading-zero KR symbol 0167A0 is preserved as a string."""
-        rows = [{
-            "instrument_name": "SOL AI반도체TOP2플러스",
-            "symbol": "0167A0",
-            "market": "KR", "currency": "KRW",
-            "quantity": 100, "average_cost": 10000,
-            "source_as_of": datetime(2026, 7, 1, tzinfo=_KST),
-        }]
+        rows = [
+            {
+                "instrument_name": "SOL AI반도체TOP2플러스",
+                "symbol": "0167A0",
+                "market": "KR",
+                "currency": "KRW",
+                "quantity": 100,
+                "average_cost": 10000,
+                "source_as_of": datetime(2026, 7, 1, tzinfo=_KST),
+            }
+        ]
         data = _make_workbook(rows)
         path = _write_landing(tmp_path, data)
         revision = parse_pension_excel(path, now=_NOW)
@@ -119,6 +132,7 @@ class TestParserBasics:
     def test_holding_item_v1_reused(self):
         """1.8 GREEN: HoldingItemV1 is reused, no PensionHoldingItemV1 duplicate."""
         import tokmo.values.pension_holdings as ph
+
         # m1: HoldingItemV1 comes from current_holdings
         assert ph.HoldingItemV1 is not None
         # No PensionHoldingItemV1 class exists in values/
@@ -129,8 +143,10 @@ class TestParserBasics:
         assert openpyxl.__version__ == "3.1.5"
         assert openpyxl.DEFUSEDXML is True
         import defusedxml
+
         assert defusedxml.__version__ == "0.7.1"
         import et_xmlfile
+
         assert et_xmlfile is not None
 
 
@@ -138,13 +154,17 @@ class TestParserRejections:
     """1.2 RED: rejection cases."""
 
     def test_missing_required_field_rejected(self, tmp_path):
-        rows = [{
-            "instrument_name": "Test",
-            "symbol": "005930",
-            "market": "KR", "currency": "KRW",
-            "quantity": 100, "average_cost": 10000,
-            # source_as_of missing
-        }]
+        rows = [
+            {
+                "instrument_name": "Test",
+                "symbol": "005930",
+                "market": "KR",
+                "currency": "KRW",
+                "quantity": 100,
+                "average_cost": 10000,
+                # source_as_of missing
+            }
+        ]
         data = _make_workbook(rows)
         path = _write_landing(tmp_path, data)
         with pytest.raises(PensionExcelParseError):
@@ -152,12 +172,24 @@ class TestParserRejections:
 
     def test_duplicate_symbol_rejected(self, tmp_path):
         rows = [
-            {"instrument_name": "A", "symbol": "005930", "market": "KR",
-             "currency": "KRW", "quantity": 100, "average_cost": 10000,
-             "source_as_of": datetime(2026, 7, 1, tzinfo=_KST)},
-            {"instrument_name": "B", "symbol": "005930", "market": "KR",
-             "currency": "KRW", "quantity": 50, "average_cost": 11000,
-             "source_as_of": datetime(2026, 7, 1, tzinfo=_KST)},
+            {
+                "instrument_name": "A",
+                "symbol": "005930",
+                "market": "KR",
+                "currency": "KRW",
+                "quantity": 100,
+                "average_cost": 10000,
+                "source_as_of": datetime(2026, 7, 1, tzinfo=_KST),
+            },
+            {
+                "instrument_name": "B",
+                "symbol": "005930",
+                "market": "KR",
+                "currency": "KRW",
+                "quantity": 50,
+                "average_cost": 11000,
+                "source_as_of": datetime(2026, 7, 1, tzinfo=_KST),
+            },
         ]
         data = _make_workbook(rows)
         path = _write_landing(tmp_path, data)
@@ -166,12 +198,17 @@ class TestParserRejections:
         assert exc_info.value.reason == "duplicate_symbol"
 
     def test_negative_quantity_rejected(self, tmp_path):
-        rows = [{
-            "instrument_name": "Test", "symbol": "005930",
-            "market": "KR", "currency": "KRW",
-            "quantity": -100, "average_cost": 10000,
-            "source_as_of": datetime(2026, 7, 1, tzinfo=_KST),
-        }]
+        rows = [
+            {
+                "instrument_name": "Test",
+                "symbol": "005930",
+                "market": "KR",
+                "currency": "KRW",
+                "quantity": -100,
+                "average_cost": 10000,
+                "source_as_of": datetime(2026, 7, 1, tzinfo=_KST),
+            }
+        ]
         data = _make_workbook(rows)
         path = _write_landing(tmp_path, data)
         with pytest.raises(PensionExcelParseError) as exc_info:
@@ -179,12 +216,17 @@ class TestParserRejections:
         assert exc_info.value.reason == "zero_quantity_row"
 
     def test_currency_mismatch_rejected(self, tmp_path):
-        rows = [{
-            "instrument_name": "Test", "symbol": "005930",
-            "market": "KR", "currency": "USD",
-            "quantity": 100, "average_cost": 10000,
-            "source_as_of": datetime(2026, 7, 1, tzinfo=_KST),
-        }]
+        rows = [
+            {
+                "instrument_name": "Test",
+                "symbol": "005930",
+                "market": "KR",
+                "currency": "USD",
+                "quantity": 100,
+                "average_cost": 10000,
+                "source_as_of": datetime(2026, 7, 1, tzinfo=_KST),
+            }
+        ]
         data = _make_workbook(rows)
         path = _write_landing(tmp_path, data)
         with pytest.raises(PensionExcelParseError) as exc_info:
@@ -192,12 +234,17 @@ class TestParserRejections:
         assert exc_info.value.reason == "currency_mismatch"
 
     def test_invalid_market_rejected(self, tmp_path):
-        rows = [{
-            "instrument_name": "Test", "symbol": "005930",
-            "market": "JP", "currency": "JPY",
-            "quantity": 100, "average_cost": 10000,
-            "source_as_of": datetime(2026, 7, 1, tzinfo=_KST),
-        }]
+        rows = [
+            {
+                "instrument_name": "Test",
+                "symbol": "005930",
+                "market": "JP",
+                "currency": "JPY",
+                "quantity": 100,
+                "average_cost": 10000,
+                "source_as_of": datetime(2026, 7, 1, tzinfo=_KST),
+            }
+        ]
         data = _make_workbook(rows)
         path = _write_landing(tmp_path, data)
         with pytest.raises(PensionExcelParseError) as exc_info:
@@ -209,13 +256,17 @@ class TestParserPrivacy:
     """1.3 RED: privacy boundary."""
 
     def test_revision_repr_excludes_holdings_and_raw_values(self, tmp_path):
-        rows = [{
-            "instrument_name": "SOL AI반도체TOP2플러스",
-            "symbol": "0167A0",
-            "market": "KR", "currency": "KRW",
-            "quantity": 100, "average_cost": 10000,
-            "source_as_of": datetime(2026, 7, 1, tzinfo=_KST),
-        }]
+        rows = [
+            {
+                "instrument_name": "SOL AI반도체TOP2플러스",
+                "symbol": "0167A0",
+                "market": "KR",
+                "currency": "KRW",
+                "quantity": 100,
+                "average_cost": 10000,
+                "source_as_of": datetime(2026, 7, 1, tzinfo=_KST),
+            }
+        ]
         data = _make_workbook(rows)
         path = _write_landing(tmp_path, data)
         revision = parse_pension_excel(path, now=_NOW)
@@ -226,12 +277,17 @@ class TestParserPrivacy:
         assert "SOL AI" not in repr_text
 
     def test_no_path_in_revision_repr(self, tmp_path):
-        rows = [{
-            "instrument_name": "Test", "symbol": "005930",
-            "market": "KR", "currency": "KRW",
-            "quantity": 100, "average_cost": 10000,
-            "source_as_of": datetime(2026, 7, 1, tzinfo=_KST),
-        }]
+        rows = [
+            {
+                "instrument_name": "Test",
+                "symbol": "005930",
+                "market": "KR",
+                "currency": "KRW",
+                "quantity": 100,
+                "average_cost": 10000,
+                "source_as_of": datetime(2026, 7, 1, tzinfo=_KST),
+            }
+        ]
         data = _make_workbook(rows)
         path = _write_landing(tmp_path, data)
         revision = parse_pension_excel(path, now=_NOW)
@@ -244,12 +300,17 @@ class TestAdversarialWorkbooks:
 
     def test_zip_bomb_rejected(self, tmp_path):
         """Too many ZIP entries."""
-        rows = [{
-            "instrument_name": "Test", "symbol": "005930",
-            "market": "KR", "currency": "KRW",
-            "quantity": 100, "average_cost": 10000,
-            "source_as_of": datetime(2026, 7, 1, tzinfo=_KST),
-        }]
+        rows = [
+            {
+                "instrument_name": "Test",
+                "symbol": "005930",
+                "market": "KR",
+                "currency": "KRW",
+                "quantity": 100,
+                "average_cost": 10000,
+                "source_as_of": datetime(2026, 7, 1, tzinfo=_KST),
+            }
+        ]
         data = _make_workbook(rows)
         # Add many fake entries
         buf = io.BytesIO()
@@ -272,12 +333,17 @@ class TestAdversarialWorkbooks:
 
     def test_macro_detected(self, tmp_path):
         """Macro ZIP entry rejected."""
-        rows = [{
-            "instrument_name": "Test", "symbol": "005930",
-            "market": "KR", "currency": "KRW",
-            "quantity": 100, "average_cost": 10000,
-            "source_as_of": datetime(2026, 7, 1, tzinfo=_KST),
-        }]
+        rows = [
+            {
+                "instrument_name": "Test",
+                "symbol": "005930",
+                "market": "KR",
+                "currency": "KRW",
+                "quantity": 100,
+                "average_cost": 10000,
+                "source_as_of": datetime(2026, 7, 1, tzinfo=_KST),
+            }
+        ]
         data = _make_workbook(rows)
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w") as zf:
@@ -312,12 +378,17 @@ class TestAdversarialWorkbooks:
         assert exc_info.value.reason == "multi_sheet"
 
     def test_invalid_file_mode_rejected(self, tmp_path):
-        rows = [{
-            "instrument_name": "Test", "symbol": "005930",
-            "market": "KR", "currency": "KRW",
-            "quantity": 100, "average_cost": 10000,
-            "source_as_of": datetime(2026, 7, 1, tzinfo=_KST),
-        }]
+        rows = [
+            {
+                "instrument_name": "Test",
+                "symbol": "005930",
+                "market": "KR",
+                "currency": "KRW",
+                "quantity": 100,
+                "average_cost": 10000,
+                "source_as_of": datetime(2026, 7, 1, tzinfo=_KST),
+            }
+        ]
         data = _make_workbook(rows)
         path = tmp_path / "pension_landing.xlsx"
         path.write_bytes(data)
@@ -327,12 +398,17 @@ class TestAdversarialWorkbooks:
         assert exc_info.value.reason == "invalid_file_mode"
 
     def test_invalid_sheet_name_rejected(self, tmp_path):
-        rows = [{
-            "instrument_name": "Test", "symbol": "005930",
-            "market": "KR", "currency": "KRW",
-            "quantity": 100, "average_cost": 10000,
-            "source_as_of": datetime(2026, 7, 1, tzinfo=_KST),
-        }]
+        rows = [
+            {
+                "instrument_name": "Test",
+                "symbol": "005930",
+                "market": "KR",
+                "currency": "KRW",
+                "quantity": 100,
+                "average_cost": 10000,
+                "source_as_of": datetime(2026, 7, 1, tzinfo=_KST),
+            }
+        ]
         data = _make_workbook(rows, sheet_name="Sheet1")
         path = _write_landing(tmp_path, data)
         with pytest.raises(PensionExcelParseError) as exc_info:
@@ -348,8 +424,9 @@ class TestHeaderAliases:
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "pension_holdings_v1"
-        for c, h in enumerate(["종목명", "단축코드", "시장", "통화",
-                                "수량", "평균단가", "기준일"], 1):
+        for c, h in enumerate(
+            ["종목명", "단축코드", "시장", "통화", "수량", "평균단가", "기준일"], 1
+        ):
             ws.cell(row=1, column=c, value=h)
         ws.cell(row=2, column=1, value="삼성전자")
         ws.cell(row=2, column=2, value="005930")
@@ -365,12 +442,17 @@ class TestHeaderAliases:
         assert revision.holdings[0].symbol == "005930"
 
     def test_unmapped_header_rejected(self, tmp_path):
-        rows = [{
-            "instrument_name": "Test", "symbol": "005930",
-            "market": "KR", "currency": "KRW",
-            "quantity": 100, "average_cost": 10000,
-            "source_as_of": datetime(2026, 7, 1, tzinfo=_KST),
-        }]
+        rows = [
+            {
+                "instrument_name": "Test",
+                "symbol": "005930",
+                "market": "KR",
+                "currency": "KRW",
+                "quantity": 100,
+                "average_cost": 10000,
+                "source_as_of": datetime(2026, 7, 1, tzinfo=_KST),
+            }
+        ]
         data = _make_workbook(rows, extra_columns={"unknown_col": "val"})
         path = _write_landing(tmp_path, data)
         with pytest.raises(PensionExcelParseError) as exc_info:

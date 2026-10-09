@@ -1,18 +1,29 @@
 """Request-bound permits and account/position constraints; no I/O."""
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timedelta, time, timezone
-from decimal import Decimal
+
 import hashlib
 import json
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, time, timedelta, timezone
+from decimal import Decimal
 
-from tokmo.values.order_commands import ConditionalOrder, OrderCommand, OrderOperation, RegularOrder
+from tokmo.values.order_commands import (
+    ConditionalOrder,
+    OrderCommand,
+    OrderOperation,
+    RegularOrder,
+)
 
 
 def command_document(command):
     if type(command) is not OrderCommand:
         raise ValueError("order_command")
-    return json.dumps(asdict(command), sort_keys=True, separators=(",", ":"),
-                      default=lambda value: value.isoformat(), allow_nan=False)
+    return json.dumps(
+        asdict(command),
+        sort_keys=True,
+        separators=(",", ":"),
+        default=lambda value: value.isoformat(),
+        allow_nan=False,
+    )
 
 
 def command_digest(command):
@@ -58,7 +69,11 @@ class RiskSnapshot:
 
 
 def aware(value):
-    return isinstance(value, datetime) and value.tzinfo is not None and value.utcoffset() is not None
+    return (
+        isinstance(value, datetime)
+        and value.tzinfo is not None
+        and value.utcoffset() is not None
+    )
 
 
 def _nonnegative(value):
@@ -74,27 +89,51 @@ def authorize_order(command, envelope, snapshot, *, now, mode):
     """
     if type(envelope) is not RiskEnvelope or type(snapshot) is not RiskSnapshot:
         raise ValueError("risk_inputs")
-    if mode not in {"paper", "live"} or not all(aware(v) for v in (now, envelope.valid_until, snapshot.observed_at)):
+    if mode not in {"paper", "live"} or not all(
+        aware(v) for v in (now, envelope.valid_until, snapshot.observed_at)
+    ):
         raise ValueError("risk_clock")
-    if not 0 <= (now - snapshot.observed_at).total_seconds() <= 30 or now >= envelope.valid_until:
+    if (
+        not 0 <= (now - snapshot.observed_at).total_seconds() <= 30
+        or now >= envelope.valid_until
+    ):
         raise ValueError("risk_expired")
     if not envelope.plan_version or not envelope.account_scope:
         raise ValueError("risk_identity")
     if (snapshot.account_scope, snapshot.symbol, snapshot.market) != (
-            envelope.account_scope, envelope.symbol, envelope.market):
+        envelope.account_scope,
+        envelope.symbol,
+        envelope.market,
+    ):
         raise ValueError("snapshot_identity")
     if (command.symbol, command.market) != (envelope.symbol, envelope.market):
         raise ValueError("instrument_outside_envelope")
-    numbers = (envelope.max_quantity, envelope.initial_budget, envelope.protected_quantity,
-               snapshot.total_quantity, snapshot.experiment_quantity, snapshot.pending_buy,
-               snapshot.pending_sell, snapshot.available_cash, snapshot.fee_buffer, snapshot.funded_amount)
-    if not all(_nonnegative(v) for v in numbers) or envelope.max_quantity <= 0 or envelope.initial_budget <= 0:
+    numbers = (
+        envelope.max_quantity,
+        envelope.initial_budget,
+        envelope.protected_quantity,
+        snapshot.total_quantity,
+        snapshot.experiment_quantity,
+        snapshot.pending_buy,
+        snapshot.pending_sell,
+        snapshot.available_cash,
+        snapshot.fee_buffer,
+        snapshot.funded_amount,
+    )
+    if (
+        not all(_nonnegative(v) for v in numbers)
+        or envelope.max_quantity <= 0
+        or envelope.initial_budget <= 0
+    ):
         raise ValueError("risk_numbers")
     if type(snapshot.unresolved) is not bool or snapshot.unresolved:
         raise ValueError("unresolved_orders")
     if snapshot.funded_amount > envelope.initial_budget:
         raise ValueError("additional_funding")
-    if snapshot.total_quantity != envelope.protected_quantity + snapshot.experiment_quantity:
+    if (
+        snapshot.total_quantity
+        != envelope.protected_quantity + snapshot.experiment_quantity
+    ):
         raise ValueError("protected_position_changed")
     if snapshot.experiment_quantity + snapshot.pending_buy > envelope.max_quantity:
         raise ValueError("existing_exposure_exceeded")
@@ -104,36 +143,56 @@ def authorize_order(command, envelope, snapshot, *, now, mode):
             raise ValueError("quantity_required_for_experiment")
         quantity = Decimal(order.quantity)
         side, price = order.side, order.price
-    elif command.operation == OrderOperation.CONDITIONAL_CREATE and type(order) is ConditionalOrder:
+    elif (
+        command.operation == OrderOperation.CONDITIONAL_CREATE
+        and type(order) is ConditionalOrder
+    ):
         quantity = Decimal(order.quantity)
         side, price = order.first.side, order.first.order_price
         # A date is not an intraday cutoff. Until the provider's expiration
         # timezone is normalized, use the latest civil-day boundary (UTC-12).
-        expiration_bound = datetime.combine(order.expire_date + timedelta(days=1), time.min,
-                                             tzinfo=timezone(timedelta(hours=-12)))
+        expiration_bound = datetime.combine(
+            order.expire_date + timedelta(days=1),
+            time.min,
+            tzinfo=timezone(timedelta(hours=-12)),
+        )
         if expiration_bound > envelope.valid_until:
             raise ValueError("condition_beyond_envelope")
         if order.kind == "OTO" and snapshot.pending_sell:
             raise ValueError("oto_sell_conflict")
     else:
         raise ValueError("target_review_required")
-    if not _nonnegative(quantity) or quantity <= 0 or quantity != quantity.to_integral_value():
+    if (
+        not _nonnegative(quantity)
+        or quantity <= 0
+        or quantity != quantity.to_integral_value()
+    ):
         raise ValueError("quantity")
     if side == "BUY":
-        if quantity + snapshot.experiment_quantity + snapshot.pending_buy > envelope.max_quantity:
+        if (
+            quantity + snapshot.experiment_quantity + snapshot.pending_buy
+            > envelope.max_quantity
+        ):
             raise ValueError("position_limit")
         if order.order_type != "LIMIT" or price is None:
             raise ValueError("bounded_buy_price_required")
         amount = Decimal(price) * quantity
         if not _nonnegative(amount) or amount <= 0:
             raise ValueError("buy_amount")
-        if amount + snapshot.fee_buffer > min(snapshot.available_cash, envelope.initial_budget):
+        if amount + snapshot.fee_buffer > min(
+            snapshot.available_cash, envelope.initial_budget
+        ):
             raise ValueError("experiment_cash_limit")
     elif side == "SELL":
         if quantity + snapshot.pending_sell > snapshot.experiment_quantity:
             raise ValueError("protected_shares_not_sellable")
     else:
         raise ValueError("side")
-    return ExecutionPermit(envelope.account_scope, command_digest(command), mode,
-                           min(envelope.valid_until, now + timedelta(seconds=15)), envelope.plan_version,
-                           snapshot.observed_at)
+    return ExecutionPermit(
+        envelope.account_scope,
+        command_digest(command),
+        mode,
+        min(envelope.valid_until, now + timedelta(seconds=15)),
+        envelope.plan_version,
+        snapshot.observed_at,
+    )

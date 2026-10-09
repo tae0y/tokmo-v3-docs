@@ -6,6 +6,7 @@ prompt internal-source reuse.  Repeating that exact external lookup is allowed
 without a receipt or second approval.  Direct third-party quote endpoints remain
 hard-blocked because they bypass the normal source-selection flow.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -16,7 +17,9 @@ import sys
 from pathlib import Path
 
 WEB_TOOLS = {
-    "web_search", "web_extract", "mcp__zai_web_search__web_search_prime",
+    "web_search",
+    "web_extract",
+    "mcp__zai_web_search__web_search_prime",
 }
 BROWSER_TOOLS = {"computer_use"}
 FINANCE_RE = re.compile(
@@ -28,19 +31,34 @@ FINANCE_RE = re.compile(
     re.IGNORECASE,
 )
 UPPER_FINANCE_TOKEN_RE = re.compile(r"\b(?:KR|US|API|CFS|OFS|XBRL|ETF|FX)\b")
-FX_RE = re.compile(r"(?:환율|exchange.?rate|USD\s*[/_-]?\s*KRW|KRW\s*[/_-]?\s*USD|\bFX\b)", re.I)
-HOLDINGS_RE = re.compile(r"(?:보유수량|보유|수량|평단|평균단가|holdings?|average.?cost)", re.I)
-ORDER_TRADE_RE = re.compile(r"(?:주문|체결|orders?|fills?|거래내역|trade.?history)", re.I)
-CALENDAR_RE = re.compile(r"(?:시장.*(?:마감|개장|캘린더)|market.*(?:close|open|calendar)|휴장)", re.I)
-INDEX_RE = re.compile(r"(?:KOSPI|KOSDAQ|S&P\s*500|NASDAQ|다우|시장지수|주가지수|market.?index)", re.I)
-IDENTITY_RE = re.compile(r"(?:종목명|종목코드|티커|identity|isin)", re.I)
-US_RE = re.compile(r"(?:미국|US(?:A)?\b|NYSE|NASDAQ)", re.I)
+FX_RE = re.compile(
+    r"(?:환율|exchange.?rate|USD\s*[/_-]?\s*KRW|KRW\s*[/_-]?\s*USD|\bFX\b)",
+    re.IGNORECASE,
+)
+HOLDINGS_RE = re.compile(
+    r"(?:보유수량|보유|수량|평단|평균단가|holdings?|average.?cost)", re.IGNORECASE
+)
+ORDER_TRADE_RE = re.compile(
+    r"(?:주문|체결|orders?|fills?|거래내역|trade.?history)", re.IGNORECASE
+)
+CALENDAR_RE = re.compile(
+    r"(?:시장.*(?:마감|개장|캘린더)|market.*(?:close|open|calendar)|휴장)",
+    re.IGNORECASE,
+)
+INDEX_RE = re.compile(
+    r"(?:KOSPI|KOSDAQ|S&P\s*500|NASDAQ|다우|시장지수|주가지수|market.?index)",
+    re.IGNORECASE,
+)
+IDENTITY_RE = re.compile(r"(?:종목명|종목코드|티커|identity|isin)", re.IGNORECASE)
+US_RE = re.compile(r"(?:미국|US(?:A)?\b|NYSE|NASDAQ)", re.IGNORECASE)
 THIRD_PARTY_FINANCE_RE = re.compile(
     r"(?:finance\.naver\.com|polling\.finance\.naver\.com|query[12]?\.finance\.yahoo\.com|"
     r"alphavantage|finnhub|polygon\.io|stooq|investing\.com)",
     re.IGNORECASE,
 )
-OFFICIAL_TOSS_RE = re.compile(r"(?:openapi\.tossinvest\.com|TossReadsLiveTransport|\.env\.toss)", re.IGNORECASE)
+OFFICIAL_TOSS_RE = re.compile(
+    r"(?:openapi\.tossinvest\.com|TossReadsLiveTransport|\.env\.toss)", re.IGNORECASE
+)
 STATE_DIR = Path.home() / ".hermes" / "state" / "tokmo-source-internal-first"
 
 
@@ -51,7 +69,9 @@ def _text(value) -> str:
         return str(value)
 
 
-def _internal_first_already_prompted(text: str, *, tool_name: str, session_id: str) -> bool:
+def _internal_first_already_prompted(
+    text: str, *, tool_name: str, session_id: str
+) -> bool:
     """Return True after the first prompt for the exact session/tool/input scope."""
     if not session_id:
         return False
@@ -125,9 +145,7 @@ def decide(payload: dict) -> dict | None:
 
     candidate = False
     hard_block = False
-    if tool in WEB_TOOLS:
-        candidate = bool(FINANCE_RE.search(text) or UPPER_FINANCE_TOKEN_RE.search(text))
-    elif tool in BROWSER_TOOLS:
+    if tool in WEB_TOOLS or tool in BROWSER_TOOLS:
         candidate = bool(FINANCE_RE.search(text) or UPPER_FINANCE_TOKEN_RE.search(text))
     elif tool == "terminal":
         candidate = bool(THIRD_PARTY_FINANCE_RE.search(text))
@@ -154,8 +172,8 @@ def decide(payload: dict) -> dict | None:
             f"next_action={next_action}; "
             + (
                 "fallback=direct third-party quote endpoint bypass remains blocked."
-                if hard_block else
-                "fallback=if internal sources are absent or limited, first report "
+                if hard_block
+                else "fallback=if internal sources are absent or limited, first report "
                 "local_checked=<stores/files/queries and freshness>; "
                 "unresolved_gap=<specific missing or conflicting fact>; "
                 "why_external_can_change_answer=<material reason>. Then retry the same external request; "

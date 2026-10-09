@@ -1,14 +1,15 @@
 """Strict RSS 2.0 metadata parser for NEWS connectors."""
 
-from datetime import timezone
+from datetime import UTC
 from email.utils import parsedate_to_datetime
 from html import unescape
 from html.parser import HTMLParser
-import re
 from xml.etree import ElementTree
 
 from tokmo.values.news_connectors import (
-    NewsConnectorItem, NewsFetchResult, NewsFetchStatus,
+    NewsConnectorItem,
+    NewsFetchResult,
+    NewsFetchStatus,
 )
 
 
@@ -28,7 +29,9 @@ def _plain(value: str) -> str:
     return " ".join(unescape("".join(parser.parts)).split())
 
 
-def parse_rss_news(body: bytes, *, observed_at, max_items: int = 100) -> NewsFetchResult:
+def parse_rss_news(
+    body: bytes, *, observed_at, max_items: int = 100
+) -> NewsFetchResult:
     if type(body) is not bytes or not 1 <= max_items <= 500:
         return NewsFetchResult(NewsFetchStatus.CONTRACT_MISMATCH)
     lowered = body.lower()
@@ -61,15 +64,21 @@ def parse_rss_news(body: bytes, *, observed_at, max_items: int = 100) -> NewsFet
                 published = parsedate_to_datetime(pub_raw)
                 if published.tzinfo is None or published.utcoffset() is None:
                     raise ValueError
-                published = published.astimezone(timezone.utc)
-            items.append(NewsConnectorItem(
-                canonical_url=link, title=title, observed_at=observed_at,
-                source_article_id=guid, summary_text=description,
-                published_at=published,
-            ))
+                published = published.astimezone(UTC)
+            items.append(
+                NewsConnectorItem(
+                    canonical_url=link,
+                    title=title,
+                    observed_at=observed_at,
+                    source_article_id=guid,
+                    summary_text=description,
+                    published_at=published,
+                )
+            )
     except (ElementTree.ParseError, ValueError, TypeError, OverflowError):
         return NewsFetchResult(NewsFetchStatus.CONTRACT_MISMATCH)
     if not items:
         return NewsFetchResult(NewsFetchStatus.EMPTY)
-    return NewsFetchResult(NewsFetchStatus.COLLECTED, tuple(items),
-                           bytes_received=len(body))
+    return NewsFetchResult(
+        NewsFetchStatus.COLLECTED, tuple(items), bytes_received=len(body)
+    )

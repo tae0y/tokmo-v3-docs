@@ -1,34 +1,55 @@
 import json
-from datetime import date, datetime, timezone
+from datetime import date
 
 import pytest
 
 from tokmo.facts.opendart_bulk import (
-    BulkContractError, BulkRequest, parse_page,
+    BulkContractError,
+    BulkRequest,
+    parse_page,
 )
 
 
 def row(receipt="20260000000001", stock="005930", name=" report "):
-    return {"corp_code": "00126380", "corp_name": " Samsung ",
-            "stock_code": stock, "corp_cls": "Y", "report_nm": name,
-            "rcept_no": receipt, "flr_nm": " filer ",
-            "rcept_dt": "20260701", "rm": " "}
+    return {
+        "corp_code": "00126380",
+        "corp_name": " Samsung ",
+        "stock_code": stock,
+        "corp_cls": "Y",
+        "report_nm": name,
+        "rcept_no": receipt,
+        "flr_nm": " filer ",
+        "rcept_dt": "20260701",
+        "rm": " ",
+    }
 
 
 def envelope(rows, *, page=1, total_count=None, total_page=None):
     total_count = len(rows) if total_count is None else total_count
     total_page = ((total_count + 99) // 100) if total_page is None else total_page
-    return json.dumps({"status": "000", "page_no": page, "page_count": 100,
-                       "total_count": total_count, "total_page": total_page,
-                       "list": rows}).encode()
+    return json.dumps(
+        {
+            "status": "000",
+            "page_no": page,
+            "page_count": 100,
+            "total_count": total_count,
+            "total_page": total_page,
+            "list": rows,
+        }
+    ).encode()
 
 
 def test_request_has_exact_fixed_allowlist_and_no_corp_code():
     request = BulkRequest.create(date(2026, 7, 1), date(2026, 7, 31), 2)
-    assert request.query_pairs == (("bgn_de", "20260701"), ("end_de", "20260731"),
-                                   ("sort", "date"), ("sort_mth", "asc"),
-                                   ("page_count", "100"), ("last_reprt_at", "N"),
-                                   ("page_no", "2"))
+    assert request.query_pairs == (
+        ("bgn_de", "20260701"),
+        ("end_de", "20260731"),
+        ("sort", "date"),
+        ("sort_mth", "asc"),
+        ("page_count", "100"),
+        ("last_reprt_at", "N"),
+        ("page_no", "2"),
+    )
     assert "corp_code" not in dict(request.query_pairs)
     with pytest.raises(TypeError):
         BulkRequest.create(date(2026, 7, 1), date(2026, 7, 2), 1, extra="x")
@@ -54,9 +75,17 @@ def test_six_character_ascii_uppercase_alphanumeric_stock_code_is_canonical(stoc
     assert parsed.rows[0].stock_code == stock
 
 
-@pytest.mark.parametrize("stock", [
-    "a05930", "00593k", "0059-0", "0059 0", "Ａ05930", "00593가",
-])
+@pytest.mark.parametrize(
+    "stock",
+    [
+        "a05930",
+        "00593k",
+        "0059-0",
+        "0059 0",
+        "Ａ05930",
+        "00593가",
+    ],
+)
 def test_noncanonical_six_character_stock_code_is_rejected(stock):
     with pytest.raises(BulkContractError, match="invalid_stock_code"):
         parse_page(envelope([row(stock=stock)]), 1)
@@ -70,10 +99,16 @@ def test_provider_stop_code_is_preserved_without_provider_text(code):
     assert "RAW" not in str(caught.value)
 
 
-@pytest.mark.parametrize("change", [
-    {"page_no": 2}, {"page_count": 99}, {"total_page": 2},
-    {"total_count": -1}, {"list": [row() for _ in range(101)]},
-])
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"page_no": 2},
+        {"page_count": 99},
+        {"total_page": 2},
+        {"total_count": -1},
+        {"list": [row() for _ in range(101)]},
+    ],
+)
 def test_metadata_mismatch_is_closed(change):
     payload = json.loads(envelope([row()]))
     payload.update(change)

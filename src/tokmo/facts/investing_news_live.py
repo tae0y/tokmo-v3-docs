@@ -17,16 +17,27 @@ class InvestingAnalystConnector:
     def __init__(self, http) -> None:
         self._http = http
 
-    def fetch(self, request: InvestingAnalystRequest, *, observed_at: datetime) -> NewsFetchResult:
+    def fetch(
+        self, request: InvestingAnalystRequest, *, observed_at: datetime
+    ) -> NewsFetchResult:
         if type(request) is not InvestingAnalystRequest:
             return NewsFetchResult(NewsFetchStatus.CONTRACT_MISMATCH)
-        response: NewsHttpResponse = self._http.get(ClosedNewsGet(
-            host="kr.investing.com", path="/rss/news_1061.rss",
-            headers=(("User-Agent", "Tokmo/1.0 RSS Reader"),),
-        ))
+        response: NewsHttpResponse = self._http.get(
+            ClosedNewsGet(
+                host="kr.investing.com",
+                path="/rss/news_1061.rss",
+                headers=(("User-Agent", "Tokmo/1.0 RSS Reader"),),
+            )
+        )
         if response.status is not NewsFetchStatus.COLLECTED:
-            return NewsFetchResult(response.status, http_status=response.http_status,
-                                   failure_class=response.failure_class)
-        parsed = parse_investing_news(response.body, observed_at=observed_at, max_items=100)
-        return NewsFetchResult(parsed.status, parsed.items, response.http_status,
-                               len(response.body))
+            return NewsFetchResult(
+                response.status,
+                http_status=response.http_status,
+                failure_class=response.failure_class,
+            )
+        parsed = parse_investing_news(
+            response.body, observed_at=observed_at, max_items=100
+        )
+        return NewsFetchResult(
+            parsed.status, parsed.items, response.http_status, len(response.body)
+        )

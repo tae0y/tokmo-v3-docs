@@ -5,9 +5,16 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 __all__ = [
-    "MISSING", "Missing", "Opt", "RawStr", "_Decimal30",
-    "_DecimalNoMax", "_AwareDateTime", "_StrictDate", "_RawEnum",
+    "MISSING",
+    "Missing",
+    "Opt",
+    "RawStr",
+    "_AwareDateTime",
+    "_Decimal30",
+    "_DecimalNoMax",
     "_MissingType",
+    "_RawEnum",
+    "_StrictDate",
 ]
 
 
@@ -15,11 +22,13 @@ __all__ = [
 # MISSING sentinel and three-state optional
 # =========================================================================
 
+
 class _MissingType:
     """Singleton sentinel for an optional key absent from the JSON payload.
 
     Distinct from ``None``, which represents an explicit JSON ``null``.
     """
+
     _instance = None
 
     def __new__(cls):
@@ -57,6 +66,7 @@ class Opt:
 # =========================================================================
 # Primitive parsing helpers
 # =========================================================================
+
 
 class RawStr:
     """Raw non-empty string — used for raw response enums."""

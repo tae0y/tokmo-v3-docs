@@ -26,11 +26,11 @@ from pathlib import Path
 
 from tokmo.records.durability import fsync_directory
 from tokmo.records.pension_revisions import (
+    _DDL_STATEMENTS_GEN2,
     EMPTY_HOLDINGS_PAYLOAD,
     PENSION_REGISTRY_DDL_SHA256,
     PENSION_REGISTRY_DDL_SHA256_GEN2,
     SCHEMA_VERSION,
-    _DDL_STATEMENTS_GEN2,
 )
 from tokmo.records.private_sqlite import connect_private
 
@@ -85,8 +85,7 @@ def inspect_registry(path: Path) -> RegistryInventory:
         if connection.execute("PRAGMA foreign_key_check").fetchone():
             raise RegistryMigrationError("source_corrupt")
         counts = {
-            table: connection.execute(
-                f"SELECT count(*) FROM {table}").fetchone()[0]
+            table: connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
             for table in _CARRIED_TABLES
         }
         active = connection.execute(
@@ -108,7 +107,8 @@ def inspect_registry(path: Path) -> RegistryInventory:
 
 
 def build_current_read_model_sidecar(
-    source: Path, sidecar: Path,
+    source: Path,
+    sidecar: Path,
 ) -> RegistryInventory:
     """Build the generation-2 sidecar, carrying every audit row forward.
 
@@ -136,11 +136,11 @@ def build_current_read_model_sidecar(
 
             for table in _CARRIED_TABLES:
                 columns = [
-                    row[1] for row in source_conn.execute(
-                        f"PRAGMA table_info({table})")
+                    row[1] for row in source_conn.execute(f"PRAGMA table_info({table})")
                 ]
                 rows = source_conn.execute(
-                    f"SELECT {', '.join(columns)} FROM {table}").fetchall()
+                    f"SELECT {', '.join(columns)} FROM {table}"
+                ).fetchall()
                 if table == "pension_revisions":
                     revision_index = columns.index("revision_id")
                     payload_index = columns.index("holdings_json")
@@ -154,7 +154,9 @@ def build_current_read_model_sidecar(
                 placeholders = ", ".join("?" for _ in columns)
                 target_conn.executemany(
                     f"INSERT INTO {table}({', '.join(columns)}) "
-                    f"VALUES ({placeholders})", rows)
+                    f"VALUES ({placeholders})",
+                    rows,
+                )
             target_conn.execute("COMMIT")
         except BaseException:
             try:
@@ -176,7 +178,8 @@ def build_current_read_model_sidecar(
 
 
 def verify_current_read_model_sidecar(
-    inventory: RegistryInventory, sidecar: Path,
+    inventory: RegistryInventory,
+    sidecar: Path,
 ) -> None:
     """Independently prove the sidecar before it is installed.
 
@@ -201,8 +204,9 @@ def verify_current_read_model_sidecar(
             raise RegistryMigrationError("sidecar_corrupt")
 
         for table in _CARRIED_TABLES:
-            observed = target_conn.execute(
-                f"SELECT count(*) FROM {table}").fetchone()[0]
+            observed = target_conn.execute(f"SELECT count(*) FROM {table}").fetchone()[
+                0
+            ]
             if observed != inventory.row_counts[table]:
                 raise RegistryMigrationError(f"row_count_mismatch:{table}")
 
@@ -214,18 +218,17 @@ def verify_current_read_model_sidecar(
             ("pension_reminder_events", "reminder_id"),
         ):
             columns = [
-                row[1] for row in source_conn.execute(
-                    f"PRAGMA table_info({table})")
+                row[1] for row in source_conn.execute(f"PRAGMA table_info({table})")
             ]
             if columns != [
-                row[1] for row in target_conn.execute(
-                    f"PRAGMA table_info({table})")
+                row[1] for row in target_conn.execute(f"PRAGMA table_info({table})")
             ]:
                 raise RegistryMigrationError(f"column_set_altered:{table}")
-            query = (f"SELECT {', '.join(columns)} FROM {table} "
-                     f"ORDER BY {order}")
-            if (source_conn.execute(query).fetchall()
-                    != target_conn.execute(query).fetchall()):
+            query = f"SELECT {', '.join(columns)} FROM {table} ORDER BY {order}"
+            if (
+                source_conn.execute(query).fetchall()
+                != target_conn.execute(query).fetchall()
+            ):
                 raise RegistryMigrationError(f"rows_altered:{table}")
 
         # pension_revisions: EVERY column is compared verbatim except the one
@@ -242,44 +245,56 @@ def verify_current_read_model_sidecar(
         #   validated_at, approved_at, approval_reason, state, created_at,
         #   previous_active_revision_id.
         revision_columns = [
-            row[1] for row in source_conn.execute(
-                "PRAGMA table_info(pension_revisions)")
+            row[1]
+            for row in source_conn.execute("PRAGMA table_info(pension_revisions)")
         ]
         if revision_columns != [
-            row[1] for row in target_conn.execute(
-                "PRAGMA table_info(pension_revisions)")
+            row[1]
+            for row in target_conn.execute("PRAGMA table_info(pension_revisions)")
         ]:
-            raise RegistryMigrationError(
-                "column_set_altered:pension_revisions")
-        preserved = [name for name in revision_columns
-                     if name != "holdings_json"]
-        query = (f"SELECT {', '.join(preserved)} FROM pension_revisions "
-                 f"ORDER BY revision_id")
-        if (source_conn.execute(query).fetchall()
-                != target_conn.execute(query).fetchall()):
+            raise RegistryMigrationError("column_set_altered:pension_revisions")
+        preserved = [name for name in revision_columns if name != "holdings_json"]
+        query = (
+            f"SELECT {', '.join(preserved)} FROM pension_revisions ORDER BY revision_id"
+        )
+        if (
+            source_conn.execute(query).fetchall()
+            != target_conn.execute(query).fetchall()
+        ):
             raise RegistryMigrationError("audit_rows_altered")
 
         # And the one transformed column, row by row.
-        source_payloads = dict(source_conn.execute(
-            "SELECT revision_id, holdings_json FROM pension_revisions"))
-        target_payloads = dict(target_conn.execute(
-            "SELECT revision_id, holdings_json FROM pension_revisions"))
+        source_payloads = dict(
+            source_conn.execute(
+                "SELECT revision_id, holdings_json FROM pension_revisions"
+            )
+        )
+        target_payloads = dict(
+            target_conn.execute(
+                "SELECT revision_id, holdings_json FROM pension_revisions"
+            )
+        )
         if set(source_payloads) != set(target_payloads):
             raise RegistryMigrationError("revision_identity_altered")
         for revision_id, original in source_payloads.items():
             carried = target_payloads[revision_id]
-            expected = (original if revision_id == inventory.active_revision_id
-                        else EMPTY_HOLDINGS_PAYLOAD)
+            expected = (
+                original
+                if revision_id == inventory.active_revision_id
+                else EMPTY_HOLDINGS_PAYLOAD
+            )
             if carried != expected:
-                raise RegistryMigrationError(
-                    "payload_transformation_incorrect")
+                raise RegistryMigrationError("payload_transformation_incorrect")
 
         payload_rows = target_conn.execute(
             "SELECT revision_id FROM pension_revisions WHERE holdings_json <> ?",
             (EMPTY_HOLDINGS_PAYLOAD,),
         ).fetchall()
-        expected = ([] if inventory.active_revision_id is None
-                    else [(inventory.active_revision_id,)])
+        expected = (
+            []
+            if inventory.active_revision_id is None
+            else [(inventory.active_revision_id,)]
+        )
         if payload_rows != expected:
             raise RegistryMigrationError("payload_not_reduced_to_current")
 

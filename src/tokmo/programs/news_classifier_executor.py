@@ -25,21 +25,24 @@ diagnostics record carrying control-plane facts only (typed error
 class, HTTP status, digests); model-derived transcripts cannot survive
 because the direct transport never produces any.
 """
+
 import hashlib
 import json
 import os
 import shutil
 import stat
-from datetime import timedelta
+from datetime import UTC, timedelta
 from pathlib import Path
 
 from tokmo.values.news_classifier import (
     DEFAULT_NEWS_CLASSIFIER_MODEL_ID,
-    NEWS_CLASSIFIER_OUTPUT_MAX_BYTES as GLM_OUTPUT_MAX_BYTES,
     NEWS_CLASSIFIER_OUTPUT_SCHEMA_ID,
     NEWS_CLASSIFIER_PROVIDER,
     NewsClassifierFailure,
     validate_classifier_output_r3,
+)
+from tokmo.values.news_classifier import (
+    NEWS_CLASSIFIER_OUTPUT_MAX_BYTES as GLM_OUTPUT_MAX_BYTES,
 )
 from tokmo.values.news_event_confirmation import EVENT_TYPES_V1
 
@@ -58,19 +61,19 @@ _QUOTA_REQUIRED_WINDOWS = frozenset({"5시간", "주간"})
 # routing-state markers the completion-safe launcher itself demands for
 # this exact route: the executor's own admission binds the same authority
 # text, retaining completion-safe routing admission without a child
-_ROUTE_MARKERS = ("model-quota-latest.json", "invocation freshness",
-                  "glm-5.3-flash")
+_ROUTE_MARKERS = ("model-quota-latest.json", "invocation freshness", "glm-5.3-flash")
 
 
 def _file_stamp(path):
     info = os.stat(path)
-    return {"path": str(path),
-            "sha256": hashlib.sha256(Path(path).read_bytes()).hexdigest(),
-            "mtime_ns": info.st_mtime_ns}
+    return {
+        "path": str(path),
+        "sha256": hashlib.sha256(Path(path).read_bytes()).hexdigest(),
+        "mtime_ns": info.st_mtime_ns,
+    }
 
 
-def build_route_authority_reader(*, routing_state_path, quota_latest_path,
-                                 now):
+def build_route_authority_reader(*, routing_state_path, quota_latest_path, now):
     """Fail-closed reader over the two canonical route authorities.
 
     ``now`` is the composing CLI's explicit judgment instant (no ambient
@@ -93,8 +96,7 @@ def build_route_authority_reader(*, routing_state_path, quota_latest_path,
             payload = json.loads(quota_bytes)
         except (OSError, ValueError):
             raise NewsClassifierFailure("MODEL_UNAVAILABLE")
-        if not isinstance(payload, dict) \
-                or payload.get("schema") != _QUOTA_SCHEMA_ID:
+        if not isinstance(payload, dict) or payload.get("schema") != _QUOTA_SCHEMA_ID:
             raise NewsClassifierFailure("MODEL_UNAVAILABLE")
         try:
             routing_text = routing_bytes.decode("utf-8")
@@ -107,13 +109,11 @@ def build_route_authority_reader(*, routing_state_path, quota_latest_path,
             observed_at = _parse_observed_at(payload.get("observed_at"))
         except ValueError:
             raise NewsClassifierFailure("MODEL_UNAVAILABLE")
-        if observed_at - now \
-                > timedelta(seconds=ROUTE_AUTHORITY_MAX_FUTURE_SECONDS):
+        if observed_at - now > timedelta(seconds=ROUTE_AUTHORITY_MAX_FUTURE_SECONDS):
             # implausibly in the future: same skew bound as the
             # completion-safe launcher's admission
             raise NewsClassifierFailure("MODEL_UNAVAILABLE")
-        if now - observed_at \
-                > timedelta(seconds=ROUTE_AUTHORITY_MAX_AGE_SECONDS):
+        if now - observed_at > timedelta(seconds=ROUTE_AUTHORITY_MAX_AGE_SECONDS):
             raise NewsClassifierFailure("MODEL_UNAVAILABLE")
         provider = payload.get("providers", {}).get(_QUOTA_PROVIDER_KEY)
         if not isinstance(provider, dict) or provider.get("ok") is not True:
@@ -131,25 +131,29 @@ def build_route_authority_reader(*, routing_state_path, quota_latest_path,
         if set(remaining) != _QUOTA_REQUIRED_WINDOWS:
             # a required 5h/weekly window is missing entirely
             raise NewsClassifierFailure("MODEL_UNAVAILABLE")
-        if any(not isinstance(value, (int, float)) or isinstance(value, bool)
-               for value in remaining.values()):
+        if any(
+            not isinstance(value, (int, float)) or isinstance(value, bool)
+            for value in remaining.values()
+        ):
             # a required window exists but carries no usable remaining
             raise NewsClassifierFailure("MODEL_UNAVAILABLE")
         if any(value <= 0 for value in remaining.values()):
             raise NewsClassifierFailure("QUOTA_EXCEEDED")
-        return {"routing_state": routing_stamp,
-                "quota_latest": quota_stamp
-                | {"observed_at": observed_at.isoformat()}}
+        return {
+            "routing_state": routing_stamp,
+            "quota_latest": quota_stamp | {"observed_at": observed_at.isoformat()},
+        }
 
     return read_authority
 
 
 def _parse_observed_at(value):
-    from datetime import datetime, timezone
+    from datetime import datetime
+
     observed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     if observed.tzinfo is None or observed.utcoffset() is None:
         raise ValueError("naive observed_at")
-    return observed.astimezone(timezone.utc)
+    return observed.astimezone(UTC)
 
 
 def build_glm_prompt(request):
@@ -163,8 +167,9 @@ def build_glm_prompt(request):
     exists in this prompt. GLM receives no ``--output-schema`` enforcement,
     so the prompt itself demands the exact output contract: one bare JSON
     object — no prose, no code fences."""
-    evidence = json.dumps(request.evidence, sort_keys=True,
-                          separators=(",", ":"), ensure_ascii=False)
+    evidence = json.dumps(
+        request.evidence, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
     event_types = "/".join(sorted(EVENT_TYPES_V1))
     return (
         "역할: Tokmo NEWS 구조화 사실 추출기. 아래 공개 NEWS 근거에서 "
@@ -192,7 +197,8 @@ def build_glm_prompt(request):
         "에는 아래 evidence의 key만 넣을 수 있다. evidence "
         "밖의 사실, 계정·보유·가격·경로·비밀 정보는 절대 출력하지 "
         "않는다.\n"
-        f"evidence: {evidence}\n")
+        f"evidence: {evidence}\n"
+    )
 
 
 def _top_level_object_spans(text):
@@ -237,8 +243,11 @@ def _top_level_object_spans(text):
     # candidates. A complete child of an unmatched malformed opener is
     # promoted. Every character is still visited exactly once.
     completed_starts = {start for start, _, _ in completed}
-    return [(start, end) for start, end, parent in completed
-            if parent is None or parent not in completed_starts]
+    return [
+        (start, end)
+        for start, end, parent in completed
+        if parent is None or parent not in completed_starts
+    ]
 
 
 def extract_json_object(text):
@@ -253,12 +262,11 @@ def extract_json_object(text):
     Raises JSONDecodeError (settling as PARSE_FAIL) when no object is
     present or the message exceeds the bounded output cap."""
     if len(text) > GLM_OUTPUT_MAX_BYTES:
-        raise json.JSONDecodeError(
-            "model output exceeds the bounded cap", text, 0)
+        raise json.JSONDecodeError("model output exceeds the bounded cap", text, 0)
     chosen = None
     for start, end in _top_level_object_spans(text):
         try:
-            value = json.loads(text[start:end + 1])
+            value = json.loads(text[start : end + 1])
         except ValueError:
             continue
         if isinstance(value, dict):
@@ -299,14 +307,16 @@ def read_zai_credential_file(env_file):
         if line.startswith("export "):
             line = line[7:].lstrip()
         name, separator, value = line.partition("=")
-        if separator and name.strip() in ("GLM_API_KEY", "ZAI_API_KEY") \
-                and value.strip().strip("'\""):
+        if (
+            separator
+            and name.strip() in ("GLM_API_KEY", "ZAI_API_KEY")
+            and value.strip().strip("'\"")
+        ):
             return value.strip().strip("'\"")
     raise NewsClassifierFailure("MODEL_UNAVAILABLE")
 
 
-def _sanitize_failure_excerpt(data, secret_texts,
-                              max_chars=_FAILURE_EXCERPT_MAX_CHARS):
+def _sanitize_failure_excerpt(data, secret_texts, max_chars=_FAILURE_EXCERPT_MAX_CHARS):
     """Bounded diagnostics excerpt with every secret-bearing line removed.
 
     Direct occurrences of each secret are replaced, and any line sharing a
@@ -318,10 +328,13 @@ def _sanitize_failure_excerpt(data, secret_texts,
         if not secret or len(secret) < 4:
             continue
         data = data.replace(secret, _REDACTED)
-        fragments.extend(line.strip() for line in secret.splitlines()
-                         if len(line.strip()) >= 4)
-    lines = [_REDACTED if any(fragment in line for fragment in fragments)
-             else line for line in data.splitlines()]
+        fragments.extend(
+            line.strip() for line in secret.splitlines() if len(line.strip()) >= 4
+        )
+    lines = [
+        _REDACTED if any(fragment in line for fragment in fragments) else line
+        for line in data.splitlines()
+    ]
     text = "\n".join(lines)
     if len(text) > max_chars:
         text = text[:max_chars] + "…[truncated]"
@@ -329,15 +342,18 @@ def _sanitize_failure_excerpt(data, secret_texts,
 
 
 def _bundle_identity(request, prompt_text):
-    return (request.input_evidence_digest,
-            hashlib.sha256(prompt_text.encode("utf-8")).hexdigest()[:16])
+    return (
+        request.input_evidence_digest,
+        hashlib.sha256(prompt_text.encode("utf-8")).hexdigest()[:16],
+    )
 
 
 _BUNDLE_SEQUENCE = []  # monotonic fallback counter (no ambient clock)
 
 
-def _preserve_failure_diagnostics(*, diagnostics_root, error,
-                                  request, prompt_text, now=None):
+def _preserve_failure_diagnostics(
+    *, diagnostics_root, error, request, prompt_text, now=None
+):
     """Owner-only bounded failure record rescued after a typed failure.
 
     Retains control-plane facts only — typed exit, provider/model echo,
@@ -350,18 +366,18 @@ def _preserve_failure_diagnostics(*, diagnostics_root, error,
     transport failure."""
     try:
         diagnostics_root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        evidence_digest, prompt_digest = _bundle_identity(
-            request, prompt_text)
+        evidence_digest, prompt_digest = _bundle_identity(request, prompt_text)
         _BUNDLE_SEQUENCE.append(None)
-        prefix = (now.strftime("%Y%m%dT%H%M%S")
-                  if now is not None
-                  else f"seq{len(_BUNDLE_SEQUENCE):06d}")
+        prefix = (
+            now.strftime("%Y%m%dT%H%M%S")
+            if now is not None
+            else f"seq{len(_BUNDLE_SEQUENCE):06d}"
+        )
         bundle = diagnostics_root / f"{prefix}-{prompt_digest}"
         bundle.mkdir(mode=0o700)
         secrets = [prompt_text]
         for key, value in request.evidence.items():
-            secrets.extend(text for text in (str(key), str(value))
-                           if len(text) >= 4)
+            secrets.extend(text for text in (str(key), str(value)) if len(text) >= 4)
         carried = getattr(error, "failure_diagnostics", None) or {}
         record = {
             "record": "news-classifier-failure-diagnostics-v1",
@@ -373,25 +389,27 @@ def _preserve_failure_diagnostics(*, diagnostics_root, error,
             "prompt_policy_digest": request.prompt_policy_digest,
             "http_status": carried.get("http_status"),
             "error_class": _sanitize_failure_excerpt(
-                carried.get("error_class") or "", secrets),
+                carried.get("error_class") or "", secrets
+            ),
         }
         record_path = bundle / "failure.json"
         record_path.write_text(
-            json.dumps(record, ensure_ascii=False, sort_keys=True),
-            encoding="utf-8")
+            json.dumps(record, ensure_ascii=False, sort_keys=True), encoding="utf-8"
+        )
         os.chmod(record_path, 0o600)
         bundles = sorted(
             (path for path in diagnostics_root.iterdir() if path.is_dir()),
-            key=lambda path: (path.stat().st_mtime_ns, path.name))
+            key=lambda path: (path.stat().st_mtime_ns, path.name),
+        )
         for stale in bundles[:-FAILURE_DIAGNOSTICS_MAX_BUNDLES]:
             shutil.rmtree(stale, ignore_errors=True)
     except OSError:
         pass
 
 
-def build_glm_classifier_call(*, glm_runner, authority_reader,
-                              receipt_sink, timeout_seconds, work_dir,
-                              clock):
+def build_glm_classifier_call(
+    *, glm_runner, authority_reader, receipt_sink, timeout_seconds, work_dir, clock
+):
     """Compose the production classifier_call for the async worker.
 
     ``glm_runner`` is a ``prompt_text, timeout_seconds -> message text``
@@ -409,10 +427,11 @@ def build_glm_classifier_call(*, glm_runner, authority_reader,
     work_dir = Path(work_dir)
 
     def classifier_call(request):
-        if request.provider != NEWS_CLASSIFIER_PROVIDER \
-                or request.model_id != DEFAULT_NEWS_CLASSIFIER_MODEL_ID \
-                or request.output_schema_id \
-                != NEWS_CLASSIFIER_OUTPUT_SCHEMA_ID:
+        if (
+            request.provider != NEWS_CLASSIFIER_PROVIDER
+            or request.model_id != DEFAULT_NEWS_CLASSIFIER_MODEL_ID
+            or request.output_schema_id != NEWS_CLASSIFIER_OUTPUT_SCHEMA_ID
+        ):
             raise NewsClassifierFailure("MODEL_REJECTED")
         authority = authority_reader(request)
         prompt_text = build_glm_prompt(request)
@@ -423,28 +442,35 @@ def build_glm_classifier_call(*, glm_runner, authority_reader,
         except (NewsClassifierFailure, TimeoutError) as error:
             _preserve_failure_diagnostics(
                 diagnostics_root=work_dir / "failure_diagnostics",
-                error=error, request=request, prompt_text=prompt_text,
-                now=clock() if clock is not None else None)
+                error=error,
+                request=request,
+                prompt_text=prompt_text,
+                now=clock() if clock is not None else None,
+            )
             raise
         output = extract_json_object(message)  # settles as PARSE_FAIL
         canonical = validate_classifier_output_r3(
-            output, provider=request.provider, model_id=request.model_id,
-            evidence=request.evidence)
-        receipt_sink({
-            "receipt": "news-classifier-routing-receipt-v1",
-            "provider": request.provider,
-            "model_id": request.model_id,
-            "purpose": request.purpose,
-            "output_schema_id": request.output_schema_id,
-            "input_evidence_digest": request.input_evidence_digest,
-            "prompt_policy_digest": request.prompt_policy_digest,
-            "timeout_seconds": timeout_seconds,
-            "retry_max": 0,
-            "transport": "direct-zai-chat-completions",
-            "route_authority": authority,
-            "output_digest": hashlib.sha256(
-                canonical.encode("utf-8")).hexdigest(),
-        })
+            output,
+            provider=request.provider,
+            model_id=request.model_id,
+            evidence=request.evidence,
+        )
+        receipt_sink(
+            {
+                "receipt": "news-classifier-routing-receipt-v1",
+                "provider": request.provider,
+                "model_id": request.model_id,
+                "purpose": request.purpose,
+                "output_schema_id": request.output_schema_id,
+                "input_evidence_digest": request.input_evidence_digest,
+                "prompt_policy_digest": request.prompt_policy_digest,
+                "timeout_seconds": timeout_seconds,
+                "retry_max": 0,
+                "transport": "direct-zai-chat-completions",
+                "route_authority": authority,
+                "output_digest": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+            }
+        )
         return canonical
 
     return classifier_call

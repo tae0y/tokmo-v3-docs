@@ -5,9 +5,15 @@ import json
 from dataclasses import asdict, dataclass
 from datetime import date
 
-
-FIXED_QUERY_KEYS = ("bgn_de", "end_de", "sort", "sort_mth", "page_count",
-                    "last_reprt_at", "page_no")
+FIXED_QUERY_KEYS = (
+    "bgn_de",
+    "end_de",
+    "sort",
+    "sort_mth",
+    "page_count",
+    "last_reprt_at",
+    "page_no",
+)
 MAX_WINDOW_DAYS = 90
 PAGE_COUNT = 100
 
@@ -19,9 +25,20 @@ class BulkContractError(ValueError):
 class BulkTransportFailure(Exception):
     """Closed transport outcome; never contains wire/provider text."""
 
-    ALLOWED = frozenset({"timeout", "connection_failure", "http_5xx", "http_429",
-                         "auth_rejection", "bad_request", "redirect", "body_too_large",
-                         "unsupported_content_encoding", "protocol_failure"})
+    ALLOWED = frozenset(
+        {
+            "timeout",
+            "connection_failure",
+            "http_5xx",
+            "http_429",
+            "auth_rejection",
+            "bad_request",
+            "redirect",
+            "body_too_large",
+            "unsupported_content_encoding",
+            "protocol_failure",
+        }
+    )
 
     def __init__(self, code: str):
         if code not in self.ALLOWED:
@@ -45,10 +62,15 @@ class BulkRequest:
             raise BulkContractError("window_too_large")
         if type(page_no) is not int or page_no < 1:
             raise BulkContractError("invalid_page")
-        pairs = (("bgn_de", begin.strftime("%Y%m%d")),
-                 ("end_de", end.strftime("%Y%m%d")), ("sort", "date"),
-                 ("sort_mth", "asc"), ("page_count", "100"),
-                 ("last_reprt_at", "N"), ("page_no", str(page_no)))
+        pairs = (
+            ("bgn_de", begin.strftime("%Y%m%d")),
+            ("end_de", end.strftime("%Y%m%d")),
+            ("sort", "date"),
+            ("sort_mth", "asc"),
+            ("page_count", "100"),
+            ("last_reprt_at", "N"),
+            ("page_no", str(page_no)),
+        )
         if tuple(key for key, _ in pairs) != FIXED_QUERY_KEYS:
             raise BulkContractError("query_contract")
         return cls(begin, end, page_no, pairs)
@@ -67,8 +89,9 @@ class Disclosure:
     rm: str | None
 
     def canonical_json(self) -> str:
-        return json.dumps(asdict(self), ensure_ascii=False, sort_keys=True,
-                          separators=(",", ":"))
+        return json.dumps(
+            asdict(self), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
 
     def payload_hash(self) -> str:
         return hashlib.sha256(self.canonical_json().encode()).hexdigest()
@@ -108,9 +131,13 @@ def _row(value) -> Disclosure:
     if not isinstance(value, dict):
         raise BulkContractError("invalid_row")
     stock = _optional(value, "stock_code")
-    if stock is not None and (len(stock) != 6 or
-                              any(character not in "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                                  for character in stock)):
+    if stock is not None and (
+        len(stock) != 6
+        or any(
+            character not in "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            for character in stock
+        )
+    ):
         raise BulkContractError("invalid_stock_code")
     corp_code = _required(value, "corp_code")
     receipt = _required(value, "rcept_no")
@@ -124,10 +151,17 @@ def _row(value) -> Disclosure:
     corp_cls = _required(value, "corp_cls")
     if corp_cls not in {"Y", "K", "N", "E"}:
         raise BulkContractError("invalid_corp_cls")
-    return Disclosure(corp_code, _required(value, "corp_name"), stock, corp_cls,
-                      _required(value, "report_nm"), receipt,
-                      _required(value, "flr_nm"), receipt_date,
-                      _optional(value, "rm"))
+    return Disclosure(
+        corp_code,
+        _required(value, "corp_name"),
+        stock,
+        corp_cls,
+        _required(value, "report_nm"),
+        receipt,
+        _required(value, "flr_nm"),
+        receipt_date,
+        _optional(value, "rm"),
+    )
 
 
 def parse_page(body: bytes, requested_page: int) -> BulkPage:
@@ -140,7 +174,9 @@ def parse_page(body: bytes, requested_page: int) -> BulkPage:
         if code == "013":
             return BulkPage(requested_page, 0, 0, ())
         stop = {"010", "011", "012", "020", "021", "101"}
-        raise BulkContractError(f"provider_{code}" if code in stop else "provider_contract")
+        raise BulkContractError(
+            f"provider_{code}" if code in stop else "provider_contract"
+        )
     if payload.get("page_no") != requested_page:
         raise BulkContractError("page_echo")
     if payload.get("page_count") != PAGE_COUNT:
@@ -155,5 +191,6 @@ def parse_page(body: bytes, requested_page: int) -> BulkPage:
         raise BulkContractError("list_cardinality")
     if requested_page < total_page and len(rows) != PAGE_COUNT:
         raise BulkContractError("nonfinal_cardinality")
-    return BulkPage(requested_page, total_count, total_page,
-                    tuple(_row(item) for item in rows))
+    return BulkPage(
+        requested_page, total_count, total_page, tuple(_row(item) for item in rows)
+    )

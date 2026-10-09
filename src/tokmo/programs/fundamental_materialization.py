@@ -26,11 +26,11 @@ from types import MappingProxyType
 
 from tokmo.facts.sec_fundamentals import parse_companyfacts_response
 from tokmo.values.fundamental_materials import (
+    AvailableAtResolution,
     OfficialFundamentalMaterialV1,
     StatementScope,
 )
 
-from tokmo.values.fundamental_materials import AvailableAtResolution
 AvailableAtResolver = Callable[[str], AvailableAtResolution]
 
 
@@ -138,7 +138,8 @@ def build_fundamental_materialization_deps(
     - SQLite/file-write: 0 (store is NOT instantiated here)
     """
     store_path = (
-        (home / ".local" / "share" / "tokmo-v3").resolve() / "fundamentals"
+        (home / ".local" / "share" / "tokmo-v3").resolve()
+        / "fundamentals"
         / "fundamental_materials.db"
     )
 
@@ -146,13 +147,16 @@ def build_fundamental_materialization_deps(
         from tokmo.records.fundamental_material_store import (
             FundamentalMaterialStore,
         )
+
         store_path.parent.mkdir(parents=True, exist_ok=True)
         return FundamentalMaterialStore(store_path)
 
-    return MappingProxyType({
-        "sec_transport": sec_transport_factory(),
-        "opendart_transport": opendart_transport_factory(),
-        "store_path": store_path,
-        "store_factory": _store_factory,
-        "clock": clock,
-    })
+    return MappingProxyType(
+        {
+            "sec_transport": sec_transport_factory(),
+            "opendart_transport": opendart_transport_factory(),
+            "store_path": store_path,
+            "store_factory": _store_factory,
+            "clock": clock,
+        }
+    )

@@ -15,11 +15,10 @@ event already exists. Unmappable market strings alert nothing and are
 surfaced as counts only.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Callable
 
-from tokmo.values.account_scope_patterns import ACCOUNT_SCOPE_RE
 from tokmo.values.account_source_profile import (
     derive_account_source_profiles,
     toss_orders_target_scopes,
@@ -29,7 +28,6 @@ from tokmo.values.instrument_display import order_alert_title
 from tokmo.values.pulse_policy import PulseTickV1
 from tokmo.values.trade_event import (
     conditional_alert_id,
-    dialogue_dedupe_key,
 )
 
 CONDITIONAL_PAGE_LIMIT = 20
@@ -64,10 +62,14 @@ class ConditionalStageResult:
     wire_starts: int
 
 
-def build_conditional_fill_question(*, account_scope: str, symbol: str,
-                                    market_class: "str | None" = None,
-                                    instrument_name: "str | None" = None,
-                                    recommendation: "str | None" = None) -> str:
+def build_conditional_fill_question(
+    *,
+    account_scope: str,
+    symbol: str,
+    market_class: "str | None" = None,
+    instrument_name: "str | None" = None,
+    recommendation: "str | None" = None,
+) -> str:
     """Render submission, never infer execution from a triggered order ID.
 
     The legacy function/prompt-kind names remain for stored reply compatibility.
@@ -79,18 +81,21 @@ def build_conditional_fill_question(*, account_scope: str, symbol: str,
     del account_scope
     recommendation_line = (
         "- 플레이북 정보 부족으로 추천문구 없음"
-        if recommendation is None else f"- {recommendation}"
+        if recommendation is None
+        else f"- {recommendation}"
     )
-    return "\n".join([
-        order_alert_title(market_class, symbol, instrument_name),
-        "조건에 도달해 주문이 접수됐어요.",
-        "체결 여부는 아직 확인되지 않았어요.",
-        "",
-        "추천문구",
-        recommendation_line,
-        "",
-        "답장으로 남긴 매매 사유는 체결 확인 전까지 임시 보관해요.",
-    ])
+    return "\n".join(
+        [
+            order_alert_title(market_class, symbol, instrument_name),
+            "조건에 도달해 주문이 접수됐어요.",
+            "체결 여부는 아직 확인되지 않았어요.",
+            "",
+            "추천문구",
+            recommendation_line,
+            "",
+            "답장으로 남긴 매매 사유는 체결 확인 전까지 임시 보관해요.",
+        ]
+    )
 
 
 def _legs(order):
@@ -108,27 +113,49 @@ def _triggered_id(condition) -> "str | None":
     return value if isinstance(value, str) and value else None
 
 
-def run_conditional_detection(*, tick: PulseTickV1,
-                              holdings_reader: Callable,
-                              native_refs_reader: Callable,
-                              token_provider: Callable,
-                              conditional_orders_fetch: Callable,
-                              dialogue_store,
-                              clock: Callable[[], datetime], now: datetime,
-                              wire_recorder: Callable,
-                              playbook_root=None,
-                              ) -> ConditionalStageResult:
+def run_conditional_detection(
+    *,
+    tick: PulseTickV1,
+    holdings_reader: Callable,
+    native_refs_reader: Callable,
+    token_provider: Callable,
+    conditional_orders_fetch: Callable,
+    dialogue_store,
+    clock: Callable[[], datetime],
+    now: datetime,
+    wire_recorder: Callable,
+    playbook_root=None,
+) -> ConditionalStageResult:
     if not isinstance(tick, PulseTickV1):
         raise ValueError("conditional detection requires a PulseTickV1")
     del clock, now  # detected_at instants come from the store's own clock
 
-    def _result(status, reason, *, scanned_status="", observed=0,
-                transitions=0, alerts=0, suppressed=0, mapping_failures=0,
-                enqueued=0, wires=0):
+    def _result(
+        status,
+        reason,
+        *,
+        scanned_status="",
+        observed=0,
+        transitions=0,
+        alerts=0,
+        suppressed=0,
+        mapping_failures=0,
+        enqueued=0,
+        wires=0,
+    ):
         return ConditionalStageResult(
-            status, reason, tick.tick_id, scanned_status, observed,
-            transitions, alerts, suppressed, mapping_failures, enqueued,
-            wires)
+            status,
+            reason,
+            tick.tick_id,
+            scanned_status,
+            observed,
+            transitions,
+            alerts,
+            suppressed,
+            mapping_failures,
+            enqueued,
+            wires,
+        )
 
     try:
         holdings = holdings_reader()
@@ -141,8 +168,7 @@ def run_conditional_detection(*, tick: PulseTickV1,
     except Exception:
         refs = None
     ref_scopes = frozenset() if refs is None else frozenset(refs.scopes())
-    profiles = derive_account_source_profiles(
-        holdings, native_ref_scopes=ref_scopes)
+    profiles = derive_account_source_profiles(holdings, native_ref_scopes=ref_scopes)
     target_scopes = list(toss_orders_target_scopes(profiles))
     if not target_scopes:
         return _result("skipped", "skipped_no_target_scopes")
@@ -157,16 +183,21 @@ def run_conditional_detection(*, tick: PulseTickV1,
     wire_recorder("CONDITIONAL_ORDERS", f"conditional:{scan_status}:0")
     try:
         outcome = conditional_orders_fetch(
-            account_scope=scope, native_ref=refs.reveal(scope),
-            status=scan_status, cursor=cursors.get(scan_status),
-            limit=CONDITIONAL_PAGE_LIMIT)
+            account_scope=scope,
+            native_ref=refs.reveal(scope),
+            status=scan_status,
+            cursor=cursors.get(scan_status),
+            limit=CONDITIONAL_PAGE_LIMIT,
+        )
     except Exception:
-        return _result("failed", "failed_provider_other",
-                       scanned_status=scan_status, wires=1)
+        return _result(
+            "failed", "failed_provider_other", scanned_status=scan_status, wires=1
+        )
     code = getattr(outcome, "code", None)
     if code != "success":
-        return _result("failed", f"failed_provider_{code}",
-                       scanned_status=scan_status, wires=1)
+        return _result(
+            "failed", f"failed_provider_{code}", scanned_status=scan_status, wires=1
+        )
 
     observed = 0
     transitions = 0
@@ -175,21 +206,24 @@ def run_conditional_detection(*, tick: PulseTickV1,
     mapping_failures = 0
     enqueued = 0
     for order in outcome.conditional_orders:
-        market_class = order.market if order.market in _MARKET_CLASSES \
-            else None
+        market_class = order.market if order.market in _MARKET_CLASSES else None
         for leg_index, condition in _legs(order):
             observed += 1
             key = f"{order.conditional_order_id}:{leg_index}"
             previous = observations.get(key)
-            previous_id = None if previous is None \
-                else previous.get("triggered_order_id")
+            previous_id = (
+                None if previous is None else previous.get("triggered_order_id")
+            )
             current_id = _triggered_id(condition)
-            is_transition = (previous is not None and previous_id is None
-                            and current_id is not None)
+            is_transition = (
+                previous is not None and previous_id is None and current_id is not None
+            )
             if is_transition:
                 transitions += 1
-                if dialogue_store.find_event_by_source_record_key(
-                        current_id) is not None:
+                if (
+                    dialogue_store.find_event_by_source_record_key(current_id)
+                    is not None
+                ):
                     # §3.1(d): the migrated regular event arrived first —
                     # its question flow already ran; alert nothing.
                     suppressed += 1
@@ -199,8 +233,8 @@ def run_conditional_detection(*, tick: PulseTickV1,
                     mapping_failures += 1
                 else:
                     alert_id = conditional_alert_id(
-                        order.conditional_order_id, leg_index,
-                        condition.status)
+                        order.conditional_order_id, leg_index, condition.status
+                    )
                     created = dialogue_store.record_conditional_alert(
                         alert_id,
                         conditional_order_id=order.conditional_order_id,
@@ -211,9 +245,11 @@ def run_conditional_detection(*, tick: PulseTickV1,
                         market_class=market_class,
                         order_type=order.order_type,
                         quantity_ordered=order.quantity,
-                        prev_status=(previous.get("status")
-                                     if previous else "UNOBSERVED"),
-                        new_status=condition.status)
+                        prev_status=(
+                            previous.get("status") if previous else "UNOBSERVED"
+                        ),
+                        new_status=condition.status,
+                    )
                     if created == "created":
                         alerts_created += 1
                         # A triggered order is not a fill. Keep correlation
@@ -222,13 +258,21 @@ def run_conditional_detection(*, tick: PulseTickV1,
                 "status": condition.status,
                 "triggered_order_id": current_id,
             }
-    cursors[scan_status] = (outcome.next_cursor
-                            if outcome.has_next and outcome.next_cursor
-                            else None)
+    cursors[scan_status] = (
+        outcome.next_cursor if outcome.has_next and outcome.next_cursor else None
+    )
     dialogue_store.write_conditional_scan_state(
-        {"observations": observations, "cursors": cursors})
-    return _result("saved", "saved", scanned_status=scan_status,
-                   observed=observed, transitions=transitions,
-                   alerts=alerts_created, suppressed=suppressed,
-                   mapping_failures=mapping_failures, enqueued=enqueued,
-                   wires=1)
+        {"observations": observations, "cursors": cursors}
+    )
+    return _result(
+        "saved",
+        "saved",
+        scanned_status=scan_status,
+        observed=observed,
+        transitions=transitions,
+        alerts=alerts_created,
+        suppressed=suppressed,
+        mapping_failures=mapping_failures,
+        enqueued=enqueued,
+        wires=1,
+    )

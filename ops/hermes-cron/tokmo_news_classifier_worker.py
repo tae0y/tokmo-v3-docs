@@ -7,6 +7,7 @@ Hermes origin bot. Failure to send leaves the health notice unacknowledged.
 The final summary must match the callback. Already-notified or nighttime
 health stays silent; its raw detail remains in decision-worker/latest.json.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -15,21 +16,32 @@ import io
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]  # ops/hermes-cron/<this> -> project root
+PROJECT_ROOT = (
+    Path(__file__).resolve().parents[2]
+)  # ops/hermes-cron/<this> -> project root
 HERMES_HOME = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
 
 
 PROJECT = PROJECT_ROOT
 ROOT = PROJECT_ROOT / "var/data"
 RUNTIME = PROJECT_ROOT / "var/runtime/news-classifier-worker"
-STOCK_HEALTH_CREDENTIAL = PROJECT_ROOT / '.secrets/hermes-credentials/news_decision_stock_telegram.env'
+STOCK_HEALTH_CREDENTIAL = (
+    PROJECT_ROOT / ".secrets/hermes-credentials/news_decision_stock_telegram.env"
+)
 sys.path.insert(0, str(PROJECT / "src"))
 
 SUMMARY = "news-decision-worker/1"
-CODES = {"OK": 0, "DEGRADED": 2, "EXCEPTION": 1, "DISABLED": 0, "ALREADY_RUNNING": 0, "BEFORE_CUTOFF": 2}
+CODES = {
+    "OK": 0,
+    "DEGRADED": 2,
+    "EXCEPTION": 1,
+    "DISABLED": 0,
+    "ALREADY_RUNNING": 0,
+    "BEFORE_CUTOFF": 2,
+}
 
 
 def atomic_write(path: Path, text: str) -> None:
@@ -50,10 +62,17 @@ def atomic_write(path: Path, text: str) -> None:
 def validated_payload(payload) -> dict:
     """Check the notice payload's version/status/code before anything reaches the real stdout."""
     contract = getattr(payload, "contract", None)
-    if (not isinstance(payload, str) or not payload.strip() or not isinstance(contract, dict)
-            or contract.get("summary") != SUMMARY or contract.get("status") not in CODES
-            or contract.get("code") != CODES[contract["status"]]):
-        raise RuntimeError(f"NEWS decision notice payload rejected before stdout: {str(payload)[:200]!r} {contract!r}")
+    if (
+        not isinstance(payload, str)
+        or not payload.strip()
+        or not isinstance(contract, dict)
+        or contract.get("summary") != SUMMARY
+        or contract.get("status") not in CODES
+        or contract.get("code") != CODES[contract["status"]]
+    ):
+        raise RuntimeError(
+            f"NEWS decision notice payload rejected before stdout: {str(payload)[:200]!r} {contract!r}"
+        )
     return dict(contract, notice=str(payload))
 
 
@@ -64,23 +83,41 @@ def validated_summary(raw: str, code, delivered: list) -> dict:
     except ValueError:
         summary = None
     notice = summary.get("notice") if isinstance(summary, dict) else None
-    if (not isinstance(summary, dict) or summary.get("summary") != SUMMARY or summary.get("status") not in CODES
-            or summary.get("code") != code or CODES[summary["status"]] != code
-            or not (notice is None or (isinstance(notice, str) and notice.strip()))):
-        raise RuntimeError(f"NEWS decision worker contract mismatch: exit={code!r} output={raw[-600:]!r}")
+    if (
+        not isinstance(summary, dict)
+        or summary.get("summary") != SUMMARY
+        or summary.get("status") not in CODES
+        or summary.get("code") != code
+        or CODES[summary["status"]] != code
+        or not (notice is None or (isinstance(notice, str) and notice.strip()))
+    ):
+        raise RuntimeError(
+            f"NEWS decision worker contract mismatch: exit={code!r} output={raw[-600:]!r}"
+        )
     handoff = summary.get("notice_handoff")
     if isinstance(handoff, dict) and handoff.get("status") != "OK":
-        raise RuntimeError("NEWS decision notice handoff failed: " + json.dumps(handoff, ensure_ascii=False))
+        raise RuntimeError(
+            "NEWS decision notice handoff failed: "
+            + json.dumps(handoff, ensure_ascii=False)
+        )
     # What the callback actually wrote must be exactly what the final summary claims.
-    expected = [dict(summary=SUMMARY, status=summary["status"], code=code, notice=notice)] if notice is not None else []
-    if delivered != expected or (notice is not None) != (isinstance(handoff, dict) and handoff.get("status") == "OK"):
-        raise RuntimeError(f"NEWS decision notice handoff mismatch: delivered={delivered!r} summary={lines[-1][-600:]!r}")
+    expected = (
+        [dict(summary=SUMMARY, status=summary["status"], code=code, notice=notice)]
+        if notice is not None
+        else []
+    )
+    if delivered != expected or (notice is not None) != (
+        isinstance(handoff, dict) and handoff.get("status") == "OK"
+    ):
+        raise RuntimeError(
+            f"NEWS decision notice handoff mismatch: delivered={delivered!r} summary={lines[-1][-600:]!r}"
+        )
     return summary
 
 
 def emit_stock_notice(payload, delivered, sender):
     record = validated_payload(payload)
-    receipt = sender(record['notice'])
+    receipt = sender(record["notice"])
     delivered.append(record)
     return receipt
 
@@ -94,16 +131,22 @@ def main() -> int:
         except BlockingIOError:
             return 0
         from tokmo.programs.news_decision_config import read_decision_config
+
         if read_decision_config(ROOT).get("enabled"):
             sys.path.insert(0, str(PROJECT / "tools"))
             from run_news_decision_worker import main as decision_main
+
             delivered = []
             receipts = []
 
             def emit(payload) -> None:
                 from news_health_stock_route import build_stock_health_sender
+
                 from tokmo.facts.telegram_dialogue_live import send_dialogue_message
-                sender = build_stock_health_sender(STOCK_HEALTH_CREDENTIAL, send_dialogue_message)
+
+                sender = build_stock_health_sender(
+                    STOCK_HEALTH_CREDENTIAL, send_dialogue_message
+                )
                 receipts.append(emit_stock_notice(payload, delivered, sender))
 
             captured = io.StringIO()
@@ -111,22 +154,44 @@ def main() -> int:
                 code = decision_main(["--root", str(ROOT)], emit=emit)
             validated_summary(captured.getvalue(), code, delivered)
             if receipts:
-                atomic_write(RUNTIME / 'stock-health-latest.json', json.dumps({
-                    'at':datetime.now(timezone.utc).isoformat(), 'destination':'STOCK_BOT',
-                    'provider_message_ids':receipts}, ensure_ascii=False)+'\n')
+                atomic_write(
+                    RUNTIME / "stock-health-latest.json",
+                    json.dumps(
+                        {
+                            "at": datetime.now(UTC).isoformat(),
+                            "destination": "STOCK_BOT",
+                            "provider_message_ids": receipts,
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n",
+                )
             return 0
         from tokmo.facts.news_http import zai_chat_once
         from tokmo.programs.news_classifier_worker import main as worker_main
-        now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+        now = datetime.now(UTC).replace(microsecond=0).isoformat()
         captured = io.StringIO()
         with contextlib.redirect_stdout(captured):
-            code = worker_main([
-                "--root", str(ROOT), "--now", now,
-                "--routing-state", str(HERMES_HOME / "MODEL_ROUTING_STATE.md"),
-                "--quota-latest", str(HERMES_HOME / "cron/state/model-quota-latest.json"),
-                "--timeout", "600", "--max-items", "2",
-                "--lease-owner", "news-classifier-worker-cron",
-            ], glm_transport=zai_chat_once)
+            code = worker_main(
+                [
+                    "--root",
+                    str(ROOT),
+                    "--now",
+                    now,
+                    "--routing-state",
+                    str(HERMES_HOME / "MODEL_ROUTING_STATE.md"),
+                    "--quota-latest",
+                    str(HERMES_HOME / "cron/state/model-quota-latest.json"),
+                    "--timeout",
+                    "600",
+                    "--max-items",
+                    "2",
+                    "--lease-owner",
+                    "news-classifier-worker-cron",
+                ],
+                glm_transport=zai_chat_once,
+            )
         if code != 0:
             raise RuntimeError(f"NEWS classifier worker exit {code}")
         payload = captured.getvalue().strip() or "{}"

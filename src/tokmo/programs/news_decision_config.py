@@ -1,4 +1,5 @@
 """Small opt-in selector shared by Pulse and the decision worker."""
+
 import json
 from datetime import datetime
 from pathlib import Path
@@ -16,10 +17,10 @@ def read_decision_config(root):
 
 def delivery_window_open(config, now):
     """Optional one-time notification deadline; analysis remains enabled after expiry."""
-    if 'delivery_until' not in config:
+    if "delivery_until" not in config:
         return True
     try:
-        end = datetime.fromisoformat(config['delivery_until'].replace('Z', '+00:00'))
+        end = datetime.fromisoformat(config["delivery_until"].replace("Z", "+00:00"))
         return end.utcoffset() is not None and now < end
     except (ValueError, TypeError, AttributeError):
         return False

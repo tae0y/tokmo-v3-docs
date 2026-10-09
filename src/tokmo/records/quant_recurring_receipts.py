@@ -1,12 +1,12 @@
 """Private STRICT receipt store for the inactive Quant recurring lane."""
 
-from dataclasses import dataclass
-from datetime import datetime, timedelta
 import fcntl
 import json
 import os
-from pathlib import Path
 import sqlite3
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from pathlib import Path
 
 from tokmo.records.durability import fsync_directory
 from tokmo.records.private_sqlite import (
@@ -25,7 +25,6 @@ from tokmo.values.quant_recurring import (
     QuantDueIdentityV1,
     QuantTerminalStateV1,
 )
-
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS quant_recurring_due(
@@ -72,12 +71,14 @@ CREATE TABLE IF NOT EXISTS quant_recurring_result(
 PRAGMA user_version=1;
 """
 
-_TERMINAL_STATES = frozenset({
-    QuantTerminalStateV1.SUCCEEDED,
-    QuantTerminalStateV1.NO_PACK,
-    QuantTerminalStateV1.FAILED,
-    QuantTerminalStateV1.UNKNOWN,
-})
+_TERMINAL_STATES = frozenset(
+    {
+        QuantTerminalStateV1.SUCCEEDED,
+        QuantTerminalStateV1.NO_PACK,
+        QuantTerminalStateV1.FAILED,
+        QuantTerminalStateV1.UNKNOWN,
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,9 +177,7 @@ class QuantRecurringReceiptStore:
             with private_creation():
                 connection = connect_private(self.path)
         else:
-            connection = connect_private(
-                self.path, mode="ro" if readonly else "rwc"
-            )
+            connection = connect_private(self.path, mode="ro" if readonly else "rwc")
         connection.row_factory = sqlite3.Row
         return connection, created
 
@@ -206,7 +205,8 @@ class QuantRecurringReceiptStore:
             reference.close()
 
     def acquire_identity_lease(
-        self, identity_digest: str,
+        self,
+        identity_digest: str,
     ) -> QuantIdentityLeaseV1 | None:
         if not _valid_digest(identity_digest):
             raise ValueError("identity_digest")
@@ -225,9 +225,7 @@ class QuantRecurringReceiptStore:
         except BlockingIOError:
             os.close(descriptor)
             return None
-        return QuantIdentityLeaseV1(
-            descriptor, f"quant-recurring:{identity_digest}"
-        )
+        return QuantIdentityLeaseV1(descriptor, f"quant-recurring:{identity_digest}")
 
     def claim(
         self,
@@ -255,7 +253,8 @@ class QuantRecurringReceiptStore:
                 (identity.identity_digest,),
             ).fetchone()
             stored_market = (
-                "US_NYSE_NASDAQ" if identity.market.value == "US"
+                "US_NYSE_NASDAQ"
+                if identity.market.value == "US"
                 else identity.market.value
             )
             if row is None:
@@ -283,10 +282,16 @@ class QuantRecurringReceiptStore:
                     identity.completed_session_date.isoformat(),
                     identity.universe_policy_version,
                 )
-                actual = tuple(row[key] for key in (
-                    "program_id", "policy_version", "market",
-                    "completed_session_date", "universe_policy_version",
-                ))
+                actual = tuple(
+                    row[key]
+                    for key in (
+                        "program_id",
+                        "policy_version",
+                        "market",
+                        "completed_session_date",
+                        "universe_policy_version",
+                    )
+                )
                 if actual != expected:
                     connection.execute("ROLLBACK")
                     raise ValueError("identity_conflict")

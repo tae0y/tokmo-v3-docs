@@ -7,24 +7,24 @@ from hashlib import sha256
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from tokmo.facts.quant_recurring_membership import (
-    DEADLINE_MARGIN_SECONDS,
-    EndpointKindV1,
-    OfficialMembershipRequestV1,
-    PER_START_BUDGET_SECONDS,
-    membership_native_identity,
-    membership_operation_plan,
-    predict_us_personal_cohort,
-    sufficient_deadline,
-    quant_candle_native_identity,
-)
+from tokmo.facts.market_regime_toss_input import completed_session_boundary
 from tokmo.facts.quant_membership import (
     parse_nasdaqlisted,
     parse_otherlisted,
     parse_sec_issuer,
     parse_sec_registry,
 )
-from tokmo.facts.market_regime_toss_input import completed_session_boundary
+from tokmo.facts.quant_recurring_membership import (
+    DEADLINE_MARGIN_SECONDS,
+    PER_START_BUDGET_SECONDS,
+    EndpointKindV1,
+    OfficialMembershipRequestV1,
+    membership_native_identity,
+    membership_operation_plan,
+    predict_us_personal_cohort,
+    quant_candle_native_identity,
+    sufficient_deadline,
+)
 from tokmo.programs.market_regime_shadow import resolve_completed_session_by_market
 from tokmo.programs.quant_membership import assemble_us_personal_membership_material
 from tokmo.programs.quant_multifactor_core import evaluate_quant_multifactor_core_v1
@@ -34,13 +34,14 @@ from tokmo.programs.quant_multifactor_inputs import (
     requires_page2,
 )
 from tokmo.records.current_holdings_store import CurrentHoldingsStore
+from tokmo.records.fundamental_material_store import read_admissible_materials_ro
 from tokmo.records.official_membership_observation_store import (
     OfficialMembershipObservationStore,
 )
-from tokmo.records.fundamental_material_store import read_admissible_materials_ro
 from tokmo.records.quant_recurring_receipts import QuantRecurringResultV1
 from tokmo.records.regular_session_history import RegularSessionHistoryStore
 from tokmo.values.cadence_policy import CadencePolicyV1
+from tokmo.values.current_holdings import canonical_holdings_bytes
 from tokmo.values.official_membership_observation import (
     MembershipPolicyV1,
     ObservationSourceKindV1,
@@ -48,7 +49,6 @@ from tokmo.values.official_membership_observation import (
     OfficialMembershipAcquisitionV1,
     RequestIdentityV1,
 )
-from tokmo.values.current_holdings import canonical_holdings_bytes
 from tokmo.values.ops_kernel import CadenceBudgetExceeded
 from tokmo.values.quant_multifactor_core import MarketV1
 from tokmo.values.quant_multifactor_provenance import (
@@ -147,9 +147,7 @@ def evaluate_quant_due(
         )
 
     scheduled_for_utc = tick.scheduled_for_utc
-    ny_date = scheduled_for_utc.astimezone(
-        ZoneInfo(MARKET_TIMEZONE[Market.US])
-    ).date()
+    ny_date = scheduled_for_utc.astimezone(ZoneInfo(MARKET_TIMEZONE[Market.US])).date()
     if (
         not calendar.us_refresh_succeeded
         or not calendar.mask_bound
@@ -245,7 +243,8 @@ def evaluate_quant_due(
         observations_path.exists()
         and OfficialMembershipObservationStore(observations_path).read_acquisition(
             identity.acquisition_id
-        ) is not None
+        )
+        is not None
     ):
         return _context(
             QuantDueDecisionV1.ALREADY_TERMINAL,
@@ -279,9 +278,10 @@ def evaluate_quant_due(
         )
     planned_starts = quant_due_max_increment(len(predicted_symbols))
     observed_now = deps.clock()
-    remaining = policy.child_timeout_seconds - (
-        observed_now - scheduled_for_utc
-    ).total_seconds()
+    remaining = (
+        policy.child_timeout_seconds
+        - (observed_now - scheduled_for_utc).total_seconds()
+    )
     required = planned_starts * PER_START_BUDGET_SECONDS + DEADLINE_MARGIN_SECONDS
     deadline_margin = int(remaining - required)
     if not sufficient_deadline(
@@ -311,7 +311,13 @@ def evaluate_quant_due(
 
 
 def _request_payload(
-    *, acquisition_id, source_kind, request, subject_key, started_count, outcome,
+    *,
+    acquisition_id,
+    source_kind,
+    request,
+    subject_key,
+    started_count,
+    outcome,
 ) -> ObservedSourcePayloadV1:
     parts = request.url.split("/", 3)
     return ObservedSourcePayloadV1(
@@ -365,8 +371,14 @@ def _expected_membership_plan(symbols, binding):
 
 
 def run_quant_membership_acquisition(
-    *, root: Path, deps, policy: CadencePolicyV1, tick, executor,
-    context: QuantDueContextV1, receipts,
+    *,
+    root: Path,
+    deps,
+    policy: CadencePolicyV1,
+    tick,
+    executor,
+    context: QuantDueContextV1,
+    receipts,
 ) -> QuantMembershipOutcomeV1:
     del root, tick
     if context.decision is not QuantDueDecisionV1.DUE or context.identity is None:
@@ -374,14 +386,11 @@ def run_quant_membership_acquisition(
     if (
         context.membership_plan_starts
         != membership_plan_starts(len(context.predicted_symbols))
-        or context.membership_starts_ceiling
-        != policy.request_limits.membership_starts
+        or context.membership_starts_ceiling != policy.request_limits.membership_starts
     ):
         raise QuantRecurringRefusal("membership_budget_binding")
     binding = QuantSessionBindingV1(context.identity)
-    plan = membership_operation_plan(
-        context.predicted_symbols, binding.session_date
-    )
+    plan = membership_operation_plan(context.predicted_symbols, binding.session_date)
     if len(plan) != context.membership_plan_starts:
         raise QuantRecurringRefusal("membership_plan_starts")
     if plan != _expected_membership_plan(context.predicted_symbols, binding):
@@ -391,8 +400,13 @@ def run_quant_membership_acquisition(
     lease = receipts.acquire_identity_lease(identity.identity_digest)
     if lease is None:
         return QuantMembershipOutcomeV1(
-            identity, None, (), context.predicted_symbols, 0,
-            "skipped", "identity_in_progress",
+            identity,
+            None,
+            (),
+            context.predicted_symbols,
+            0,
+            "skipped",
+            "identity_in_progress",
         )
     payloads = []
     starts = 0
@@ -407,10 +421,16 @@ def run_quant_membership_acquisition(
         )
         if claim.state is not QuantTerminalStateV1.CLAIMED:
             return QuantMembershipOutcomeV1(
-                identity, None, (), context.predicted_symbols, 0,
-                "skipped", "already_terminal",
+                identity,
+                None,
+                (),
+                context.predicted_symbols,
+                0,
+                "skipped",
+                "already_terminal",
             )
         try:
+
             def fetch(index, request, source_kind, subject_key):
                 nonlocal starts
                 operation, native_identity = plan[index]
@@ -430,14 +450,16 @@ def run_quant_membership_acquisition(
                     native_identity,
                     invoke,
                 )
-                payloads.append(_request_payload(
-                    acquisition_id=identity.acquisition_id,
-                    source_kind=source_kind,
-                    request=request,
-                    subject_key=subject_key,
-                    started_count=index + 1,
-                    outcome=outcome,
-                ))
+                payloads.append(
+                    _request_payload(
+                        acquisition_id=identity.acquisition_id,
+                        source_kind=source_kind,
+                        request=request,
+                        subject_key=subject_key,
+                        started_count=index + 1,
+                        outcome=outcome,
+                    )
+                )
                 return outcome
 
             listed = fetch(
@@ -488,13 +510,15 @@ def run_quant_membership_acquisition(
                     ObservationSourceKindV1.SEC_ISSUER,
                     symbol,
                 )
-                issuer_rows.append(parse_sec_issuer(
-                    issuer_payload.body,
-                    observed_at=issuer_payload.observed_at,
-                    expected_symbol=symbol,
-                    expected_cik=registry.cik,
-                    expected_exchange=registry.exchange_token,
-                ))
+                issuer_rows.append(
+                    parse_sec_issuer(
+                        issuer_payload.body,
+                        observed_at=issuer_payload.observed_at,
+                        expected_symbol=symbol,
+                        expected_cik=registry.cik,
+                        expected_exchange=registry.exchange_token,
+                    )
+                )
             acquisition = OfficialMembershipAcquisitionV1(
                 acquisition_id=identity.acquisition_id,
                 membership_policy=MembershipPolicyV1.OBSERVED_CURRENT_LISTING_V1,
@@ -513,14 +537,19 @@ def run_quant_membership_acquisition(
                 finished_at=deps.clock(),
             )
             return QuantMembershipOutcomeV1(
-                identity, None, tuple(payloads), context.predicted_symbols,
+                identity,
+                None,
+                tuple(payloads),
+                context.predicted_symbols,
                 starts,
-                "failed", "membership_budget_exhausted",
+                "failed",
+                "membership_budget_exhausted",
             )
         except Exception as error:
             detail = getattr(error, "args", ())
-            detail_text = detail[0] if detail and isinstance(
-                detail[0], str) else "unknown"
+            detail_text = (
+                detail[0] if detail and isinstance(detail[0], str) else "unknown"
+            )
             reason = f"source_failure:{detail_text}"[:48]
             receipts.finish(
                 identity.identity_digest,
@@ -529,9 +558,13 @@ def run_quant_membership_acquisition(
                 finished_at=deps.clock(),
             )
             return QuantMembershipOutcomeV1(
-                identity, None, tuple(payloads), context.predicted_symbols,
+                identity,
+                None,
+                tuple(payloads),
+                context.predicted_symbols,
                 starts,
-                "failed", reason,
+                "failed",
+                reason,
             )
     return QuantMembershipOutcomeV1(
         identity,
@@ -572,13 +605,21 @@ def _observation_store(root, deps):
 
 
 def _result(
-    *, membership, holdings, membership_digest, provenance_digest, pack_digest,
-    membership_starts, page1_starts, page2_starts, admissible_count, degraded,
-    limitations, holdings_captured_at=None,
+    *,
+    membership,
+    holdings,
+    membership_digest,
+    provenance_digest,
+    pack_digest,
+    membership_starts,
+    page1_starts,
+    page2_starts,
+    admissible_count,
+    degraded,
+    limitations,
+    holdings_captured_at=None,
 ):
-    captured_at = (
-        holdings.captured_at if holdings is not None else holdings_captured_at
-    )
+    captured_at = holdings.captured_at if holdings is not None else holdings_captured_at
     if captured_at is None:
         raise ValueError("holdings_captured_at")
     return QuantRecurringResultV1(
@@ -600,8 +641,17 @@ def _result(
 
 
 def _settle_no_pack(
-    *, receipts, membership, holdings, membership_digest, provenance_digest,
-    reason, page1_starts=0, page2_starts=0, admissible_count=0, deps,
+    *,
+    receipts,
+    membership,
+    holdings,
+    membership_digest,
+    provenance_digest,
+    reason,
+    page1_starts=0,
+    page2_starts=0,
+    admissible_count=0,
+    deps,
 ):
     receipts.finish(
         membership.identity.identity_digest,
@@ -647,7 +697,14 @@ def _validate_candle_outcome(outcome):
 
 
 def _fetch_candle_pages(
-    *, deps, executor, bearer, binding, symbol, remaining_starts, starts,
+    *,
+    deps,
+    executor,
+    bearer,
+    binding,
+    symbol,
+    remaining_starts,
+    starts,
 ):
     if remaining_starts < 1:
         raise _QuantCandleBudgetExceeded()
@@ -662,13 +719,15 @@ def _fetch_candle_pages(
     )
 
     def fetch_page1(claim):
-        return _validate_candle_outcome(deps.stock_candles_fetch(
-            claim=claim,
-            bearer=bearer,
-            symbol=symbol,
-            before=completed_session_boundary(Market.US, binding.session_date),
-            adjusted=False,
-        ))
+        return _validate_candle_outcome(
+            deps.stock_candles_fetch(
+                claim=claim,
+                bearer=bearer,
+                symbol=symbol,
+                before=completed_session_boundary(Market.US, binding.session_date),
+                adjusted=False,
+            )
+        )
 
     starts.page1 += 1
     page1 = _raw_candle_page(
@@ -692,13 +751,15 @@ def _fetch_candle_pages(
     )
 
     def fetch_page2(claim):
-        return _validate_candle_outcome(deps.stock_candles_fetch(
-            claim=claim,
-            bearer=bearer,
-            symbol=symbol,
-            before=page2_request.before,
-            adjusted=False,
-        ))
+        return _validate_candle_outcome(
+            deps.stock_candles_fetch(
+                claim=claim,
+                bearer=bearer,
+                symbol=symbol,
+                before=page2_request.before,
+                adjusted=False,
+            )
+        )
 
     starts.page2 += 1
     page2 = _raw_candle_page(
@@ -713,8 +774,15 @@ def _fetch_candle_pages(
 
 
 def run_quant_recurring_shadow(
-    *, root: Path, deps, policy: CadencePolicyV1, tick, executor, token,
-    membership: QuantMembershipOutcomeV1, receipts,
+    *,
+    root: Path,
+    deps,
+    policy: CadencePolicyV1,
+    tick,
+    executor,
+    token,
+    membership: QuantMembershipOutcomeV1,
+    receipts,
 ) -> tuple[str, str]:
     del tick
     if membership.status != "ok" or membership.acquisition is None:
@@ -755,11 +823,9 @@ def run_quant_recurring_shadow(
         evaluation_as_of=holdings.captured_at,
         acquisition=membership.acquisition,
     )
-    if (
-        tuple(sorted(proof.symbol for proof in assembled_membership.proofs))
-        != tuple(sorted(membership.predicted_symbols))
-        or len(assembled_membership.materials) != len(membership.predicted_symbols)
-    ):
+    if tuple(sorted(proof.symbol for proof in assembled_membership.proofs)) != tuple(
+        sorted(membership.predicted_symbols)
+    ) or len(assembled_membership.materials) != len(membership.predicted_symbols):
         _observation_store(root, deps).append_failure(
             acquisition=membership.acquisition,
             payloads=membership.payloads,
@@ -827,9 +893,7 @@ def run_quant_recurring_shadow(
         )
         return "failed", "token_unavailable"
 
-    proof_by_symbol = {
-        proof.symbol: proof for proof in assembled_membership.proofs
-    }
+    proof_by_symbol = {proof.symbol: proof for proof in assembled_membership.proofs}
     members = []
     candle_starts = _QuantCandleStarts()
     try:
@@ -847,12 +911,14 @@ def run_quant_recurring_shadow(
                 ),
                 starts=candle_starts,
             )
-            members.append(MemberAssemblyInputV1(
-                proof_by_symbol[symbol],
-                tuple(fundamentals[symbol]),
-                page1,
-                page2,
-            ))
+            members.append(
+                MemberAssemblyInputV1(
+                    proof_by_symbol[symbol],
+                    tuple(fundamentals[symbol]),
+                    page1,
+                    page2,
+                )
+            )
     except _QuantCandleBudgetExceeded:
         return _settle_no_pack(
             receipts=receipts,
@@ -877,14 +943,16 @@ def run_quant_recurring_shadow(
             page2_starts=candle_starts.page2,
             deps=deps,
         )
-    assembled = assemble_quant_multifactor_input(AssemblyInputV1(
-        holdings,
-        holdings.captured_at,
-        tuple(members),
-        QUANT_RECURRING_UNIVERSE_ID,
-        QUANT_RECURRING_UNIVERSE_POLICY_VERSION,
-        QUANT_RECURRING_ADJUSTMENT_VERSION,
-    ))
+    assembled = assemble_quant_multifactor_input(
+        AssemblyInputV1(
+            holdings,
+            holdings.captured_at,
+            tuple(members),
+            QUANT_RECURRING_UNIVERSE_ID,
+            QUANT_RECURRING_UNIVERSE_POLICY_VERSION,
+            QUANT_RECURRING_ADJUSTMENT_VERSION,
+        )
+    )
     if assembled.cohort_input is None:
         return _settle_no_pack(
             receipts=receipts,

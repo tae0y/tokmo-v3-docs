@@ -1,18 +1,18 @@
 """Strict-TDD RED suite: material delta → reverse-index recall → shadow."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
-from tokmo.records.ops_kernel import OpsKernelStore
 from tokmo.programs.material_recall import (
     index_keys_from_delta,
     recall_for_deltas,
     record_would_have_sent_shadow,
 )
 from tokmo.programs.youtube_tracking import (
+    admit_report_candidates,
     parse_tracking_candidates,
     provenance_from_archive_meta,
-    admit_report_candidates,
 )
+from tokmo.records.ops_kernel import OpsKernelStore
 from tokmo.values.analysis_admission import MaterialDeltaV1
 from tokmo.values.analysis_contracts import (
     ChangeBasis,
@@ -21,9 +21,8 @@ from tokmo.values.analysis_contracts import (
     MaterialKindV1,
     TrustClass,
 )
-from tokmo.values.ops_kernel import IndexKeyKind
 
-NOW = datetime(2026, 8, 16, 1, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 16, 1, 0, tzinfo=UTC)
 BINDING = "b" * 64
 
 CANDIDATE_BLOCK = """=== TRACKING_CANDIDATE BEGIN ===
@@ -57,8 +56,13 @@ def evidence(evidence_id="ev-1"):
     )
 
 
-def delta(subject="subject-1", *, symbol="005980", ref=None,
-          change_basis=ChangeBasis.BASELINE_DELTA):
+def delta(
+    subject="subject-1",
+    *,
+    symbol="005980",
+    ref=None,
+    change_basis=ChangeBasis.BASELINE_DELTA,
+):
     return MaterialDeltaV1(
         subject_id=subject,
         material_kind=MaterialKindV1.QUOTE_STATE,
@@ -100,8 +104,10 @@ def make_store_with_hypothesis(tmp_path):
     }
     provenance = provenance_from_archive_meta(meta)
     candidates = parse_tracking_candidates(
-        CANDIDATE_BLOCK, source_ref=provenance.source_ref,
-        revision=provenance.revision, observed_at=NOW,
+        CANDIDATE_BLOCK,
+        source_ref=provenance.source_ref,
+        revision=provenance.revision,
+        observed_at=NOW,
     )
     admit_report_candidates(store, candidates, now=NOW)
     return store
@@ -136,7 +142,10 @@ def test_shadow_record_written_once_and_replayed_as_duplicate(tmp_path):
     outcome = record_would_have_sent_shadow(store, recalls, deltas, now=NOW)
     assert outcome.new_records == 1
     replay = record_would_have_sent_shadow(
-        store, recalls, deltas, now=NOW + timedelta(hours=5),
+        store,
+        recalls,
+        deltas,
+        now=NOW + timedelta(hours=5),
     )
     assert replay.new_records == 0
     assert replay.duplicates == 1
@@ -186,6 +195,7 @@ def test_128_char_subject_with_symbol_none_end_to_end(tmp_path):
         assert len(key.value) <= 128
         # require_token-legal charset (the old '~' separator raised here)
         from tokmo.values.ops_kernel import HypothesisIndexKeyV1 as _K
+
         _K(key.kind, key.value)  # must not raise
     # deterministic: same input -> identical bounded identity
     again = index_keys_from_delta(
@@ -198,14 +208,19 @@ def test_128_char_subject_with_symbol_none_end_to_end(tmp_path):
     # batch resilience + real match: register a hypothesis under the SAME
     # bounded key namespace via a delta-built key, then recall matches it
     from tokmo.programs.youtube_tracking import (
-        admit_report_candidates, parse_tracking_candidates,
+        admit_report_candidates,
+        parse_tracking_candidates,
     )
+
     block = CANDIDATE_BLOCK.replace(
         "KEYS: entity:005980, metric:005980:net_flow_10d, effect:state_change",
         f"KEYS: {entity.value}",
     )
     parsed = parse_tracking_candidates(
-        block, source_ref="vid-long", revision="rev-long-1", observed_at=NOW,
+        block,
+        source_ref="vid-long",
+        revision="rev-long-1",
+        observed_at=NOW,
     )
     admit_report_candidates(store, parsed, now=NOW)
     recalls = recall_for_deltas(store, (long_delta,), now=NOW)
@@ -216,13 +231,13 @@ def test_128_char_subject_with_symbol_none_end_to_end(tmp_path):
 def test_max_length_evidence_id_source_event_is_bounded(tmp_path):
     """128-char evidence_id must yield a legal bounded source-event key."""
     long_ev = "e" * 128
-    long_delta = delta(subject="subject-1", symbol="005980",
-                       ref=evidence(long_ev))
+    long_delta = delta(subject="subject-1", symbol="005980", ref=evidence(long_ev))
     keys = index_keys_from_delta(long_delta)
     src = next(k for k in keys if k.kind.value == "SOURCE_EVENT")
     # 'source-event:' (13) + 128 = 141 > 128: must be bounded, not thrown
     assert len(src.value) <= 128
     from tokmo.values.ops_kernel import HypothesisIndexKeyV1 as _K
+
     _K(src.kind, src.value)  # legal charset
     # deterministic
     again = index_keys_from_delta(

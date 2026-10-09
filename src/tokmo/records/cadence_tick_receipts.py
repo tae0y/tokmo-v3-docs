@@ -10,20 +10,27 @@ never rewritten. No secret, account scope, symbol, quantity, URL, or raw
 exception text is ever stored here.
 """
 
-from datetime import datetime
 import os
-from pathlib import Path
 import sqlite3
 import stat
-from typing import Mapping, Sequence
+from collections.abc import Mapping, Sequence
+from datetime import datetime
+from pathlib import Path
 
 from tokmo.values.material_pack import canonical_decode, canonical_encode
 from tokmo.values.ops_kernel import iso, parse_iso
 
-TICK_STATUS_TOKENS = frozenset({
-    "STARTED", "COMPLETE", "SKIPPED_CLOSED", "PARTIAL", "FAILED",
-    "MISSED", "UNKNOWN",
-})
+TICK_STATUS_TOKENS = frozenset(
+    {
+        "STARTED",
+        "COMPLETE",
+        "SKIPPED_CLOSED",
+        "PARTIAL",
+        "FAILED",
+        "MISSED",
+        "UNKNOWN",
+    }
+)
 TERMINAL_STATUS_TOKENS = TICK_STATUS_TOKENS - {"STARTED"}
 EVENT_KIND_TOKENS = frozenset({"MISSED", "DUPLICATE", "OVERLAP"})
 
@@ -64,8 +71,11 @@ class CadenceTickReceiptStoreError(ValueError):
 
 
 def _aware(value: datetime, name: str) -> None:
-    if (not isinstance(value, datetime) or value.tzinfo is None
-            or value.utcoffset() is None):
+    if (
+        not isinstance(value, datetime)
+        or value.tzinfo is None
+        or value.utcoffset() is None
+    ):
         raise CadenceTickReceiptStoreError(f"{name} must be an aware datetime")
 
 
@@ -109,9 +119,16 @@ class CadenceTickReceiptStore:
         _aware(scheduled_for_utc, "scheduled_for_utc")
         return policy_version, iso(scheduled_for_utc)
 
-    def begin_tick(self, policy_version: str, scheduled_for_utc: datetime,
-                   tick_id: int, *, observed_start: datetime,
-                   lag_seconds: float, max_lag_seconds: int) -> str:
+    def begin_tick(
+        self,
+        policy_version: str,
+        scheduled_for_utc: datetime,
+        tick_id: int,
+        *,
+        observed_start: datetime,
+        lag_seconds: float,
+        max_lag_seconds: int,
+    ) -> str:
         """Insert the slot's STARTED row; an existing row means duplicate."""
         version, slot_iso = self._slot(policy_version, scheduled_for_utc)
         _aware(observed_start, "observed_start")
@@ -134,14 +151,28 @@ class CadenceTickReceiptStore:
                 "calendar_attempts_json) "
                 "VALUES(?,?,?,'STARTED',NULL,?,?,NULL,?,?,NULL,NULL,NULL,"
                 "NULL,NULL,NULL)",
-                (version, slot_iso, tick_id, iso(observed_start),
-                 iso(self._clock()), float(lag_seconds), int(max_lag_seconds)),
+                (
+                    version,
+                    slot_iso,
+                    tick_id,
+                    iso(observed_start),
+                    iso(self._clock()),
+                    float(lag_seconds),
+                    int(max_lag_seconds),
+                ),
             )
             return "created"
 
-    def record_missed(self, policy_version: str, scheduled_for_utc: datetime,
-                      tick_id: int, *, observed_start: datetime,
-                      lag_seconds: float, max_lag_seconds: int) -> None:
+    def record_missed(
+        self,
+        policy_version: str,
+        scheduled_for_utc: datetime,
+        tick_id: int,
+        *,
+        observed_start: datetime,
+        lag_seconds: float,
+        max_lag_seconds: int,
+    ) -> None:
         """A lag-excess slot is terminal MISSED without ever starting."""
         version, slot_iso = self._slot(policy_version, scheduled_for_utc)
         _aware(observed_start, "observed_start")
@@ -156,8 +187,16 @@ class CadenceTickReceiptStore:
                 "calendar_attempts_json) "
                 "VALUES(?,?,?,'MISSED','excess_start_lag',?,?,?,?,?,NULL,"
                 "NULL,NULL,NULL,NULL,NULL)",
-                (version, slot_iso, tick_id, iso(observed_start), now, now,
-                 float(lag_seconds), int(max_lag_seconds)),
+                (
+                    version,
+                    slot_iso,
+                    tick_id,
+                    iso(observed_start),
+                    now,
+                    now,
+                    float(lag_seconds),
+                    int(max_lag_seconds),
+                ),
             )
             self._append_event(connection, version, slot_iso, "MISSED")
 
@@ -172,22 +211,30 @@ class CadenceTickReceiptStore:
             (version, slot_iso, seq, kind, iso(self._clock())),
         )
 
-    def record_event(self, policy_version: str, scheduled_for_utc: datetime,
-                     kind: str) -> None:
+    def record_event(
+        self, policy_version: str, scheduled_for_utc: datetime, kind: str
+    ) -> None:
         version, slot_iso = self._slot(policy_version, scheduled_for_utc)
         if kind not in EVENT_KIND_TOKENS:
             raise CadenceTickReceiptStoreError("unknown tick event kind")
         with self._connect() as connection:
             self._append_event(connection, version, slot_iso, kind)
 
-    def finish_tick(self, policy_version: str, scheduled_for_utc: datetime, *,
-                    status: str, reason: str | None, mask_digest: str | None,
-                    open_markets: Sequence[str],
-                    local_dates: Mapping[str, str],
-                    stages: Sequence[Mapping],
-                    wire_counts: Mapping,
-                    calendar_attempts: Sequence[str],
-                    finished_at: datetime) -> None:
+    def finish_tick(
+        self,
+        policy_version: str,
+        scheduled_for_utc: datetime,
+        *,
+        status: str,
+        reason: str | None,
+        mask_digest: str | None,
+        open_markets: Sequence[str],
+        local_dates: Mapping[str, str],
+        stages: Sequence[Mapping],
+        wire_counts: Mapping,
+        calendar_attempts: Sequence[str],
+        finished_at: datetime,
+    ) -> None:
         version, slot_iso = self._slot(policy_version, scheduled_for_utc)
         if status not in TERMINAL_STATUS_TOKENS:
             raise CadenceTickReceiptStoreError("invalid terminal tick status")
@@ -208,15 +255,24 @@ class CadenceTickReceiptStore:
                 "local_dates_json=?,stages_json=?,wire_counts_json=?,"
                 "calendar_attempts_json=? "
                 "WHERE policy_version=? AND scheduled_for_utc=?",
-                (status, reason, iso(finished_at), mask_digest,
-                 _json(list(open_markets)), _json(dict(local_dates)),
-                 _json([dict(stage) for stage in stages]),
-                 _json(dict(wire_counts)), _json(list(calendar_attempts)),
-                 version, slot_iso),
+                (
+                    status,
+                    reason,
+                    iso(finished_at),
+                    mask_digest,
+                    _json(list(open_markets)),
+                    _json(dict(local_dates)),
+                    _json([dict(stage) for stage in stages]),
+                    _json(dict(wire_counts)),
+                    _json(list(calendar_attempts)),
+                    version,
+                    slot_iso,
+                ),
             )
 
-    def reconcile_stale(self, *, now: datetime,
-                        exclude: tuple[str, datetime]) -> tuple[dict, ...]:
+    def reconcile_stale(
+        self, *, now: datetime, exclude: tuple[str, datetime]
+    ) -> tuple[dict, ...]:
         """Settle every stale STARTED slot (crashed invocation) to UNKNOWN."""
         _aware(now, "now")
         exclude_version, exclude_iso = self._slot(*exclude)
@@ -236,14 +292,17 @@ class CadenceTickReceiptStore:
                     "WHERE policy_version=? AND scheduled_for_utc=?",
                     (iso(now), row["policy_version"], row["scheduled_for_utc"]),
                 )
-                reconciled.append({
-                    "policy_version": row["policy_version"],
-                    "scheduled_for_utc": parse_iso(row["scheduled_for_utc"]),
-                })
+                reconciled.append(
+                    {
+                        "policy_version": row["policy_version"],
+                        "scheduled_for_utc": parse_iso(row["scheduled_for_utc"]),
+                    }
+                )
             return tuple(reconciled)
 
-    def read_tick(self, policy_version: str,
-                  scheduled_for_utc: datetime) -> dict | None:
+    def read_tick(
+        self, policy_version: str, scheduled_for_utc: datetime
+    ) -> dict | None:
         version, slot_iso = self._slot(policy_version, scheduled_for_utc)
         with self._connect() as connection:
             row = connection.execute(
@@ -272,8 +331,9 @@ class CadenceTickReceiptStore:
             "calendar_attempts": _decode(row["calendar_attempts_json"]),
         }
 
-    def read_events(self, policy_version: str,
-                    scheduled_for_utc: datetime) -> tuple[dict, ...]:
+    def read_events(
+        self, policy_version: str, scheduled_for_utc: datetime
+    ) -> tuple[dict, ...]:
         version, slot_iso = self._slot(policy_version, scheduled_for_utc)
         with self._connect() as connection:
             rows = connection.execute(
@@ -281,7 +341,11 @@ class CadenceTickReceiptStore:
                 "WHERE policy_version=? AND scheduled_for_utc=? ORDER BY seq",
                 (version, slot_iso),
             ).fetchall()
-        return tuple({
-            "seq": row["seq"], "kind": row["kind"],
-            "observed_at": parse_iso(row["observed_at"]),
-        } for row in rows)
+        return tuple(
+            {
+                "seq": row["seq"],
+                "kind": row["kind"],
+                "observed_at": parse_iso(row["observed_at"]),
+            }
+            for row in rows
+        )

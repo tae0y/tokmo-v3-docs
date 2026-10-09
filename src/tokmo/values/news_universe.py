@@ -6,10 +6,10 @@ and are never guessed; a KR entry without a resolvable Korean name stays in
 the universe but out of the Naver query (D12).
 """
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-import re
 
 UNIVERSE_SCHEMA_VERSION = 1
 UNIVERSE_MAX_BYTES = 64 * 1024
@@ -58,20 +58,26 @@ class NewsUniverseEntryV1:
         if type(self.symbol) is not str or not self.symbol:
             raise ValueError("invalid universe symbol")
         if self.name is not None and (
-                type(self.name) is not str or not self.name.strip()):
+            type(self.name) is not str or not self.name.strip()
+        ):
             raise ValueError("invalid universe name")
         if not isinstance(self.provenance, UniverseProvenance):
             raise ValueError("invalid universe provenance")
         if not isinstance(self.routing, UniverseRouting):
             raise ValueError("invalid universe routing")
-        if (self.market == UNKNOWN_MARKET
-                and self.routing is not UniverseRouting.UNROUTABLE_MARKET):
+        if (
+            self.market == UNKNOWN_MARKET
+            and self.routing is not UniverseRouting.UNROUTABLE_MARKET
+        ):
             raise ValueError("unknown market must be unroutable")
 
 
 def _aware(value: datetime, label: str) -> None:
-    if (not isinstance(value, datetime) or value.tzinfo is None
-            or value.utcoffset() is None):
+    if (
+        not isinstance(value, datetime)
+        or value.tzinfo is None
+        or value.utcoffset() is None
+    ):
         raise ValueError(f"{label} must be aware")
 
 
@@ -96,14 +102,16 @@ class NewsUniverseV1:
         if self.stale_since is not None and not self.stale:
             raise ValueError("stale_since requires stale")
         if type(self.entries) is not tuple or not all(
-                isinstance(entry, NewsUniverseEntryV1)
-                for entry in self.entries):
+            isinstance(entry, NewsUniverseEntryV1) for entry in self.entries
+        ):
             raise ValueError("entries must be NewsUniverseEntryV1 tuple")
         keys = [(entry.market, entry.symbol) for entry in self.entries]
         if len(set(keys)) != len(keys):
             raise ValueError("duplicate universe entry")
-        for label, value in (("holdings_ref", self.holdings_ref),
-                             ("watchlist_ref", self.watchlist_ref)):
+        for label, value in (
+            ("holdings_ref", self.holdings_ref),
+            ("watchlist_ref", self.watchlist_ref),
+        ):
             if type(value) is not str or not value:
                 raise ValueError(f"invalid {label}")
 
@@ -119,6 +127,5 @@ class PersistedUniverseV1:
     def __post_init__(self) -> None:
         if not isinstance(self.latest, NewsUniverseV1):
             raise ValueError("latest must be NewsUniverseV1")
-        if self.previous is not None and not isinstance(
-                self.previous, NewsUniverseV1):
+        if self.previous is not None and not isinstance(self.previous, NewsUniverseV1):
             raise ValueError("previous must be NewsUniverseV1")

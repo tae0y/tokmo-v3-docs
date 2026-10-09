@@ -6,9 +6,7 @@ already present on candidates/hypotheses; deterministic conservative
 classification with typed reason codes and compared fields.
 """
 
-from datetime import datetime, timedelta, timezone
-
-import pytest
+from datetime import UTC, datetime, timedelta
 
 from tokmo.programs.youtube_semantic import classify_semantic_profiles
 from tokmo.values.ops_kernel import (
@@ -22,7 +20,7 @@ from tokmo.values.ops_kernel import (
     TriggerKind,
 )
 
-NOW = datetime(2026, 8, 16, 1, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 16, 1, 0, tzinfo=UTC)
 
 
 def key(kind, value):
@@ -130,29 +128,56 @@ def test_time_horizon_buckets_are_bounded_and_deterministic():
         trigger_expression="entity:005980:x",
         index_keys=(key(ENTITY, "entity:005980"),),
     )
-    none = SemanticProfileV1.from_candidate(make_candidate(
-        next_check_at=None, **base,
-    ))
-    short = SemanticProfileV1.from_candidate(make_candidate(
-        next_check_at=NOW + timedelta(days=7), **base,
-    ))
-    medium = SemanticProfileV1.from_candidate(make_candidate(
-        next_check_at=NOW + timedelta(days=30), **base,
-    ))
-    long_ = SemanticProfileV1.from_candidate(make_candidate(
-        next_check_at=NOW + timedelta(days=90), **base,
-    ))
-    indefinite = SemanticProfileV1.from_candidate(make_candidate(
-        next_check_at=NOW + timedelta(days=400), **base,
-    ))
-    assert (none.horizon, short.horizon, medium.horizon,
-            long_.horizon, indefinite.horizon) == (
-        "none", "short", "medium", "long", "indefinite",
+    none = SemanticProfileV1.from_candidate(
+        make_candidate(
+            next_check_at=None,
+            **base,
+        )
+    )
+    short = SemanticProfileV1.from_candidate(
+        make_candidate(
+            next_check_at=NOW + timedelta(days=7),
+            **base,
+        )
+    )
+    medium = SemanticProfileV1.from_candidate(
+        make_candidate(
+            next_check_at=NOW + timedelta(days=30),
+            **base,
+        )
+    )
+    long_ = SemanticProfileV1.from_candidate(
+        make_candidate(
+            next_check_at=NOW + timedelta(days=90),
+            **base,
+        )
+    )
+    indefinite = SemanticProfileV1.from_candidate(
+        make_candidate(
+            next_check_at=NOW + timedelta(days=400),
+            **base,
+        )
+    )
+    assert (
+        none.horizon,
+        short.horizon,
+        medium.horizon,
+        long_.horizon,
+        indefinite.horizon,
+    ) == (
+        "none",
+        "short",
+        "medium",
+        "long",
+        "indefinite",
     )
     # small drift in the anchor cannot flip the bucket
-    drifted = SemanticProfileV1.from_candidate(make_candidate(
-        next_check_at=NOW + timedelta(days=30) + timedelta(minutes=90), **base,
-    ))
+    drifted = SemanticProfileV1.from_candidate(
+        make_candidate(
+            next_check_at=NOW + timedelta(days=30) + timedelta(minutes=90),
+            **base,
+        )
+    )
     assert drifted.horizon == medium.horizon
 
 
@@ -183,14 +208,16 @@ def test_canonical_identity_flag_short_circuits_to_exact_duplicate():
 
 def test_material_trigger_conflict_preserves_distinct_with_reason():
     decision = classify_semantic_profiles(
-        SemanticProfileV1.from_candidate(make_candidate(
-            trigger_expression="entity:005980:other_signal",
-            index_keys=(
-                key(ENTITY, "entity:005980"),
-                key(METRIC, "metric:semis:sovereign_flow"),
-                key(EFFECT, "effect:semis_long_growth"),
-            ),
-        )),
+        SemanticProfileV1.from_candidate(
+            make_candidate(
+                trigger_expression="entity:005980:other_signal",
+                index_keys=(
+                    key(ENTITY, "entity:005980"),
+                    key(METRIC, "metric:semis:sovereign_flow"),
+                    key(EFFECT, "effect:semis_long_growth"),
+                ),
+            )
+        ),
         hyp_profile(make_hypothesis()),
     )
     assert decision.classification is SemanticClassification.RELATED_BUT_DISTINCT
@@ -217,13 +244,15 @@ def test_high_overlap_without_conflict_queues_merge_review():
     # metric sets differ by one element; everything material is equal and the
     # Jaccard overlap of entity/metric/effect keys is >= 1/2
     decision = classify_semantic_profiles(
-        SemanticProfileV1.from_candidate(make_candidate(
-            index_keys=(
-                key(ENTITY, "entity:005980"),
-                key(METRIC, "metric:semis:sovereign_flow_v2"),
-                key(EFFECT, "effect:semis_long_growth"),
-            ),
-        )),
+        SemanticProfileV1.from_candidate(
+            make_candidate(
+                index_keys=(
+                    key(ENTITY, "entity:005980"),
+                    key(METRIC, "metric:semis:sovereign_flow_v2"),
+                    key(EFFECT, "effect:semis_long_growth"),
+                ),
+            )
+        ),
         hyp_profile(make_hypothesis()),
     )
     assert decision.classification is SemanticClassification.MERGE_REVIEW
@@ -234,15 +263,17 @@ def test_partial_overlap_without_conflict_is_related_but_distinct():
     # 1 shared key of a 7-key union (~0.14): below the high-overlap band,
     # above zero, no material conflict -> preserved as distinct.
     decision = classify_semantic_profiles(
-        SemanticProfileV1.from_candidate(make_candidate(
-            index_keys=(
-                key(ENTITY, "entity:005980"),
-                key(ENTITY, "entity:000660"),
-                key(ENTITY, "entity:035720"),
-                key(ENTITY, "entity:068270"),
-                key(ENTITY, "entity:207940"),
-            ),
-        )),
+        SemanticProfileV1.from_candidate(
+            make_candidate(
+                index_keys=(
+                    key(ENTITY, "entity:005980"),
+                    key(ENTITY, "entity:000660"),
+                    key(ENTITY, "entity:035720"),
+                    key(ENTITY, "entity:068270"),
+                    key(ENTITY, "entity:207940"),
+                ),
+            )
+        ),
         hyp_profile(make_hypothesis()),
     )
     assert decision.classification is SemanticClassification.RELATED_BUT_DISTINCT
@@ -253,9 +284,11 @@ def test_no_meaningful_overlap_creates_with_no_relation():
     # Disjoint key sets but NO material conflict (same trigger/invalidation/
     # horizon/touch): zero overlap only, so the pair is simply unrelated.
     decision = classify_semantic_profiles(
-        SemanticProfileV1.from_candidate(make_candidate(
-            index_keys=(key(ENTITY, "entity:035720"),),
-        )),
+        SemanticProfileV1.from_candidate(
+            make_candidate(
+                index_keys=(key(ENTITY, "entity:035720"),),
+            )
+        ),
         hyp_profile(make_hypothesis()),
     )
     assert decision.classification is SemanticClassification.NO_RELATION
@@ -265,14 +298,16 @@ def test_classifier_hint_cannot_override_material_conflict_guard():
     from tokmo.values.ops_kernel import ClassifierHintV1
 
     decision = classify_semantic_profiles(
-        SemanticProfileV1.from_candidate(make_candidate(
-            trigger_expression="entity:005980:other_signal",
-            index_keys=(
-                key(ENTITY, "entity:005980"),
-                key(METRIC, "metric:semis:sovereign_flow"),
-                key(EFFECT, "effect:semis_long_growth"),
-            ),
-        )),
+        SemanticProfileV1.from_candidate(
+            make_candidate(
+                trigger_expression="entity:005980:other_signal",
+                index_keys=(
+                    key(ENTITY, "entity:005980"),
+                    key(METRIC, "metric:semis:sovereign_flow"),
+                    key(EFFECT, "effect:semis_long_growth"),
+                ),
+            )
+        ),
         hyp_profile(make_hypothesis()),
         hint=ClassifierHintV1(asserts_high_overlap=True),
     )
@@ -284,9 +319,11 @@ def test_classifier_hint_may_only_escalate_no_relation_to_merge_review():
     from tokmo.values.ops_kernel import ClassifierHintV1
 
     decision = classify_semantic_profiles(
-        SemanticProfileV1.from_candidate(make_candidate(
-            index_keys=(key(ENTITY, "entity:035720"),),
-        )),
+        SemanticProfileV1.from_candidate(
+            make_candidate(
+                index_keys=(key(ENTITY, "entity:035720"),),
+            )
+        ),
         hyp_profile(make_hypothesis()),
         hint=ClassifierHintV1(asserts_high_overlap=True),
     )

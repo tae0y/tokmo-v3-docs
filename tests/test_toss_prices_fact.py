@@ -1,13 +1,12 @@
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 from tokmo.facts.toss_prices import parse_prices_response
 from tokmo.values import TOSS_PRICE_SOURCE, TossCurrentPriceFact
 
-
 FIXTURE = Path(__file__).parent / "fixtures" / "toss_prices_openapi_excerpt.json"
-FETCHED_AT = datetime(2026, 7, 28, 3, 0, tzinfo=timezone.utc)
+FETCHED_AT = datetime(2026, 7, 28, 3, 0, tzinfo=UTC)
 
 
 def encoded(items):
@@ -31,8 +30,8 @@ def test_official_kr_us_examples_parse_and_canonicalize_decimal():
             last_price="185.7",
             currency_raw="USD",
             timestamp=datetime(
-                2026, 3, 25, 22, 30, 0, 456000,
-                tzinfo=timezone(timedelta(hours=9))),
+                2026, 3, 25, 22, 30, 0, 456000, tzinfo=timezone(timedelta(hours=9))
+            ),
             fetched_at=FETCHED_AT,
         ),
         TossCurrentPriceFact(
@@ -41,8 +40,8 @@ def test_official_kr_us_examples_parse_and_canonicalize_decimal():
             last_price="72000",
             currency_raw="KRW",
             timestamp=datetime(
-                2026, 3, 25, 9, 30, 0, 123000,
-                tzinfo=timezone(timedelta(hours=9))),
+                2026, 3, 25, 9, 30, 0, 123000, tzinfo=timezone(timedelta(hours=9))
+            ),
             fetched_at=FETCHED_AT,
         ),
     )
@@ -53,12 +52,16 @@ def test_official_kr_us_examples_parse_and_canonicalize_decimal():
 
 def test_null_timestamp_and_unknown_nonempty_currency_are_successful():
     outcome = parse_prices_response(
-        encoded([{
-            "symbol": "Future.X",
-            "lastPrice": "0.0000",
-            "currency": "SYNTH",
-            "timestamp": None,
-        }]),
+        encoded(
+            [
+                {
+                    "symbol": "Future.X",
+                    "lastPrice": "0.0000",
+                    "currency": "SYNTH",
+                    "timestamp": None,
+                }
+            ]
+        ),
         requested_symbols=("Future.X",),
         fetched_at=FETCHED_AT,
     )
@@ -77,12 +80,17 @@ def test_response_symbol_set_is_exact_unique_and_case_sensitive():
         (("Abc",), ["Abc", "Abc"]),
     ]:
         outcome = parse_prices_response(
-            encoded([{
-                "symbol": symbol,
-                "lastPrice": "1",
-                "currency": "USD",
-                "timestamp": None,
-            } for symbol in returned]),
+            encoded(
+                [
+                    {
+                        "symbol": symbol,
+                        "lastPrice": "1",
+                        "currency": "USD",
+                        "timestamp": None,
+                    }
+                    for symbol in returned
+                ]
+            ),
             requested_symbols=requested,
             fetched_at=FETCHED_AT,
         )
@@ -92,16 +100,31 @@ def test_response_symbol_set_is_exact_unique_and_case_sensitive():
 
 def test_malformed_items_fail_all_or_nothing_without_value_leakage():
     invalid_values = [
-        -1, "-0.01", "", "NaN", "Infinity", True,
+        -1,
+        "-0.01",
+        "",
+        "NaN",
+        "Infinity",
+        True,
     ]
     for invalid in invalid_values:
         outcome = parse_prices_response(
-            encoded([
-                {"symbol": "OK", "lastPrice": "2", "currency": "USD",
-                 "timestamp": None},
-                {"symbol": "BAD", "lastPrice": invalid, "currency": "USD",
-                 "timestamp": None},
-            ]),
+            encoded(
+                [
+                    {
+                        "symbol": "OK",
+                        "lastPrice": "2",
+                        "currency": "USD",
+                        "timestamp": None,
+                    },
+                    {
+                        "symbol": "BAD",
+                        "lastPrice": invalid,
+                        "currency": "USD",
+                        "timestamp": None,
+                    },
+                ]
+            ),
             requested_symbols=("OK", "BAD"),
             fetched_at=FETCHED_AT,
         )
@@ -116,7 +139,9 @@ def test_naive_or_non_string_timestamp_and_invalid_fetched_at_fail_closed():
     for timestamp in ["2026-03-25T09:30:00", 1770000000, True, "bad"]:
         outcome = parse_prices_response(
             encoded([{**item, "timestamp": timestamp}]),
-            requested_symbols=("ABC",), fetched_at=FETCHED_AT)
+            requested_symbols=("ABC",),
+            fetched_at=FETCHED_AT,
+        )
         assert outcome.code == "contract_mismatch"
         assert outcome.facts == ()
 
@@ -126,7 +151,9 @@ def test_naive_or_non_string_timestamp_and_invalid_fetched_at_fail_closed():
     ]:
         outcome = parse_prices_response(
             encoded([{**item, "timestamp": None}]),
-            requested_symbols=("ABC",), fetched_at=fetched_at)
+            requested_symbols=("ABC",),
+            fetched_at=fetched_at,
+        )
         assert outcome.code == "contract_mismatch"
         assert outcome.facts == ()
 
@@ -143,18 +170,27 @@ def test_malformed_json_envelope_and_required_fields_fail_closed():
     ]
     for body in bodies:
         outcome = parse_prices_response(
-            body, requested_symbols=("ABC",), fetched_at=FETCHED_AT)
+            body, requested_symbols=("ABC",), fetched_at=FETCHED_AT
+        )
         assert outcome.code in {"parse_error", "contract_mismatch"}
         assert outcome.facts == ()
 
 
 def test_price_respects_official_thirty_character_bound():
     outcome = parse_prices_response(
-        encoded([{
-            "symbol": "ABC", "lastPrice": "1" * 31,
-            "currency": "USD", "timestamp": None,
-        }]),
-        requested_symbols=("ABC",), fetched_at=FETCHED_AT)
+        encoded(
+            [
+                {
+                    "symbol": "ABC",
+                    "lastPrice": "1" * 31,
+                    "currency": "USD",
+                    "timestamp": None,
+                }
+            ]
+        ),
+        requested_symbols=("ABC",),
+        fetched_at=FETCHED_AT,
+    )
 
     assert outcome.code == "contract_mismatch"
     assert outcome.facts == ()
@@ -162,14 +198,28 @@ def test_price_respects_official_thirty_character_bound():
 
 def test_price_rejects_non_plain_decimal_without_expanding_exponent():
     for invalid in [
-        "1E+9999999999999999", "1e5", "1_0", " 1 ", "+1", ".1", "1.",
+        "1E+9999999999999999",
+        "1e5",
+        "1_0",
+        " 1 ",
+        "+1",
+        ".1",
+        "1.",
     ]:
         outcome = parse_prices_response(
-            encoded([{
-                "symbol": "ABC", "lastPrice": invalid,
-                "currency": "USD", "timestamp": None,
-            }]),
-            requested_symbols=("ABC",), fetched_at=FETCHED_AT)
+            encoded(
+                [
+                    {
+                        "symbol": "ABC",
+                        "lastPrice": invalid,
+                        "currency": "USD",
+                        "timestamp": None,
+                    }
+                ]
+            ),
+            requested_symbols=("ABC",),
+            fetched_at=FETCHED_AT,
+        )
 
         assert outcome.code == "contract_mismatch"
         assert outcome.facts == ()

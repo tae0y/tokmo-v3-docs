@@ -1,7 +1,7 @@
 import json
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email.message import Message
 
 import pytest
@@ -17,15 +17,12 @@ from tokmo.facts.toss_prices import (
 from tokmo.facts.toss_prices_live import (
     MAX_BODY_BYTES,
     METHOD,
-    PRICES_PATH,
-    TOSS_HOST,
     TossPricesLiveTransport,
     build_live_opener,
 )
 
-
 TOKEN = "SYNTHETIC-PRICE-TOKEN-0001"
-NOW = datetime(2026, 7, 28, 3, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 28, 3, 0, tzinfo=UTC)
 
 
 class Response:
@@ -68,8 +65,14 @@ def test_request_validation_preserves_case_and_requires_1_to_200_unique_symbols(
     assert request.symbols == ("Abc.1", "x-y")
 
     invalid = [
-        (), tuple(f"S{i}" for i in range(201)), ("ABC", "ABC"),
-        ("A,B",), ("A B",), ("한글",), ("",), ["ABC"],
+        (),
+        tuple(f"S{i}" for i in range(201)),
+        ("ABC", "ABC"),
+        ("A,B",),
+        ("A B",),
+        ("한글",),
+        ("",),
+        ["ABC"],
     ]
     for symbols in invalid:
         with pytest.raises(ValueError, match="invalid_symbols"):
@@ -79,15 +82,14 @@ def test_request_validation_preserves_case_and_requires_1_to_200_unique_symbols(
 def test_wire_is_exact_get_with_literal_comma_and_bearer_only_headers():
     transport = transport_with(Response())
 
-    outcome = transport(build_prices_request(
-        symbols=("Abc.1", "x-y"), token=TOKEN))
+    outcome = transport(build_prices_request(symbols=("Abc.1", "x-y"), token=TOKEN))
 
     assert isinstance(outcome, _TossTransportSuccess)
     assert len(transport.opener.calls) == 1
     wire, timeout = transport.opener.calls[0]
     assert wire.full_url == (
-        "https://openapi.tossinvest.com/api/v1/prices"
-        "?symbols=Abc.1,x-y")
+        "https://openapi.tossinvest.com/api/v1/prices?symbols=Abc.1,x-y"
+    )
     assert wire.get_method() == METHOD == "GET"
     assert wire.data is None
     assert timeout == REQUEST_TIMEOUT_SECONDS
@@ -106,7 +108,8 @@ def test_closed_endpoint_identity_and_invalid_token_never_reach_io():
         TossPricesRequest(PRICES_ENDPOINT_ID, 999, ("ABC",), TOKEN),
         TossPricesRequest(PRICES_ENDPOINT_ID, REQUEST_TIMEOUT_SECONDS, ("ABC",), ""),
         TossPricesRequest(
-            PRICES_ENDPOINT_ID, REQUEST_TIMEOUT_SECONDS, ("ABC",), "bad\nheader"),
+            PRICES_ENDPOINT_ID, REQUEST_TIMEOUT_SECONDS, ("ABC",), "bad\nheader"
+        ),
     ]
     for request in requests:
         assert transport(request).code == "protocol_failure"
@@ -116,18 +119,31 @@ def test_closed_endpoint_identity_and_invalid_token_never_reach_io():
 
 def test_opener_disables_proxy_discovery_and_redirect_following():
     opener = build_live_opener()
-    assert not any(type(handler).__name__ == "ProxyHandler"
-                   for handler in opener.handlers)
-    redirect = next(handler for handler in opener.handlers
-                    if isinstance(handler, urllib.request.HTTPRedirectHandler))
-    assert redirect.redirect_request(
-        None, None, 302, "", None, "https://invalid.example") is None
+    assert not any(
+        type(handler).__name__ == "ProxyHandler" for handler in opener.handlers
+    )
+    redirect = next(
+        handler
+        for handler in opener.handlers
+        if isinstance(handler, urllib.request.HTTPRedirectHandler)
+    )
+    assert (
+        redirect.redirect_request(None, None, 302, "", None, "https://invalid.example")
+        is None
+    )
 
 
-@pytest.mark.parametrize("status,code", [
-    (400, "bad_request"), (401, "auth_rejection"), (403, "forbidden"),
-    (429, "http_429"), (500, "http_5xx"), (302, "redirect"),
-])
+@pytest.mark.parametrize(
+    "status,code",
+    [
+        (400, "bad_request"),
+        (401, "auth_rejection"),
+        (403, "forbidden"),
+        (429, "http_429"),
+        (500, "http_5xx"),
+        (302, "redirect"),
+    ],
+)
 def test_http_failures_map_to_closed_codes_without_retry(status, code):
     headers = Message()
     headers["Retry-After"] = "12"
@@ -145,29 +161,43 @@ def test_http_failures_map_to_closed_codes_without_retry(status, code):
 
 def test_body_encoding_and_numeric_rate_limit_are_bounded():
     too_large = transport_with(Response(b"x" * (MAX_BODY_BYTES + 1)))
-    assert too_large(build_prices_request(
-        symbols=("ABC",), token=TOKEN)).code == "body_too_large"
+    assert (
+        too_large(build_prices_request(symbols=("ABC",), token=TOKEN)).code
+        == "body_too_large"
+    )
 
     headers = Message()
     headers["Content-Encoding"] = "gzip"
     encoded = transport_with(Response(headers=headers))
-    assert encoded(build_prices_request(
-        symbols=("ABC",), token=TOKEN)).code == "unsupported_content_encoding"
+    assert (
+        encoded(build_prices_request(symbols=("ABC",), token=TOKEN)).code
+        == "unsupported_content_encoding"
+    )
 
     headers = Message()
     headers["X-RateLimit-Remaining"] = "7"
     success = transport_with(Response(headers=headers))
-    assert success(build_prices_request(
-        symbols=("ABC",), token=TOKEN)).rate_limit_remaining == 7
+    assert (
+        success(
+            build_prices_request(symbols=("ABC",), token=TOKEN)
+        ).rate_limit_remaining
+        == 7
+    )
 
 
 def test_query_starts_once_and_returns_all_facts_or_closed_failure():
-    body = json.dumps({"result": [{
-        "symbol": "Abc",
-        "lastPrice": "12.30",
-        "currency": "FUT",
-        "timestamp": None,
-    }]}).encode()
+    body = json.dumps(
+        {
+            "result": [
+                {
+                    "symbol": "Abc",
+                    "lastPrice": "12.30",
+                    "currency": "FUT",
+                    "timestamp": None,
+                }
+            ]
+        }
+    ).encode()
     calls = []
 
     def success(request):
@@ -175,7 +205,8 @@ def test_query_starts_once_and_returns_all_facts_or_closed_failure():
         return _TossTransportSuccess(body, rate_limit_remaining=6)
 
     outcome = query_current_prices(
-        symbols=("Abc",), token=TOKEN, transport=success, clock=lambda: NOW)
+        symbols=("Abc",), token=TOKEN, transport=success, clock=lambda: NOW
+    )
     assert outcome.code == "success"
     assert len(outcome.facts) == 1
     assert outcome.rate_limit_remaining == 6
@@ -188,7 +219,8 @@ def test_query_starts_once_and_returns_all_facts_or_closed_failure():
         return _TossTransportFailure("timeout")
 
     outcome = query_current_prices(
-        symbols=("Abc",), token=TOKEN, transport=failure, clock=lambda: NOW)
+        symbols=("Abc",), token=TOKEN, transport=failure, clock=lambda: NOW
+    )
     assert outcome.code == "timeout"
     assert outcome.facts == ()
     assert len(calls) == 1

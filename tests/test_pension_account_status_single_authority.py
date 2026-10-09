@@ -12,18 +12,25 @@ Requirement 7: the V1 DDL pin and backward compatibility are preserved.
 
 Every fixture is synthetic.
 """
+
 from __future__ import annotations
 
 import ast
 import hashlib
 import itertools
 import sqlite3
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
 
+from tests.test_pension_account_status_parser import (
+    build_status_workbook,
+    build_summary_workbook,
+    landing,
+    reviewed_plan,
+)
 from tokmo.facts import pension_account_status_excel
 from tokmo.facts.pension_account_status_excel import (
     parse_pension_account_status,
@@ -60,15 +67,8 @@ from tokmo.values.pension_holdings import (
 )
 from tokmo.values.trade_ledger import ImportAuditMeta, TradeLedgerEvent
 
-from tests.test_pension_account_status_parser import (  # noqa: E402
-    build_status_workbook,
-    build_summary_workbook,
-    landing,
-    reviewed_plan,
-)
-
 _KST = ZoneInfo("Asia/Seoul")
-_NOW = datetime(2026, 8, 13, 12, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 8, 13, 12, 0, tzinfo=UTC)
 _AS_OF = datetime(2026, 8, 13, tzinfo=_KST)
 _OLD_AS_OF = datetime(2026, 7, 13, tzinfo=_KST)
 
@@ -79,7 +79,7 @@ CHANGED_FILES = (
     "src/tokmo/values/pension_account_status.py",
     "src/tokmo/facts/pension_account_status_excel.py",
     "tools/import_pension_account_status.py",
-    "tools/import_pension_excel.py",   # retired fail-closed under PT-01
+    "tools/import_pension_excel.py",  # retired fail-closed under PT-01
     "tests/test_pension_legacy_cli_fail_closed.py",
     "tests/test_pension_account_status_parser.py",
     "tests/test_pension_account_status_single_authority.py",
@@ -98,30 +98,18 @@ CHANGED_FILES = (
 # is now retired fail-closed, and pinned by
 # tests/test_pension_legacy_cli_fail_closed.py instead.
 PROTECTED_FILE_SHA256 = {
-    "src/tokmo/values/pension_holdings.py":
-        "b00ba3868a7a15a8595e40532b92093c6fac9973b01a2171108732982705cc4a",
-    "src/tokmo/facts/pension_excel.py":
-        "bd926d4e9bd9b6cf7a7bceba1488e90d5be761cb56983247e17e64f49dcd95b6",
-    "src/tokmo/programs/pension_ingestion.py":
-        "1427bacbee460feb0b8b1048da0f3f63064dc24dcf870aff91df85a855b6b457",
-    "src/tokmo/programs/pension_materialization.py":
-        "5812fa2114124aeb6b04497ccd3eda9c612077107ab9c2407e14a19fb565af5e",
-    "src/tokmo/programs/pension_trade_ingestion.py":
-        "6bf8cc98b57459437094eea9c5ead986d84efc49f32aee05375554dcfb8445ea",
-    "src/tokmo/programs/pension_legacy_migration.py":
-        "b697c335cff0bea8e3385f1eef403693cc066661aeaf7c7f835e1f9613c2ee8e",
-    "src/tokmo/values/material_pack.py":
-        "b748ec39d03070e2bc8066b04c60d651665de9a3d97e939ca320985d07e3314c",
-    "src/tokmo/values/holdings.py":
-        "01b42ec5d4a0bdb2ccb24b56d138c43aa9c3b4dd3b5a77cb94edfa2d86f63e69",
-    "src/tokmo/records/trade_ledger_canonical.py":
-        "11c11be6ba27ec8123dc31afb96ccd6353cab709fe5fb336e9b24d5bbbb9dfbd",
-    "src/tokmo/records/trade_ledger_preflight.py":
-        "7bf4d343d7b109cd734d232780f5b5fbaa06a4a57d1ffcd98af7f479c8178bf8",
-    "src/tokmo/records/trade_ledger_store.py":
-        "d170ac3cda0873cc8deff3dc846ff62817ad9c7ff61a5516389300a091083707",
-    "tests/test_architecture.py":
-        "1030e6987c556033340bf46053ab44474ac0600e3a91564151c67c0c6b65b63c",
+    "src/tokmo/values/pension_holdings.py": "b00ba3868a7a15a8595e40532b92093c6fac9973b01a2171108732982705cc4a",
+    "src/tokmo/facts/pension_excel.py": "bd926d4e9bd9b6cf7a7bceba1488e90d5be761cb56983247e17e64f49dcd95b6",
+    "src/tokmo/programs/pension_ingestion.py": "1427bacbee460feb0b8b1048da0f3f63064dc24dcf870aff91df85a855b6b457",
+    "src/tokmo/programs/pension_materialization.py": "5812fa2114124aeb6b04497ccd3eda9c612077107ab9c2407e14a19fb565af5e",
+    "src/tokmo/programs/pension_trade_ingestion.py": "6bf8cc98b57459437094eea9c5ead986d84efc49f32aee05375554dcfb8445ea",
+    "src/tokmo/programs/pension_legacy_migration.py": "b697c335cff0bea8e3385f1eef403693cc066661aeaf7c7f835e1f9613c2ee8e",
+    "src/tokmo/values/material_pack.py": "b748ec39d03070e2bc8066b04c60d651665de9a3d97e939ca320985d07e3314c",
+    "src/tokmo/values/holdings.py": "01b42ec5d4a0bdb2ccb24b56d138c43aa9c3b4dd3b5a77cb94edfa2d86f63e69",
+    "src/tokmo/records/trade_ledger_canonical.py": "11c11be6ba27ec8123dc31afb96ccd6353cab709fe5fb336e9b24d5bbbb9dfbd",
+    "src/tokmo/records/trade_ledger_preflight.py": "7bf4d343d7b109cd734d232780f5b5fbaa06a4a57d1ffcd98af7f479c8178bf8",
+    "src/tokmo/records/trade_ledger_store.py": "d170ac3cda0873cc8deff3dc846ff62817ad9c7ff61a5516389300a091083707",
+    "tests/test_architecture.py": "1030e6987c556033340bf46053ab44474ac0600e3a91564151c67c0c6b65b63c",
 }
 
 
@@ -132,20 +120,24 @@ def clock():
 def registry(tmp_path) -> PensionRegistryStore:
     """The ONE canonical pension holdings store. There is no other."""
     return PensionRegistryStore(
-        tmp_path / "stores" / "pension_registry.sqlite3", clock=clock)
+        tmp_path / "stores" / "pension_registry.sqlite3", clock=clock
+    )
 
 
 def existing_seven_etf_revision() -> PensionHoldingsRevisionV1:
     """The already-integrated V1 ACTIVE revision, as it stands today."""
     holdings = tuple(
         HoldingItemV1(
-            symbol=f"80000{n}", quantity="100", avg_price="1000",
-            currency="KRW", market_raw="KR", market_field="market",
+            symbol=f"80000{n}",
+            quantity="100",
+            avg_price="1000",
+            currency="KRW",
+            market_raw="KR",
+            market_field="market",
         )
         for n in range(1, 8)
     )
-    names = tuple((item, f"SYNTH-LEGACY-{n:02d}")
-                  for n, item in enumerate(holdings, 1))
+    names = tuple((item, f"SYNTH-LEGACY-{n:02d}") for n, item in enumerate(holdings, 1))
     return PensionHoldingsRevisionV1(
         revision_id="a" * 32,
         schema_version=PENSION_HOLDINGS_SCHEMA_VERSION,
@@ -167,7 +159,9 @@ def new_ten_etf_candidate(tmp_path) -> PensionHoldingsRevisionV1:
     """The new broker account-status workbook, normalized to V1."""
     result = parse_pension_account_status(
         landing(tmp_path, build_status_workbook(), "status.xlsx"),
-        now=_NOW, source_as_of=_AS_OF, plan=reviewed_plan(),
+        now=_NOW,
+        source_as_of=_AS_OF,
+        plan=reviewed_plan(),
     )
     return result.revision
 
@@ -175,6 +169,7 @@ def new_ten_etf_candidate(tmp_path) -> PensionHoldingsRevisionV1:
 # ---------------------------------------------------------------------------
 # Requirement 3 — one ACTIVE pointer, 7 before, 10 after
 # ---------------------------------------------------------------------------
+
 
 def test_active_read_path_moves_from_seven_to_ten_etfs(tmp_path):
     store = registry(tmp_path)
@@ -216,14 +211,20 @@ def test_exactly_one_active_and_the_old_revision_is_superseded(tmp_path):
     assert pointer["active_revision_id"] == new.revision_id
     assert pointer["activation_generation"] == 2
 
-    connection = sqlite3.connect(
-        tmp_path / "stores" / "pension_registry.sqlite3")
+    connection = sqlite3.connect(tmp_path / "stores" / "pension_registry.sqlite3")
     try:
-        assert connection.execute(
-            "SELECT count(*) FROM pension_revisions "
-            "WHERE state = 'ACTIVE'").fetchone()[0] == 1
-        assert connection.execute(
-            "SELECT count(*) FROM pension_active_pointer").fetchone()[0] == 1
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM pension_revisions WHERE state = 'ACTIVE'"
+            ).fetchone()[0]
+            == 1
+        )
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM pension_active_pointer"
+            ).fetchone()[0]
+            == 1
+        )
     finally:
         connection.close()
 
@@ -256,6 +257,7 @@ def test_the_new_revision_round_trips_through_the_existing_store(tmp_path):
 # Requirement 4 — the existing downstream read path, unchanged
 # ---------------------------------------------------------------------------
 
+
 def activated(tmp_path) -> tuple[PensionRegistryStore, PensionHoldingsRevisionV1]:
     store = registry(tmp_path)
     old = existing_seven_etf_revision()
@@ -279,8 +281,7 @@ def test_materialization_reads_the_same_revision_with_no_alternate_store(tmp_pat
 
 def test_provenance_reads_the_same_revision_and_source_as_of(tmp_path):
     store, new = activated(tmp_path)
-    provenance = build_pension_provenance(
-        store.read_active_revision(), tick_now=_NOW)
+    provenance = build_pension_provenance(store.read_active_revision(), tick_now=_NOW)
     assert provenance["revision_id"] == new.revision_id
     assert provenance["semantic_digest"] == new.semantic_digest
     # The V1 store canonicalizes timestamps to UTC on write; the INSTANT
@@ -298,16 +299,22 @@ def test_composite_payload_validator_still_accepts_the_new_revision(tmp_path):
     scope = pension_account_scope()
     state = CurrentHoldingsV1(
         schema_version=1,
-        accounts=(AccountHoldingsV1(
-            account_scope=scope, ordinal=1, holdings=active.holdings),),
+        accounts=(
+            AccountHoldingsV1(account_scope=scope, ordinal=1, holdings=active.holdings),
+        ),
         global_inventory=True,
         captured_at=_NOW,
-        identity_map={scope: AccountScopeIdentityV1(
-            account_scope=scope, account_type_label="pension-excel-v1",
-            ordinal=1, masked_name=None)},
+        identity_map={
+            scope: AccountScopeIdentityV1(
+                account_scope=scope,
+                account_type_label="pension-excel-v1",
+                ordinal=1,
+                masked_name=None,
+            )
+        },
     )
     payload = _payload(state, active, tick_now=_NOW)
-    _validate_holdings_generation_r2(payload)          # must not raise
+    _validate_holdings_generation_r2(payload)  # must not raise
     assert payload["payload_version"] == 2
     assert len(payload["accounts"][0]["holdings"]) == 10
     assert payload["pension_provenance"]["parser_version"] == "pension-excel-v1"
@@ -322,18 +329,31 @@ def test_reminder_path_reads_the_same_revision(tmp_path):
     assert "2026-08-13" in reminder_text(freshness)
     # The reminder evaluator takes the one V1 registry and no other store.
     import inspect
+
     parameters = inspect.signature(evaluate_reminder).parameters
     assert list(parameters)[0] == "registry"
-    assert evaluate_reminder(
-        store, None, tick_now=_NOW, tick_id=1, production_mode=False,
-        replay=False, send_enabled=False, role=None) is None
+    assert (
+        evaluate_reminder(
+            store,
+            None,
+            tick_now=_NOW,
+            tick_id=1,
+            production_mode=False,
+            replay=False,
+            send_enabled=False,
+            role=None,
+        )
+        is None
+    )
 
 
 def test_downstream_consumers_name_only_the_one_registry():
     """No production consumer may reach for a second holdings store."""
-    for relative in ("src/tokmo/programs/production_cadence.py",
-                     "src/tokmo/programs/pension_materialization.py",
-                     "src/tokmo/programs/holdings_sync.py"):
+    for relative in (
+        "src/tokmo/programs/production_cadence.py",
+        "src/tokmo/programs/pension_materialization.py",
+        "src/tokmo/programs/holdings_sync.py",
+    ):
         source = (REPO_ROOT / relative).read_text(encoding="utf-8")
         assert "pension_account_" + "snapshots" not in source, relative
         assert "PensionAccount" + "SnapshotStore" not in source, relative
@@ -342,6 +362,7 @@ def test_downstream_consumers_name_only_the_one_registry():
 # ---------------------------------------------------------------------------
 # Requirement 5 — no second canonical store, table, resolver, or claim
 # ---------------------------------------------------------------------------
+
 
 def test_the_rejected_second_store_exists_nowhere_in_the_tree():
     prefix = "pension_account_"
@@ -358,12 +379,15 @@ def test_the_rejected_second_store_exists_nowhere_in_the_tree():
                 if "__pycache__" in path.parts:
                     continue
                 assert banned not in path.read_text(encoding="utf-8"), (
-                    banned, path.name)
+                    banned,
+                    path.name,
+                )
 
 
 def test_only_one_active_pointer_table_exists_in_the_pension_lane():
     source = (REPO_ROOT / "src/tokmo/records/pension_revisions.py").read_text(
-        encoding="utf-8")
+        encoding="utf-8"
+    )
     assert source.count("CREATE TABLE pension_active_pointer") == 1
     # Only the registry owner may CREATE the pointer table. Other modules may
     # name it (the offline migration carries it forward) but must not declare
@@ -428,8 +452,7 @@ def test_no_second_holdings_revision_type_is_defined():
 
 def test_the_new_modules_define_no_store_class():
     for module in (pension_account_status, pension_account_status_excel):
-        tree = ast.parse(
-            Path(module.__file__).read_text(encoding="utf-8"))
+        tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef):
                 assert "Store" not in node.name, node.name
@@ -449,6 +472,7 @@ def test_the_new_modules_define_no_store_class():
 # ---------------------------------------------------------------------------
 # Requirement 6 — period summary cannot alter holdings; ledger unchanged
 # ---------------------------------------------------------------------------
+
 
 def ledger(tmp_path) -> TradeLedgerStore:
     counter = itertools.count(1)
@@ -491,7 +515,8 @@ def test_period_summary_cannot_enter_the_holdings_store(tmp_path):
     before = store.read_active_revision()
 
     evidence = parse_pension_period_summary(
-        landing(tmp_path, build_summary_workbook(), "summary.xlsx"), now=_NOW)
+        landing(tmp_path, build_summary_workbook(), "summary.xlsx"), now=_NOW
+    )
     assert evidence.row_count == 5
     # The holdings store simply cannot accept it: wrong type.
     with pytest.raises(Exception):
@@ -515,14 +540,16 @@ def test_the_execution_ledger_is_unchanged_by_the_whole_flow(tmp_path):
         connection = sqlite3.connect(tmp_path / "trade_ledger.sqlite3")
         try:
             return connection.execute(
-                "SELECT count(*) FROM trade_ledger_events").fetchone()[0]
+                "SELECT count(*) FROM trade_ledger_events"
+            ).fetchone()[0]
         finally:
             connection.close()
 
     before = row_count()
     assert before == 9
     digest_before = hashlib.sha256(
-        (tmp_path / "trade_ledger.sqlite3").read_bytes()).hexdigest()
+        (tmp_path / "trade_ledger.sqlite3").read_bytes()
+    ).hexdigest()
 
     # Run the entire new flow beside it.
     store = registry(tmp_path)
@@ -530,12 +557,14 @@ def test_the_execution_ledger_is_unchanged_by_the_whole_flow(tmp_path):
     store.create_candidate(new)
     store.activate(new.revision_id, approval_reason="synthetic-account-status")
     parse_pension_period_summary(
-        landing(tmp_path, build_summary_workbook(), "summary.xlsx"), now=_NOW)
+        landing(tmp_path, build_summary_workbook(), "summary.xlsx"), now=_NOW
+    )
 
     assert row_count() == before
-    assert hashlib.sha256(
-        (tmp_path / "trade_ledger.sqlite3").read_bytes()).hexdigest() == \
-        digest_before
+    assert (
+        hashlib.sha256((tmp_path / "trade_ledger.sqlite3").read_bytes()).hexdigest()
+        == digest_before
+    )
 
 
 def test_no_new_module_can_reach_the_execution_ledger():
@@ -555,7 +584,12 @@ def test_no_new_module_can_reach_the_execution_ledger():
 
 def test_the_retirement_source_contract_is_unchanged():
     from tokmo.records.trade_ledger_preflight import SOURCE_CONTRACTS
-    assert set(SOURCE_CONTRACTS) == {"retirement_excel_v1", "retirement_excel_delta_v1", "toss-orders-v1"}
+
+    assert set(SOURCE_CONTRACTS) == {
+        "retirement_excel_v1",
+        "retirement_excel_delta_v1",
+        "toss-orders-v1",
+    }
     retirement = SOURCE_CONTRACTS["retirement_excel_v1"]
     assert retirement.source == "retirement_excel_v1"
     assert retirement.account_scopes == frozenset({"retirement_pension_1"})
@@ -566,9 +600,11 @@ def test_the_retirement_source_contract_is_unchanged():
 # Requirement 7 — V1 DDL pin, backward compatibility, existing rollback
 # ---------------------------------------------------------------------------
 
+
 def test_the_v1_registry_ddl_pin_is_unchanged():
     assert PENSION_REGISTRY_DDL_SHA256 == (
-        "41fc7e728f2e9aff8520ce0e7bd62956e453695be7bea5b8e5542da584faa29f")
+        "41fc7e728f2e9aff8520ce0e7bd62956e453695be7bea5b8e5542da584faa29f"
+    )
 
 
 @pytest.mark.parametrize("relative", sorted(PROTECTED_FILE_SHA256))
@@ -580,17 +616,20 @@ def test_protected_file_is_byte_identical_to_the_base_commit(relative):
 def test_the_registry_schema_was_not_migrated(tmp_path):
     store = registry(tmp_path)
     store.create_candidate(new_ten_etf_candidate(tmp_path))
-    connection = sqlite3.connect(
-        tmp_path / "stores" / "pension_registry.sqlite3")
+    connection = sqlite3.connect(tmp_path / "stores" / "pension_registry.sqlite3")
     try:
         tables = {
-            row[0] for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'")
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
         }
         tables.discard("sqlite_sequence")
         assert tables == {
-            "pension_revisions", "pension_activation_events",
-            "pension_active_pointer", "pension_reminder_events",
+            "pension_revisions",
+            "pension_activation_events",
+            "pension_active_pointer",
+            "pension_reminder_events",
         }
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
     finally:
@@ -614,19 +653,32 @@ def test_an_old_style_v1_revision_still_activates_after_the_change(tmp_path):
 # privacy / runtime surface of the changed files
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize(
-    "module", [pension_account_status, pension_account_status_excel],
-    ids=lambda m: m.__name__)
+    "module",
+    [pension_account_status, pension_account_status_excel],
+    ids=lambda m: m.__name__,
+)
 def test_new_modules_touch_no_ambient_runtime(module):
     source = Path(module.__file__).read_text(encoding="utf-8")
-    for banned in ("os.environ", "getenv(", "datetime.now(", "utcnow(",
-                   "urlopen(", ".local/share", "requests", "socket"):
+    for banned in (
+        "os.environ",
+        "getenv(",
+        "datetime.now(",
+        "utcnow(",
+        "urlopen(",
+        ".local/share",
+        "requests",
+        "socket",
+    ):
         assert banned not in source, (module.__name__, banned)
 
 
 @pytest.mark.parametrize(
-    "module", [pension_account_status, pension_account_status_excel],
-    ids=lambda m: m.__name__)
+    "module",
+    [pension_account_status, pension_account_status_excel],
+    ids=lambda m: m.__name__,
+)
 def test_new_modules_carry_no_forbidden_generation_token(module):
     source = Path(module.__file__).read_text(encoding="utf-8").lower()
     assert "v2" not in source, module.__name__

@@ -8,12 +8,12 @@ private paths, never creates them, and admits no consumer or recurring step.
 """
 
 import argparse
-from datetime import datetime, timezone
 import json
 import os
-from pathlib import Path
 import stat
 import sys
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import NamedTuple
 
 from tokmo.composition import execute_official_membership_canary
@@ -34,12 +34,24 @@ from tokmo.values.official_membership_observation import OfficialSicSnapshotV1
 
 CANARY_START_PLAN = 7
 OFFICIAL_CAPTURE_CLASSIFICATION = "OFFICIAL_CAPTURE"
-_CANARY_FAILURE_CODES = frozenset({
-    "sic_resource", "private_path", "campaign_path", "holdings",
-    "holdings_mutated", "cohort_size", "campaign_capacity",
-    "acquisition_conflict", "canary_preflight", "canary_conflict",
-    "source_failure", "canary_parse", "canary_assembly", "canary_readback",
-})
+_CANARY_FAILURE_CODES = frozenset(
+    {
+        "sic_resource",
+        "private_path",
+        "campaign_path",
+        "holdings",
+        "holdings_mutated",
+        "cohort_size",
+        "campaign_capacity",
+        "acquisition_conflict",
+        "canary_preflight",
+        "canary_conflict",
+        "source_failure",
+        "canary_parse",
+        "canary_assembly",
+        "canary_readback",
+    }
+)
 
 
 class FixedProductionPaths(NamedTuple):
@@ -81,6 +93,7 @@ class PreflightResult(NamedTuple):
 
 class ArmedContext(NamedTuple):
     """Fixed production dependency graph; built only after a green preflight."""
+
     paths: FixedProductionPaths
     sic_snapshot: OfficialSicSnapshotV1
     campaign_store: OfficialMembershipCampaignStore
@@ -90,20 +103,26 @@ class ArmedContext(NamedTuple):
 
 def _require_private_directory(path):
     info = os.lstat(path)
-    if (stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode)
-            or info.st_uid != os.getuid()
-            or stat.S_IMODE(info.st_mode) != 0o700
-            or info.st_nlink < 1):
+    if (
+        stat.S_ISLNK(info.st_mode)
+        or not stat.S_ISDIR(info.st_mode)
+        or info.st_uid != os.getuid()
+        or stat.S_IMODE(info.st_mode) != 0o700
+        or info.st_nlink < 1
+    ):
         raise ValueError("private_path")
 
 
 def _require_private_regular(path):
     _require_private_directory(Path(path).parent)
     info = os.lstat(path)
-    if (stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode)
-            or info.st_uid != os.getuid()
-            or stat.S_IMODE(info.st_mode) != 0o600
-            or info.st_nlink != 1):
+    if (
+        stat.S_ISLNK(info.st_mode)
+        or not stat.S_ISREG(info.st_mode)
+        or info.st_uid != os.getuid()
+        or stat.S_IMODE(info.st_mode) != 0o600
+        or info.st_nlink != 1
+    ):
         raise ValueError("private_path")
 
 
@@ -113,7 +132,10 @@ def _fixed_acquisition_id(market_date):
 
 def _fixed_campaign_store(paths, *, now, candidate=None):
     selected = paths.campaign if candidate is None else Path(candidate)
-    if selected != paths.campaign or selected.name != "live-transition-campaign.sqlite3":
+    if (
+        selected != paths.campaign
+        or selected.name != "live-transition-campaign.sqlite3"
+    ):
         raise ValueError("campaign_path")
     _require_private_directory(selected.parent)
     if os.path.lexists(selected):
@@ -122,8 +144,7 @@ def _fixed_campaign_store(paths, *, now, candidate=None):
         except (OSError, ValueError):
             raise ValueError("campaign_path") from None
     aliases = tuple(
-        item for item in selected.parent.glob("*campaign*.sqlite3")
-        if item != selected
+        item for item in selected.parent.glob("*campaign*.sqlite3") if item != selected
     )
     if aliases:
         raise ValueError("campaign_path")
@@ -132,6 +153,7 @@ def _fixed_campaign_store(paths, *, now, candidate=None):
 
 def _fixed_holdings_reader(paths, *, clock):
     """Sole canonical holdings path; preflight and the seam both read here."""
+
     def read():
         _require_private_regular(paths.holdings)
         raw = paths.holdings.read_bytes()
@@ -142,14 +164,22 @@ def _fixed_holdings_reader(paths, *, clock):
         if holdings is None or raw != canonical_holdings_bytes(holdings):
             raise ValueError("holdings")
         return raw, holdings
+
     return read
 
 
 def _evaluate_preflight(
-    *, paths, now, sic_snapshot, campaign_store, observation_store,
+    *,
+    paths,
+    now,
+    sic_snapshot,
+    campaign_store,
+    observation_store,
 ):
-    if (not isinstance(sic_snapshot, OfficialSicSnapshotV1)
-            or sic_snapshot.classification != OFFICIAL_CAPTURE_CLASSIFICATION):
+    if (
+        not isinstance(sic_snapshot, OfficialSicSnapshotV1)
+        or sic_snapshot.classification != OFFICIAL_CAPTURE_CLASSIFICATION
+    ):
         raise ValueError("sic_resource")
     _require_private_regular(paths.sec_config)
     read_holdings = _fixed_holdings_reader(paths, clock=lambda: now)
@@ -181,20 +211,32 @@ def _offline_preflight_for_test(**dependencies):
 
 
 def _execute_armed(
-    *, paths, now, sic_snapshot, campaign_store, observation_store, transport,
+    *,
+    paths,
+    now,
+    sic_snapshot,
+    campaign_store,
+    observation_store,
+    transport,
     clock,
 ):
     """Fresh preflight, then exactly the reviewed seven-start exact-cohort seam."""
     preflight = _evaluate_preflight(
-        paths=paths, now=now, sic_snapshot=sic_snapshot,
-        campaign_store=campaign_store, observation_store=observation_store,
+        paths=paths,
+        now=now,
+        sic_snapshot=sic_snapshot,
+        campaign_store=campaign_store,
+        observation_store=observation_store,
     )
     return execute_official_membership_canary(
-        campaign_store=campaign_store, observation_store=observation_store,
+        campaign_store=campaign_store,
+        observation_store=observation_store,
         transport=transport,
         holdings_reader=_fixed_holdings_reader(paths, clock=clock),
-        sic_snapshot=sic_snapshot, sec_user_agent=preflight.sec_user_agent,
-        clock=clock, acquisition_id=preflight.acquisition_id,
+        sic_snapshot=sic_snapshot,
+        sec_user_agent=preflight.sec_user_agent,
+        clock=clock,
+        acquisition_id=preflight.acquisition_id,
     )
 
 
@@ -204,7 +246,7 @@ def _execute_armed_for_test(**dependencies):
 
 
 def _utc_now():
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _production_preflight(now):
@@ -212,25 +254,36 @@ def _production_preflight(now):
     snapshot = load_production_sic_snapshot()
     for directory in (
         paths.sec_config.parent,
-        paths.holdings.parents[1], paths.holdings.parent,
+        paths.holdings.parents[1],
+        paths.holdings.parent,
         paths.campaign.parent,
     ):
         _require_private_directory(directory)
     campaign = _fixed_campaign_store(paths, now=lambda: now)
     observations = OfficialMembershipObservationStore(paths.observations)
     preflight = _evaluate_preflight(
-        paths=paths, now=now, sic_snapshot=snapshot,
-        campaign_store=campaign, observation_store=observations,
+        paths=paths,
+        now=now,
+        sic_snapshot=snapshot,
+        campaign_store=campaign,
+        observation_store=observations,
     )
     return ArmedContext(paths, snapshot, campaign, observations, preflight)
 
 
 def _failure(code, *, campaign_starts=0, source_starts=0):
-    sys.stderr.write(json.dumps(
-        {"code": code, "campaign_starts": campaign_starts,
-         "source_starts": source_starts},
-        separators=(",", ":"), sort_keys=True,
-    ) + "\n")
+    sys.stderr.write(
+        json.dumps(
+            {
+                "code": code,
+                "campaign_starts": campaign_starts,
+                "source_starts": source_starts,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        + "\n"
+    )
     return 2
 
 
@@ -261,14 +314,18 @@ def _consumed_starts(campaign_store, before):
 def main(argv=None):
     parser = argparse.ArgumentParser(
         epilog="bounded execution requires pre-created owner-only private paths"
-               " and separate --armed authorization")
+        " and separate --armed authorization"
+    )
     parser.add_argument(
-        "--mode", choices=("offline-preflight", "bounded-live-canary"),
+        "--mode",
+        choices=("offline-preflight", "bounded-live-canary"),
         default="offline-preflight",
     )
     parser.add_argument(
-        "--armed", action="store_true",
-        help="arm the separately authorized fixed seven-start exact-cohort gate")
+        "--armed",
+        action="store_true",
+        help="arm the separately authorized fixed seven-start exact-cohort gate",
+    )
     args = parser.parse_args(argv)
     if args.mode == "offline-preflight":
         if args.armed:
@@ -287,7 +344,8 @@ def main(argv=None):
     before = CAMPAIGN_CEILING - context.preflight.remaining_capacity
     try:
         _execute_armed(
-            paths=context.paths, now=_utc_now(),
+            paths=context.paths,
+            now=_utc_now(),
             sic_snapshot=context.sic_snapshot,
             campaign_store=context.campaign_store,
             observation_store=context.observation_store,
@@ -298,7 +356,8 @@ def main(argv=None):
         consumed = _consumed_starts(context.campaign_store, before)
         return _failure(
             "CANARY_FAILED_" + _safe_canary_failure_code(error),
-            campaign_starts=consumed, source_starts=consumed,
+            campaign_starts=consumed,
+            source_starts=consumed,
         )
     return 0
 

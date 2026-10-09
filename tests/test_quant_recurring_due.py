@@ -1,16 +1,15 @@
 """W1 Quant recurring completed-session due gate and cohort prediction."""
 
 from dataclasses import replace
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
 
 from tokmo.programs.calendar_refresh import MarketRefreshState
 
-
 SESSION_DATE = date(2026, 8, 14)
-SLOT = datetime(2026, 8, 14, 20, 0, tzinfo=timezone.utc)
+SLOT = datetime(2026, 8, 14, 20, 0, tzinfo=UTC)
 _DEFAULT_RECEIPTS = object()
 
 
@@ -27,8 +26,7 @@ def _holdings(
 
     scope = "toss-acct-" + "0" * 24
     items = tuple(
-        HoldingItemV1(symbol, "1", "100", "USD", "US", None)
-        for symbol in symbols
+        HoldingItemV1(symbol, "1", "100", "USD", "US", None) for symbol in symbols
     )
     return CurrentHoldingsV1(
         1,
@@ -39,8 +37,14 @@ def _holdings(
     )
 
 
-def _cache(*, slot=SLOT, regular_end=SLOT, after_end=SLOT + timedelta(hours=2),
-           trade_date=SESSION_DATE, include_after=True):
+def _cache(
+    *,
+    slot=SLOT,
+    regular_end=SLOT,
+    after_end=SLOT + timedelta(hours=2),
+    trade_date=SESSION_DATE,
+    include_after=True,
+):
     from tokmo.records.calendar_cache import (
         CalendarCacheSchema2,
         CalendarDayCacheSchema2,
@@ -128,9 +132,20 @@ def _write_holdings(root, symbols=("TSLA", "AAPL", "NVDA", "MSFT")):
     )
 
 
-def _evaluate(monkeypatch, tmp_path, *, policy, slot=SLOT, cache=None,
-              terminal=False, acquisition=False, clock=None,
-              receipts=_DEFAULT_RECEIPTS, calendar=None, cache_store=None):
+def _evaluate(
+    monkeypatch,
+    tmp_path,
+    *,
+    policy,
+    slot=SLOT,
+    cache=None,
+    terminal=False,
+    acquisition=False,
+    clock=None,
+    receipts=_DEFAULT_RECEIPTS,
+    calendar=None,
+    cache_store=None,
+):
     import tokmo.programs.quant_recurring_shadow as module
 
     class History:
@@ -165,7 +180,9 @@ def _evaluate(monkeypatch, tmp_path, *, policy, slot=SLOT, cache=None,
             else date.fromisoformat(cache_value.us.trade_date)
         )
         calendar = _calendar(cache_trade_date=cache_trade_date)
-    deps = SimpleNamespace(clock=(lambda: slot + timedelta(seconds=1)) if clock is None else clock)
+    deps = SimpleNamespace(
+        clock=(lambda: slot + timedelta(seconds=1)) if clock is None else clock
+    )
     return module.evaluate_quant_due(
         root=tmp_path,
         deps=deps,
@@ -173,11 +190,7 @@ def _evaluate(monkeypatch, tmp_path, *, policy, slot=SLOT, cache=None,
         tick=SimpleNamespace(scheduled_for_utc=slot),
         calendar=calendar,
         cache_store=_CacheStore(cache_value) if cache_store is None else cache_store,
-        receipts=(
-            _Receipts(terminal)
-            if receipts is _DEFAULT_RECEIPTS
-            else receipts
-        ),
+        receipts=(_Receipts(terminal) if receipts is _DEFAULT_RECEIPTS else receipts),
     )
 
 
@@ -185,7 +198,7 @@ def test_predict_us_personal_cohort_reuses_scope_and_market_rules_without_freshn
     from tokmo.facts.quant_recurring_membership import predict_us_personal_cohort
     from tokmo.values.current_holdings import HoldingItemV1
 
-    prior = _holdings(captured_at=datetime(2020, 1, 1, tzinfo=timezone.utc))
+    prior = _holdings(captured_at=datetime(2020, 1, 1, tzinfo=UTC))
     assert predict_us_personal_cohort(prior) == ("AAPL", "MSFT", "NVDA", "TSLA")
     assert predict_us_personal_cohort(None) == ()
     bad_item = HoldingItemV1("AAPL", "1", "1", "USD", "UNKNOWN", None)
@@ -194,7 +207,9 @@ def test_predict_us_personal_cohort_reuses_scope_and_market_rules_without_freshn
     assert predict_us_personal_cohort(prior) == ()
 
 
-def test_policy_zero_returns_before_any_cache_receipt_or_observation_access(monkeypatch, tmp_path):
+def test_policy_zero_returns_before_any_cache_receipt_or_observation_access(
+    monkeypatch, tmp_path
+):
     import tokmo.programs.quant_recurring_shadow as module
     from tokmo.values.cadence_policy import CADENCE_MARKET_PORTFOLIO_POLICY_V1
     from tokmo.values.quant_recurring import QuantDueDecisionV1
@@ -215,25 +230,30 @@ def test_policy_zero_returns_before_any_cache_receipt_or_observation_access(monk
         policy=CADENCE_MARKET_PORTFOLIO_POLICY_V1,
         tick=SimpleNamespace(scheduled_for_utc=SLOT),
         calendar=CalendarBomb(),
-        cache_store=SimpleNamespace(read=lambda: (_ for _ in ()).throw(
-            AssertionError("cache read")
-        )),
-        receipts=SimpleNamespace(read_due=lambda value: (_ for _ in ()).throw(
-            AssertionError("receipt read")
-        )),
+        cache_store=SimpleNamespace(
+            read=lambda: (_ for _ in ()).throw(AssertionError("cache read"))
+        ),
+        receipts=SimpleNamespace(
+            read_due=lambda value: (_ for _ in ()).throw(AssertionError("receipt read"))
+        ),
     )
     assert context.decision is QuantDueDecisionV1.POLICY_ZERO
     assert (context.membership_plan_starts, context.membership_starts_ceiling) == (
-        3, 0,
+        3,
+        0,
     )
 
 
 @pytest.mark.parametrize(
     "state",
-    tuple(state for state in MarketRefreshState if state is not MarketRefreshState.SUCCESS),
+    tuple(
+        state for state in MarketRefreshState if state is not MarketRefreshState.SUCCESS
+    ),
 )
 def test_same_day_cache_non_success_us_refresh_is_zero_effect_before_cache_read(
-    monkeypatch, tmp_path, state,
+    monkeypatch,
+    tmp_path,
+    state,
 ):
     from tokmo.values.cadence_policy import CADENCE_QUANT_SHADOW_POLICY_V1
     from tokmo.values.quant_recurring import QuantDueDecisionV1
@@ -275,7 +295,9 @@ def test_same_day_cache_non_success_us_refresh_is_zero_effect_before_cache_read(
     assert not (tmp_path / "official-membership" / "observations.sqlite3").exists()
 
 
-def test_unbound_mask_refuses_before_cache_read_and_does_not_burn_session(monkeypatch, tmp_path):
+def test_unbound_mask_refuses_before_cache_read_and_does_not_burn_session(
+    monkeypatch, tmp_path
+):
     from tokmo.values.cadence_policy import CADENCE_QUANT_SHADOW_POLICY_V1
     from tokmo.values.quant_recurring import QuantDueDecisionV1
 
@@ -306,7 +328,8 @@ def test_unbound_mask_refuses_before_cache_read_and_does_not_burn_session(monkey
 
 
 def test_failed_refresh_does_not_burn_d_and_next_same_session_success_is_due(
-    monkeypatch, tmp_path,
+    monkeypatch,
+    tmp_path,
 ):
     from tokmo.programs.calendar_refresh import MarketRefreshState
     from tokmo.values.cadence_policy import CADENCE_QUANT_SHADOW_POLICY_V1
@@ -347,7 +370,9 @@ def test_failed_refresh_does_not_burn_d_and_next_same_session_success_is_due(
     ids=("r16e_all_success", "r16f_kr_failed_us_success"),
 )
 def test_us_success_matching_cache_and_mask_is_due_independent_of_kr_refresh(
-    monkeypatch, tmp_path, kr_state,
+    monkeypatch,
+    tmp_path,
+    kr_state,
 ):
     import tokmo.programs.production_cadence as production
     from tokmo.programs.calendar_refresh import MarketRefreshResult
@@ -360,10 +385,16 @@ def test_us_success_matching_cache_and_mask_is_due_independent_of_kr_refresh(
     cache = _cache()
     results = {
         Market.KR: MarketRefreshResult(
-            Market.KR, SESSION_DATE, kr_state, False,
+            Market.KR,
+            SESSION_DATE,
+            kr_state,
+            False,
         ),
         Market.US: MarketRefreshResult(
-            Market.US, SESSION_DATE, MarketRefreshState.SUCCESS, False,
+            Market.US,
+            SESSION_DATE,
+            MarketRefreshState.SUCCESS,
+            False,
         ),
     }
     verdicts = (
@@ -393,7 +424,9 @@ def test_us_success_matching_cache_and_mask_is_due_independent_of_kr_refresh(
     assert context.membership_plan_starts == 7
 
 
-def test_completed_session_due_gate_and_terminal_acquisition_replay(monkeypatch, tmp_path):
+def test_completed_session_due_gate_and_terminal_acquisition_replay(
+    monkeypatch, tmp_path
+):
     from tokmo.values.cadence_policy import CADENCE_QUANT_SHADOW_POLICY_V1
     from tokmo.values.quant_recurring import QuantDueDecisionV1
 
@@ -405,12 +438,14 @@ def test_completed_session_due_gate_and_terminal_acquisition_replay(monkeypatch,
     assert due.predicted_symbols == ("AAPL", "MSFT", "NVDA", "TSLA")
 
     terminal = _evaluate(
-        monkeypatch, tmp_path,
+        monkeypatch,
+        tmp_path,
         policy=CADENCE_QUANT_SHADOW_POLICY_V1,
         terminal=True,
     )
     acquired = _evaluate(
-        monkeypatch, tmp_path,
+        monkeypatch,
+        tmp_path,
         policy=CADENCE_QUANT_SHADOW_POLICY_V1,
         acquisition=True,
     )
@@ -419,7 +454,8 @@ def test_completed_session_due_gate_and_terminal_acquisition_replay(monkeypatch,
 
 
 def test_membership_budget_boundary_and_sweep_are_exactly_three_plus_n(
-    monkeypatch, tmp_path,
+    monkeypatch,
+    tmp_path,
 ):
     from tokmo.values.cadence_policy import CADENCE_QUANT_SHADOW_POLICY_V1
     from tokmo.values.quant_recurring import QuantDueDecisionV1
@@ -471,13 +507,15 @@ def test_custom_lower_ceiling_refuses_at_its_true_boundary(monkeypatch, tmp_path
     assert (due.membership_plan_starts, due.membership_starts_ceiling) == (5, 5)
     assert refused.decision is QuantDueDecisionV1.MEMBERSHIP_BUDGET_UNSATISFIABLE
     assert (refused.membership_plan_starts, refused.membership_starts_ceiling) == (
-        6, 5,
+        6,
+        5,
     )
     assert refused.identity is None
 
 
 def test_budget_unsatisfiable_context_cannot_claim_execute_or_call_provider(
-    monkeypatch, tmp_path,
+    monkeypatch,
+    tmp_path,
 ):
     import tokmo.programs.quant_recurring_shadow as module
     from tokmo.values.cadence_policy import CADENCE_QUANT_SHADOW_POLICY_V1
@@ -520,7 +558,9 @@ def test_budget_unsatisfiable_context_cannot_claim_execute_or_call_provider(
     assert not (tmp_path / "ops" / "quant_recurring.sqlite3").exists()
 
 
-def test_due_gate_rejects_preclose_cross_date_closed_window_and_deadline(monkeypatch, tmp_path):
+def test_due_gate_rejects_preclose_cross_date_closed_window_and_deadline(
+    monkeypatch, tmp_path
+):
     from tokmo.values.cadence_policy import CADENCE_QUANT_SHADOW_POLICY_V1
     from tokmo.values.quant_recurring import QuantDueDecisionV1
 
@@ -535,7 +575,7 @@ def test_due_gate_rejects_preclose_cross_date_closed_window_and_deadline(monkeyp
     )
     assert preclose.decision is QuantDueDecisionV1.NO_COMPLETED_SESSION
 
-    next_ny_day = datetime(2026, 8, 15, 5, 0, tzinfo=timezone.utc)
+    next_ny_day = datetime(2026, 8, 15, 5, 0, tzinfo=UTC)
     mismatch = _evaluate(
         monkeypatch,
         tmp_path,

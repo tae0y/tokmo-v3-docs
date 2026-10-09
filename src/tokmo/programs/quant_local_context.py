@@ -18,13 +18,13 @@ values layer shared with news admission.
 
 from __future__ import annotations
 
-from datetime import date, timedelta
-from pathlib import Path
 import re
-import unicodedata
+from datetime import date, timedelta
 
 from tokmo.programs.internal_evidence_query import (
-    EvidenceQueryV1, expand_query_terms, run_internal_evidence_query,
+    EvidenceQueryV1,
+    expand_query_terms,
+    run_internal_evidence_query,
 )
 from tokmo.programs.news_topic_discovery import (
     _contains_exact_sequence,
@@ -32,23 +32,32 @@ from tokmo.programs.news_topic_discovery import (
     _tokens,
 )
 from tokmo.programs.quant_contextual_analysis import (
-    MAX_SUMMARY_CHARS, NEWS_MAX_AGE_DAYS, ContextItemV1,
+    MAX_SUMMARY_CHARS,
+    NEWS_MAX_AGE_DAYS,
+    ContextItemV1,
 )
-from tokmo.records.playbook_identity import scope_dir_document_path
 from tokmo.records.news_decision_store import timestamp
+from tokmo.records.playbook_identity import scope_dir_document_path
 from tokmo.values.news_instrument_match import (
-    ETF_BRAND_TRANSLITERATIONS_V1, is_etf_name, match_etf_reference,
+    ETF_BRAND_TRANSLITERATIONS_V1,
+    is_etf_name,
+    match_etf_reference,
 )
 
 MAX_CONTEXT_ITEMS = 5
 LAYER3_HEADING = "## 3층 — 매매이력"
-HERMES_START, HERMES_END = "<!-- HERMES_CURRENT_START -->", "<!-- HERMES_CURRENT_END -->"
+HERMES_START, HERMES_END = (
+    "<!-- HERMES_CURRENT_START -->",
+    "<!-- HERMES_CURRENT_END -->",
+)
 _ANCHOR_RE = re.compile(r'<a id="entry-([^"]+)"></a>')
 _SUMMARY_RE = re.compile(r"- `trade_summary`: `(BUY|SELL) ")
 _EVENT_DATE_RE = re.compile(r"- `event_date`: `(\d{4}-\d{2}-\d{2})`")
 _RAW_BLOCK_RE = re.compile(
     r'<!-- USER_RAW_START entry_id="(?P<id>[^"]+)" -->\n(?P<body>.*?)\n'
-    r'<!-- USER_RAW_END entry_id="\1" -->', re.DOTALL)
+    r'<!-- USER_RAW_END entry_id="\1" -->',
+    re.DOTALL,
+)
 _MARKUP_RE = re.compile(r"<!--.*?-->|\[[^\]]*\]\([^)]*\)|`")
 # private numeric scrub: amounts/prices/quantities never reach rendered analysis
 _NUMBERS_RE = re.compile(r"\d+(?:[,.]\d+)*")
@@ -69,7 +78,6 @@ def _bounded(text: str, limit: int = MAX_SUMMARY_CHARS) -> str:
     return ""
 
 
-
 def _with_ref(label: str, ref: str | None) -> str:
     """Bounded provenance suffix on ``source_label`` (evidence metadata
     only; renderers show item summaries and validated analysis statements,
@@ -83,8 +91,9 @@ def _with_ref(label: str, ref: str | None) -> str:
 # --- playbook Layer-3 projection -------------------------------------------------
 
 
-def collect_playbook_context_items(playbook_root, *, market: str, symbol: str,
-                                   scope_dirs=("personal", "retirement")) -> tuple:
+def collect_playbook_context_items(
+    playbook_root, *, market: str, symbol: str, scope_dirs=("personal", "retirement")
+) -> tuple:
     """(trade_reason?, playbook_current?) for the canonical instrument doc.
 
     Reads only; the Layer-3 entry newest-first directly below the ``## 3층``
@@ -100,7 +109,8 @@ def collect_playbook_context_items(playbook_root, *, market: str, symbol: str,
     items: list = []
     for scope_dir in scope_dirs:
         path = scope_dir_document_path(
-            playbook_root, scope_dir=scope_dir, market=market, symbol=symbol)
+            playbook_root, scope_dir=scope_dir, market=market, symbol=symbol
+        )
         if path is None:
             continue
         try:
@@ -119,7 +129,7 @@ def collect_playbook_context_items(playbook_root, *, market: str, symbol: str,
             entry_id = anchors[0]
             first = _ANCHOR_RE.search(layer3)
             block_end = _ANCHOR_RE.search(layer3, first.end()) if first else None
-            entry_block = layer3 if block_end is None else layer3[:block_end.start()]
+            entry_block = layer3 if block_end is None else layer3[: block_end.start()]
             raw = _RAW_BLOCK_RE.search(entry_block)
             side = _SUMMARY_RE.search(entry_block)
             event_date = _EVENT_DATE_RE.search(entry_block)
@@ -127,20 +137,35 @@ def collect_playbook_context_items(playbook_root, *, market: str, symbol: str,
             side_kr = _SIDE_KR.get(side.group(1), "거래") if side else "거래"
             reason = raw.group("body") if raw and raw.group("id") == entry_id else ""
             reason = _NUMBERS_RE.sub(" ", reason)
-            summary = _bounded(f"{side_kr} 사유: {reason}" if reason
-                               else f"최근 {side_kr} 거래 사유 원문 미기록")
+            summary = _bounded(
+                f"{side_kr} 사유: {reason}"
+                if reason
+                else f"최근 {side_kr} 거래 사유 원문 미기록"
+            )
             if summary:
-                items.append(ContextItemV1("trade_reason", summary,
-                                           observed_on=when, source_label="플레이북 3층"))
+                items.append(
+                    ContextItemV1(
+                        "trade_reason",
+                        summary,
+                        observed_on=when,
+                        source_label="플레이북 3층",
+                    )
+                )
     if text.count(HERMES_START) == 1 and text.count(HERMES_END) == 1:
         layer1 = text.split(HERMES_START, 1)[1].split(HERMES_END, 1)[0]
-        lines = [line.strip() for line in layer1.splitlines()
-                 if line.strip() and not line.strip().startswith((">", "#", "-"))]
+        lines = [
+            line.strip()
+            for line in layer1.splitlines()
+            if line.strip() and not line.strip().startswith((">", "#", "-"))
+        ]
         if lines:
             summary = _bounded(_NUMBERS_RE.sub(" ", lines[0]))
             if summary:
-                items.append(ContextItemV1("playbook_current", summary,
-                                           source_label="플레이북 1층"))
+                items.append(
+                    ContextItemV1(
+                        "playbook_current", summary, source_label="플레이북 1층"
+                    )
+                )
     return tuple(items)
 
 
@@ -172,10 +197,17 @@ def _health_status(family):
     return _STAGE1_HEALTH_TO_STATUS.get(health, "STORE_UNAVAILABLE")
 
 
-def collect_local_news_items(news_path, *, market: str, symbol: str,
-                             official_names, universe, completed_session_date,
-                             max_items: int = MAX_CONTEXT_ITEMS,
-                             status_out: dict | None = None) -> tuple:
+def collect_local_news_items(
+    news_path,
+    *,
+    market: str,
+    symbol: str,
+    official_names,
+    universe,
+    completed_session_date,
+    max_items: int = MAX_CONTEXT_ITEMS,
+    status_out: dict | None = None,
+) -> tuple:
     """Exact-instrument local NEWS titles from the n5 read-only seam.
 
     Company names bind through the same whole-sequence §O scan the news
@@ -197,8 +229,11 @@ def collect_local_news_items(news_path, *, market: str, symbol: str,
     so unavailable stays visibly distinct from a valid zero-result.
     """
     try:
-        session = (completed_session_date if isinstance(completed_session_date, date)
-                   else date.fromisoformat(str(completed_session_date)))
+        session = (
+            completed_session_date
+            if isinstance(completed_session_date, date)
+            else date.fromisoformat(str(completed_session_date))
+        )
     except ValueError:
         if status_out is not None:
             status_out["news"] = "NOT_REQUESTED"
@@ -212,18 +247,29 @@ def collect_local_news_items(news_path, *, market: str, symbol: str,
         # Every §P-matching headline anchors on the ETF brand token (or
         # its Korean transliteration) — fetch on exactly those anchors.
         brand = _tokens(_normalise(names[0]))[0]
-        fetch_terms = (brand,) + tuple(sorted(
-            korean for korean, latin
-            in ETF_BRAND_TRANSLITERATIONS_V1.items() if latin == brand))
+        fetch_terms = (brand,) + tuple(
+            sorted(
+                korean
+                for korean, latin in ETF_BRAND_TRANSLITERATIONS_V1.items()
+                if latin == brand
+            )
+        )
     else:
         fetch_terms = names
-    etf_universe = [(key, str(name)) for key, member_names in dict(universe or {}).items()
-                    for name in member_names if is_etf_name(str(name))]
+    etf_universe = [
+        (key, str(name))
+        for key, member_names in dict(universe or {}).items()
+        for name in member_names
+        if is_etf_name(str(name))
+    ]
     # Same-entity acceptance names: caller names plus the public alias
     # catalog's whole alias set for any name that grounds exactly one
     # entity (``하닉`` admits verbatim ``SK하이닉스`` titles).
-    accepted_names = tuple(dict.fromkeys((*names, *expand_query_terms(
-        terms=fetch_terms)["expanded_terms"])))
+    accepted_names = tuple(
+        dict.fromkeys(
+            (*names, *expand_query_terms(terms=fetch_terms)["expanded_terms"])
+        )
+    )
 
     def _accept_row(text: str) -> bool:
         # Exact-instrument acceptance, applied INSIDE Stage-1 before the
@@ -232,21 +278,28 @@ def collect_local_news_items(news_path, *, market: str, symbol: str,
         # coverage match, admissible only when the target symbol is the
         # unique satisfying candidate in the supplied universe.
         tokens = _tokens(_normalise(text))
-        if any(not is_etf_name(name) and _contains_exact_sequence(
-                tokens, _normalise(name)) for name in accepted_names):
+        if any(
+            not is_etf_name(name) and _contains_exact_sequence(tokens, _normalise(name))
+            for name in accepted_names
+        ):
             return True
         if not is_etf_name(names[0]):
             return False
-        hits = {key for key, name in etf_universe
-                if match_etf_reference(text, name).matched}
+        hits = {
+            key for key, name in etf_universe if match_etf_reference(text, name).matched
+        }
         return len(hits) == 1 and symbol in hits
 
     query = EvidenceQueryV1(
         date_from=session - timedelta(days=NEWS_MAX_AGE_DAYS),
-        date_to=session, terms=fetch_terms, families=("news_raw",),
-        limit=max_items)
-    result = run_internal_evidence_query(query, news_db=news_path,
-                                         news_row_acceptor=_accept_row)
+        date_to=session,
+        terms=fetch_terms,
+        families=("news_raw",),
+        limit=max_items,
+    )
+    result = run_internal_evidence_query(
+        query, news_db=news_path, news_row_acceptor=_accept_row
+    )
     family = result["families"]["news_raw"]
     health_status = _health_status(family)
     if health_status is not None:
@@ -254,28 +307,40 @@ def collect_local_news_items(news_path, *, market: str, symbol: str,
             status_out["news"] = health_status
         return ()
     if status_out is not None:
-        status_out["news"] = ("CAP_EXCEEDED"
-                              if family.get("counts", {}).get("truncated")
-                              else "OK")
+        status_out["news"] = (
+            "CAP_EXCEEDED" if family.get("counts", {}).get("truncated") else "OK"
+        )
     # The Stage-1 row acceptor already enforced the per-card exact-
     # instrument acceptance (whole window, before the result limit);
     # expansion terms stay for provenance/debugging only.
     items: list = []
     for document in family["documents"]:
         title = " ".join(str(document["title"]).split())
-        observed = str(document["published_at"] or document["first_seen_at"]
-                       or "")[:10] or None
-        available = document.get('first_seen_at')
-        if (document.get('revision_no') or 1) > 1:
+        observed = (
+            str(document["published_at"] or document["first_seen_at"] or "")[:10]
+            or None
+        )
+        available = document.get("first_seen_at")
+        if (document.get("revision_no") or 1) > 1:
             # Only the latest revision body exists here. Do not place that
             # later text at the first version's original collection time.
             try:
-                available = max((v for v in (available, document.get('last_seen_at')) if v), key=timestamp)
+                available = max(
+                    (v for v in (available, document.get("last_seen_at")) if v),
+                    key=timestamp,
+                )
             except (ValueError, TypeError):
                 available = None
-        items.append(ContextItemV1("news", _bounded(title), observed_on=observed,
-                                   available_at=available, published_at=document.get('published_at'),
-                                   source_label=_with_ref("로컬 NEWS", document["document_id"])))
+        items.append(
+            ContextItemV1(
+                "news",
+                _bounded(title),
+                observed_on=observed,
+                available_at=available,
+                published_at=document.get("published_at"),
+                source_label=_with_ref("로컬 NEWS", document["document_id"]),
+            )
+        )
         if len(items) >= max_items:
             break
     return tuple(items)
@@ -283,10 +348,16 @@ def collect_local_news_items(news_path, *, market: str, symbol: str,
 
 # --- OpenDART disclosure binding ------------------------------------------------------
 
-def collect_dart_disclosure_items(dart_path, *, market: str, symbol: str,
-                                  completed_session_date,
-                                  max_items: int = MAX_CONTEXT_ITEMS,
-                                  status_out: dict | None = None) -> tuple:
+
+def collect_dart_disclosure_items(
+    dart_path,
+    *,
+    market: str,
+    symbol: str,
+    completed_session_date,
+    max_items: int = MAX_CONTEXT_ITEMS,
+    status_out: dict | None = None,
+) -> tuple:
     """Recent disclosures for one KR stock_code from the bulk evidence store.
 
     Read-only and delegated (Stage 2) to ``run_internal_evidence_query``,
@@ -307,16 +378,22 @@ def collect_dart_disclosure_items(dart_path, *, market: str, symbol: str,
             status_out["dart"] = "NOT_REQUESTED"
         return ()
     try:
-        session = (completed_session_date if isinstance(completed_session_date, date)
-                   else date.fromisoformat(str(completed_session_date)))
+        session = (
+            completed_session_date
+            if isinstance(completed_session_date, date)
+            else date.fromisoformat(str(completed_session_date))
+        )
     except ValueError:
         if status_out is not None:
             status_out["dart"] = "NOT_REQUESTED"
         return ()
     query = EvidenceQueryV1(
         date_from=session - timedelta(days=NEWS_MAX_AGE_DAYS),
-        date_to=session, symbols=(symbol,), families=("opendart",),
-        limit=max_items)
+        date_to=session,
+        symbols=(symbol,),
+        families=("opendart",),
+        limit=max_items,
+    )
     result = run_internal_evidence_query(query, opendart_db=dart_path)
     family = result["families"]["opendart"]
     health_status = _health_status(family)
@@ -325,14 +402,20 @@ def collect_dart_disclosure_items(dart_path, *, market: str, symbol: str,
             status_out["dart"] = health_status
         return ()
     if status_out is not None:
-        status_out["dart"] = ("CAP_EXCEEDED"
-                              if family.get("counts", {}).get("truncated")
-                              else "OK")
+        status_out["dart"] = (
+            "CAP_EXCEEDED" if family.get("counts", {}).get("truncated") else "OK"
+        )
     items = []
     for row in family["disclosures"]:
         summary = _bounded(f"{row['corp_name']} {row['report_nm']} 접수")
         if summary:
-            items.append(ContextItemV1("disclosure", summary, observed_on=row["rcept_dt"],
-                                       published_at=row.get('rcept_dt'),
-                                       source_label=_with_ref("OpenDART 공시", row["rcept_no"])))
+            items.append(
+                ContextItemV1(
+                    "disclosure",
+                    summary,
+                    observed_on=row["rcept_dt"],
+                    published_at=row.get("rcept_dt"),
+                    source_label=_with_ref("OpenDART 공시", row["rcept_no"]),
+                )
+            )
     return tuple(items)

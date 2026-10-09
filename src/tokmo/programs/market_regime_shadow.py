@@ -1,41 +1,61 @@
 """Read-only market-regime shadow orchestration primitives."""
 
+import hashlib
+import json
+import re
 from dataclasses import dataclass, fields, is_dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from enum import Enum
-import hashlib
-import json
-import re
 from zoneinfo import ZoneInfo
 
-from tokmo.values.session_gate import MARKET_TIMEZONE, Market
 from tokmo.facts.market_regime_toss_input import (
-    candle_native_identity, candle_request_identity, completed_session_boundary,
+    candle_native_identity,
+    candle_request_identity,
+    completed_session_boundary,
     normalize_daily_candles,
 )
-from tokmo.programs.market_regime_core import SPEC_DIGEST, evaluate_market_regime_core_v1
-from tokmo.programs.quotes_sync import derive_analysis_targets
-from tokmo.records.regular_session_history import RegularSessionHistoryStore
-from tokmo.records.market_regime_shadow_state import MarketRegimeShadowStateStore
-from tokmo.values.ops_kernel import (
-    CadenceBudgetExceeded, CadenceDuplicateError, CadencePolicyMismatchError,
+from tokmo.programs.market_regime_core import (
+    SPEC_DIGEST,
+    evaluate_market_regime_core_v1,
 )
+from tokmo.programs.quotes_sync import derive_analysis_targets
+from tokmo.records.market_regime_shadow_state import MarketRegimeShadowStateStore
+from tokmo.records.regular_session_history import RegularSessionHistoryStore
 from tokmo.values.current_holdings import classify_market
 from tokmo.values.market_regime_core import AdjustmentMode
+from tokmo.values.ops_kernel import (
+    CadenceBudgetExceeded,
+    CadenceDuplicateError,
+    CadencePolicyMismatchError,
+)
+from tokmo.values.session_gate import MARKET_TIMEZONE, Market
 
 _ANALYSIS_SYMBOL = re.compile(r"[A-Z0-9._-]{1,32}\Z", re.ASCII)
 
-def resolve_completed_session_by_market(*, scheduled_for_utc: datetime,
-                                        market: Market, today_row,
-                                        history_store, official_close: datetime):
-    if (scheduled_for_utc.tzinfo is None or scheduled_for_utc.utcoffset() is None
-            or official_close.tzinfo is None or official_close.utcoffset() is None):
+
+def resolve_completed_session_by_market(
+    *,
+    scheduled_for_utc: datetime,
+    market: Market,
+    today_row,
+    history_store,
+    official_close: datetime,
+):
+    if (
+        scheduled_for_utc.tzinfo is None
+        or scheduled_for_utc.utcoffset() is None
+        or official_close.tzinfo is None
+        or official_close.utcoffset() is None
+    ):
         raise ValueError("aware timestamps required")
     zone = ZoneInfo(MARKET_TIMEZONE[market])
     local_now = scheduled_for_utc.astimezone(zone)
-    if (today_row is not None and today_row.get("session") == "regular"
-            and local_now >= official_close.astimezone(zone)):
+    if (
+        today_row is not None
+        and today_row.get("session") == "regular"
+        and local_now >= official_close.astimezone(zone)
+    ):
         return local_now.date()
     cursor = local_now.date() - timedelta(days=1)
     for _ in range(35):
@@ -48,12 +68,28 @@ def resolve_completed_session_by_market(*, scheduled_for_utc: datetime,
     return None
 
 
-def _identity_digest(*, policy_version, market, symbol, completed_session,
-                     adjustment_mode, request_identity):
-    values = ("market-regime-core-v1", SPEC_DIGEST, policy_version, market.value,
-              symbol, completed_session.isoformat(), adjustment_mode.value,
-              request_identity)
-    return hashlib.sha256(json.dumps(values, separators=(",", ":")).encode()).hexdigest()
+def _identity_digest(
+    *,
+    policy_version,
+    market,
+    symbol,
+    completed_session,
+    adjustment_mode,
+    request_identity,
+):
+    values = (
+        "market-regime-core-v1",
+        SPEC_DIGEST,
+        policy_version,
+        market.value,
+        symbol,
+        completed_session.isoformat(),
+        adjustment_mode.value,
+        request_identity,
+    )
+    return hashlib.sha256(
+        json.dumps(values, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 def _pack_payload(pack):
@@ -66,8 +102,10 @@ def _pack_payload(pack):
     if isinstance(pack, (date, datetime)):
         return pack.isoformat()
     if is_dataclass(pack) and not isinstance(pack, type):
-        return {field.name: _pack_payload(getattr(pack, field.name))
-                for field in fields(pack)}
+        return {
+            field.name: _pack_payload(getattr(pack, field.name))
+            for field in fields(pack)
+        }
     if isinstance(pack, dict):
         return {key: _pack_payload(value) for key, value in pack.items()}
     if isinstance(pack, (tuple, list)):
@@ -94,8 +132,10 @@ def _recurring_selection(root, deps):
     holdings = {market: [] for market in Market}
     try:
         from tokmo.records.current_holdings_store import CurrentHoldingsStore
+
         current = CurrentHoldingsStore(
-            root / "stores" / "current_holdings.json", clock=deps.clock,
+            root / "stores" / "current_holdings.json",
+            clock=deps.clock,
         ).read()
         if current is not None:
             for account in current.accounts:
@@ -109,16 +149,17 @@ def _recurring_selection(root, deps):
         return None, "target_source_invalid"
     classification_unknown = holdings.pop(None, [])
     selected, unknown = derive_analysis_targets(
-        holdings=holdings, watchlist_symbols=deps.watchlist_symbols,
+        holdings=holdings,
+        watchlist_symbols=deps.watchlist_symbols,
         market_scope=frozenset(Market),
         pension_excluded=deps.pension_unquotable_symbols,
     )
     if unknown or classification_unknown:
         return None, "unknown_target"
     if any(
-        not isinstance(symbol, str)
-        or _ANALYSIS_SYMBOL.fullmatch(symbol) is None
-        for symbols in selected.values() for symbol in symbols
+        not isinstance(symbol, str) or _ANALYSIS_SYMBOL.fullmatch(symbol) is None
+        for symbols in selected.values()
+        for symbol in symbols
     ):
         return None, "unknown_target"
     return selected, None
@@ -126,45 +167,66 @@ def _recurring_selection(root, deps):
 
 def _resolve_market_session(*, market, scheduled_for_utc, history, cache):
     """Per-market completed-session resolution; ``None`` when unresolvable."""
-    entry = None if cache is None else (
-        cache.kr if market is Market.KR else cache.us
-    )
-    today = scheduled_for_utc.astimezone(
-        ZoneInfo(MARKET_TIMEZONE[market])
-    ).date()
+    entry = None if cache is None else (cache.kr if market is Market.KR else cache.us)
+    today = scheduled_for_utc.astimezone(ZoneInfo(MARKET_TIMEZONE[market])).date()
     today_row = history.read(market, today)
     if entry is None or entry.trade_date != today.isoformat():
         return None
     regular = entry.sessions.get("regularMarket")
-    close = None if regular is None else datetime.fromisoformat(
-        regular.end.replace("Z", "+00:00")
+    close = (
+        None
+        if regular is None
+        else datetime.fromisoformat(regular.end.replace("Z", "+00:00"))
     )
     if close is None:
         # No regular session today: resolver walks official history only.
         close = scheduled_for_utc
         today_row = None
     return resolve_completed_session_by_market(
-        scheduled_for_utc=scheduled_for_utc, market=market,
-        today_row=today_row, history_store=history, official_close=close,
+        scheduled_for_utc=scheduled_for_utc,
+        market=market,
+        today_row=today_row,
+        history_store=history,
+        official_close=close,
     )
 
 
-def _execute_symbol_analysis(*, state, deps, executor, token, policy, market,
-                             symbol, completed, adjustment, identity,
-                             request_identity, invocation_id):
+def _execute_symbol_analysis(
+    *,
+    state,
+    deps,
+    executor,
+    token,
+    policy,
+    market,
+    symbol,
+    completed,
+    adjustment,
+    identity,
+    request_identity,
+    invocation_id,
+):
     """Admit and settle exactly one symbol's claim→fetch→evaluate chain."""
+
     def _started(started_claim):
         identity_lease = state.acquire_identity_lease(identity)
         if identity_lease is None:
             raise _AfterAdmissionAbort("in_progress_after_admission")
         with identity_lease:
             claim = state.claim(
-                identity_digest=identity, program_id="market-regime-core-v1",
-                spec_digest=SPEC_DIGEST, policy_version=policy.policy_version,
-                market=market, symbol=symbol, completed_session_date=completed,
-                adjustment_mode=adjustment, request_identity=request_identity,
-                owner_invocation_id=invocation_id, owner_started_at=deps.clock(),
-                owner_lease_key=identity_lease.key, identity_lease=identity_lease,
+                identity_digest=identity,
+                program_id="market-regime-core-v1",
+                spec_digest=SPEC_DIGEST,
+                policy_version=policy.policy_version,
+                market=market,
+                symbol=symbol,
+                completed_session_date=completed,
+                adjustment_mode=adjustment,
+                request_identity=request_identity,
+                owner_invocation_id=invocation_id,
+                owner_started_at=deps.clock(),
+                owner_lease_key=identity_lease.key,
+                identity_lease=identity_lease,
             )
             if claim.state == "reused":
                 raise _AfterAdmissionAbort("in_progress_after_admission")
@@ -175,8 +237,11 @@ def _execute_symbol_analysis(*, state, deps, executor, token, policy, market,
             fetched_at = deps.clock()
             try:
                 outcome = deps.stock_candles_fetch(
-                    claim=started_claim, bearer=token.bearer(), symbol=symbol,
-                    before=completed_session_boundary(market, completed), adjusted=True,
+                    claim=started_claim,
+                    bearer=token.bearer(),
+                    symbol=symbol,
+                    before=completed_session_boundary(market, completed),
+                    adjusted=True,
                 )
                 if getattr(outcome, "code", None) != "success":
                     raise ValueError("candle_provider_failed")
@@ -185,21 +250,30 @@ def _execute_symbol_analysis(*, state, deps, executor, token, policy, market,
                 if rows is None:
                     raise ValueError("candle_contract_mismatch")
                 series = normalize_daily_candles(
-                    rows, market=market, symbol=symbol, completed_session=completed,
+                    rows,
+                    market=market,
+                    symbol=symbol,
+                    completed_session=completed,
                     adjustment_mode=adjustment,
                 )
                 pack = evaluate_market_regime_core_v1(series)
                 evaluated_at = deps.clock()
                 state.succeed(
-                    identity, input_digest=series.input_digest,
-                    pack_digest=pack.pack_digest, fetched_at=fetched_at,
-                    evaluated_at=evaluated_at, completed_session_date=completed,
+                    identity,
+                    input_digest=series.input_digest,
+                    pack_digest=pack.pack_digest,
+                    fetched_at=fetched_at,
+                    evaluated_at=evaluated_at,
+                    completed_session_date=completed,
                     normalized_bar_count=len(series.bars),
                     result_payload=_pack_payload(pack),
                 )
             except Exception as error:
-                state.fail(identity, failure_code=type(error).__name__,
-                           finished_at=deps.clock())
+                state.fail(
+                    identity,
+                    failure_code=type(error).__name__,
+                    finished_at=deps.clock(),
+                )
                 raise _ProviderFailure(type(error).__name__) from error
         return outcome
 
@@ -223,8 +297,9 @@ def _drain_reason(*, admissible, terminal, in_progress, resolved):
     return "_".join(parts) + f"_pending_{pending_total}"
 
 
-def run_market_regime_shadow(*, root, deps, policy, tick, executor, token,
-                             cache_store, invocation_id):
+def run_market_regime_shadow(
+    *, root, deps, policy, tick, executor, token, cache_store, invocation_id
+):
     """Recurring per-tick portfolio drain; return ``(status, reason)``.
 
     All admissible holdings+watchlist symbols are drained in deterministic
@@ -239,14 +314,16 @@ def run_market_regime_shadow(*, root, deps, policy, tick, executor, token,
     if failure is not None:
         return "failed", failure
     targets = tuple(
-        (market, symbol) for market in sorted(selected, key=lambda item: item.value)
+        (market, symbol)
+        for market in sorted(selected, key=lambda item: item.value)
         for symbol in selected[market]
     )
     if not targets:
         return "skipped", "no_eligible_target"
 
     history = RegularSessionHistoryStore(
-        root / "ops" / "regular_session_history.sqlite3", clock=deps.clock,
+        root / "ops" / "regular_session_history.sqlite3",
+        clock=deps.clock,
     )
     try:
         cache = cache_store.read()
@@ -259,8 +336,10 @@ def run_market_regime_shadow(*, root, deps, policy, tick, executor, token,
     for market in markets_present:
         try:
             sessions[market] = _resolve_market_session(
-                market=market, scheduled_for_utc=tick.scheduled_for_utc,
-                history=history, cache=cache,
+                market=market,
+                scheduled_for_utc=tick.scheduled_for_utc,
+                history=history,
+                cache=cache,
             )
         except Exception:
             # Per-market isolation: an unresolvable market skips its own
@@ -273,9 +352,7 @@ def run_market_regime_shadow(*, root, deps, policy, tick, executor, token,
         return "skipped", "completed_session_unavailable"
 
     adjustment = AdjustmentMode.ADJUSTED
-    state = MarketRegimeShadowStateStore(
-        root / "ops" / "market_regime_shadow.sqlite3"
-    )
+    state = MarketRegimeShadowStateStore(root / "ops" / "market_regime_shadow.sqlite3")
     admissible = {market: len(selected[market]) for market in markets_present}
     terminal = {market: 0 for market in markets_present}
     in_progress = {market: 0 for market in markets_present}
@@ -285,12 +362,18 @@ def run_market_regime_shadow(*, root, deps, policy, tick, executor, token,
         if completed is None:
             continue
         request_identity = candle_request_identity(
-            lane="mr", market=market, symbol=symbol,
-            completed_session=completed, adjusted=True,
+            lane="mr",
+            market=market,
+            symbol=symbol,
+            completed_session=completed,
+            adjusted=True,
         )
         identity = _identity_digest(
-            policy_version=policy.policy_version, market=market, symbol=symbol,
-            completed_session=completed, adjustment_mode=adjustment,
+            policy_version=policy.policy_version,
+            market=market,
+            symbol=symbol,
+            completed_session=completed,
+            adjustment_mode=adjustment,
             request_identity=request_identity,
         )
         existing = state.probe(identity)
@@ -323,10 +406,18 @@ def run_market_regime_shadow(*, root, deps, policy, tick, executor, token,
         admitted += 1
         try:
             _execute_symbol_analysis(
-                state=state, deps=deps, executor=executor, token=token,
-                policy=policy, market=market, symbol=symbol,
-                completed=completed, adjustment=adjustment, identity=identity,
-                request_identity=request_identity, invocation_id=invocation_id,
+                state=state,
+                deps=deps,
+                executor=executor,
+                token=token,
+                policy=policy,
+                market=market,
+                symbol=symbol,
+                completed=completed,
+                adjustment=adjustment,
+                identity=identity,
+                request_identity=request_identity,
+                invocation_id=invocation_id,
             )
         except CadenceBudgetExceeded:
             # Normal termination: nothing started, the next tick inherits.
@@ -352,8 +443,12 @@ def run_market_regime_shadow(*, root, deps, policy, tick, executor, token,
         progressed += 1
         terminal[market] += 1
 
-    reason = _drain_reason(admissible=admissible, terminal=terminal,
-                           in_progress=in_progress, resolved=resolved)
+    reason = _drain_reason(
+        admissible=admissible,
+        terminal=terminal,
+        in_progress=in_progress,
+        resolved=resolved,
+    )
     if failed_new:
         return "failed", reason
     if progressed:
@@ -365,8 +460,9 @@ def run_market_regime_shadow(*, root, deps, policy, tick, executor, token,
     return "skipped", reason
 
 
-def read_market_regime_coverage(*, root, deps, policy_version,
-                                observed_now_utc, cache_store):
+def read_market_regime_coverage(
+    *, root, deps, policy_version, observed_now_utc, cache_store
+):
     """Read-only per-market coverage/readiness for one drain policy (§8).
 
     A deterministic data-availability readout: probes the claim store per
@@ -374,46 +470,61 @@ def read_market_regime_coverage(*, root, deps, policy_version,
     record. No provider wire, no claim, no model trigger — READY only
     declares that the deterministic Market pack set is consumable.
     """
-    result = {"policy_version": policy_version, "markets": {},
-              "last_stage": _last_shadow_stage(root, policy_version)}
+    result = {
+        "policy_version": policy_version,
+        "markets": {},
+        "last_stage": _last_shadow_stage(root, policy_version),
+    }
     selected, failure = _recurring_selection(root, deps)
     if failure is not None:
         result["reason"] = failure
         return result
     history = RegularSessionHistoryStore(
-        root / "ops" / "regular_session_history.sqlite3", clock=deps.clock,
+        root / "ops" / "regular_session_history.sqlite3",
+        clock=deps.clock,
     )
     try:
         cache = cache_store.read()
     except Exception:
         cache = None
-    state = MarketRegimeShadowStateStore(
-        root / "ops" / "market_regime_shadow.sqlite3"
-    )
+    state = MarketRegimeShadowStateStore(root / "ops" / "market_regime_shadow.sqlite3")
     for market in sorted(selected, key=lambda item: item.value):
         symbols = selected[market]
-        entry = {"admissible": len(symbols), "completed_session": None,
-                 "terminal": None, "succeeded": None, "failed": None,
-                 "in_progress": None, "pending": None, "ready": False}
+        entry = {
+            "admissible": len(symbols),
+            "completed_session": None,
+            "terminal": None,
+            "succeeded": None,
+            "failed": None,
+            "in_progress": None,
+            "pending": None,
+            "ready": False,
+        }
         try:
             completed = _resolve_market_session(
-                market=market, scheduled_for_utc=observed_now_utc,
-                history=history, cache=cache,
+                market=market,
+                scheduled_for_utc=observed_now_utc,
+                history=history,
+                cache=cache,
             )
         except Exception:
             completed = None
         if completed is not None:
             entry["completed_session"] = completed.isoformat()
-            counts = {"succeeded": 0, "failed": 0, "in_progress": 0,
-                      "pending": 0}
+            counts = {"succeeded": 0, "failed": 0, "in_progress": 0, "pending": 0}
             for symbol in symbols:
                 request_identity = candle_request_identity(
-                    lane="mr", market=market, symbol=symbol,
-                    completed_session=completed, adjusted=True,
+                    lane="mr",
+                    market=market,
+                    symbol=symbol,
+                    completed_session=completed,
+                    adjusted=True,
                 )
                 identity = _identity_digest(
-                    policy_version=policy_version, market=market,
-                    symbol=symbol, completed_session=completed,
+                    policy_version=policy_version,
+                    market=market,
+                    symbol=symbol,
+                    completed_session=completed,
                     adjustment_mode=AdjustmentMode.ADJUSTED,
                     request_identity=request_identity,
                 )
@@ -429,8 +540,10 @@ def read_market_regime_coverage(*, root, deps, policy_version,
             entry.update(counts)
             entry["terminal"] = counts["succeeded"] + counts["failed"]
             entry["ready"] = (
-                len(symbols) > 0 and counts["pending"] == 0
-                and counts["in_progress"] == 0 and counts["succeeded"] >= 1
+                len(symbols) > 0
+                and counts["pending"] == 0
+                and counts["in_progress"] == 0
+                and counts["succeeded"] >= 1
             )
         result["markets"][market.value] = entry
     return result
@@ -443,6 +556,7 @@ def _last_shadow_stage(root, policy_version):
         return None
     import sqlite3
     from contextlib import closing
+
     with closing(sqlite3.connect(path)) as connection:
         connection.row_factory = sqlite3.Row
         row = connection.execute(
@@ -459,9 +573,11 @@ def _last_shadow_stage(root, policy_version):
         return None
     for stage in stages:
         if stage.get("stage") == "market_regime_shadow":
-            return {"scheduled_for_utc": row["scheduled_for_utc"],
-                    "status": stage.get("status"),
-                    "reason": stage.get("reason")}
+            return {
+                "scheduled_for_utc": row["scheduled_for_utc"],
+                "status": stage.get("status"),
+                "reason": stage.get("reason"),
+            }
     return None
 
 
@@ -479,9 +595,18 @@ class TargetedRegimeTargetV1:
     requested_by: str
 
 
-def run_market_regime_targeted(*, root, deps, policy, tick, executor, token,
-                               cache_store, invocation_id,
-                               target: TargetedRegimeTargetV1):
+def run_market_regime_targeted(
+    *,
+    root,
+    deps,
+    policy,
+    tick,
+    executor,
+    token,
+    cache_store,
+    invocation_id,
+    target: TargetedRegimeTargetV1,
+):
     """Explicit-target one-shot; returns ``(status, reason)``.
 
     Separate seam from the recurring cap-one selector: it never reads
@@ -489,22 +614,25 @@ def run_market_regime_targeted(*, root, deps, policy, tick, executor, token,
     unservable target fails closed with zero provider I/O (token included)
     before admission, and exactly one admitted fetch (retry 0) after it.
     """
-    if (type(target) is not TargetedRegimeTargetV1
-            or not isinstance(target.market, Market)
-            or type(target.symbol) is not str
-            or _ANALYSIS_SYMBOL.fullmatch(target.symbol) is None
-            or type(target.requested_by) is not str
-            or not target.requested_by):
+    if (
+        type(target) is not TargetedRegimeTargetV1
+        or not isinstance(target.market, Market)
+        or type(target.symbol) is not str
+        or _ANALYSIS_SYMBOL.fullmatch(target.symbol) is None
+        or type(target.requested_by) is not str
+        or not target.requested_by
+    ):
         return "failed", "invalid_target"
     market = target.market
     symbol = target.symbol
     history = RegularSessionHistoryStore(
-        root / "ops" / "regular_session_history.sqlite3", clock=deps.clock,
+        root / "ops" / "regular_session_history.sqlite3",
+        clock=deps.clock,
     )
     try:
         cache = cache_store.read()
-        entry = None if cache is None else (
-            cache.kr if market is Market.KR else cache.us
+        entry = (
+            None if cache is None else (cache.kr if market is Market.KR else cache.us)
         )
         today = tick.scheduled_for_utc.astimezone(
             ZoneInfo(MARKET_TIMEZONE[market])
@@ -513,16 +641,21 @@ def run_market_regime_targeted(*, root, deps, policy, tick, executor, token,
         if entry is None or entry.trade_date != today.isoformat():
             return "skipped", "completed_session_unavailable"
         regular = entry.sessions.get("regularMarket")
-        close = None if regular is None else datetime.fromisoformat(
-            regular.end.replace("Z", "+00:00")
+        close = (
+            None
+            if regular is None
+            else datetime.fromisoformat(regular.end.replace("Z", "+00:00"))
         )
         if close is None:
             # No regular session today: resolver walks official history only.
             close = tick.scheduled_for_utc
             today_row = None
         completed = resolve_completed_session_by_market(
-            scheduled_for_utc=tick.scheduled_for_utc, market=market,
-            today_row=today_row, history_store=history, official_close=close,
+            scheduled_for_utc=tick.scheduled_for_utc,
+            market=market,
+            today_row=today_row,
+            history_store=history,
+            official_close=close,
         )
     except Exception:
         return "failed", "completed_session_invalid"
@@ -531,17 +664,21 @@ def run_market_regime_targeted(*, root, deps, policy, tick, executor, token,
 
     adjustment = AdjustmentMode.ADJUSTED
     request_identity = candle_request_identity(
-        lane="mr", market=market, symbol=symbol, completed_session=completed,
+        lane="mr",
+        market=market,
+        symbol=symbol,
+        completed_session=completed,
         adjusted=True,
     )
     identity = _identity_digest(
-        policy_version=policy.policy_version, market=market, symbol=symbol,
-        completed_session=completed, adjustment_mode=adjustment,
+        policy_version=policy.policy_version,
+        market=market,
+        symbol=symbol,
+        completed_session=completed,
+        adjustment_mode=adjustment,
         request_identity=request_identity,
     )
-    state = MarketRegimeShadowStateStore(
-        root / "ops" / "market_regime_shadow.sqlite3"
-    )
+    state = MarketRegimeShadowStateStore(root / "ops" / "market_regime_shadow.sqlite3")
     existing = state.probe(identity)
     if existing is not None:
         if existing.state == "reused":
@@ -557,12 +694,19 @@ def run_market_regime_targeted(*, root, deps, policy, tick, executor, token,
             raise _AfterAdmissionAbort("in_progress_after_admission")
         with identity_lease:
             claim = state.claim(
-                identity_digest=identity, program_id="market-regime-core-v1",
-                spec_digest=SPEC_DIGEST, policy_version=policy.policy_version,
-                market=market, symbol=symbol, completed_session_date=completed,
-                adjustment_mode=adjustment, request_identity=request_identity,
-                owner_invocation_id=invocation_id, owner_started_at=deps.clock(),
-                owner_lease_key=identity_lease.key, identity_lease=identity_lease,
+                identity_digest=identity,
+                program_id="market-regime-core-v1",
+                spec_digest=SPEC_DIGEST,
+                policy_version=policy.policy_version,
+                market=market,
+                symbol=symbol,
+                completed_session_date=completed,
+                adjustment_mode=adjustment,
+                request_identity=request_identity,
+                owner_invocation_id=invocation_id,
+                owner_started_at=deps.clock(),
+                owner_lease_key=identity_lease.key,
+                identity_lease=identity_lease,
             )
             if claim.state == "reused":
                 raise _AfterAdmissionAbort("in_progress_after_admission")
@@ -573,7 +717,9 @@ def run_market_regime_targeted(*, root, deps, policy, tick, executor, token,
             fetched_at = deps.clock()
             try:
                 outcome = deps.stock_candles_fetch(
-                    claim=started_claim, bearer=token.bearer(), symbol=symbol,
+                    claim=started_claim,
+                    bearer=token.bearer(),
+                    symbol=symbol,
                     before=completed_session_boundary(market, completed),
                     adjusted=True,
                 )
@@ -584,23 +730,32 @@ def run_market_regime_targeted(*, root, deps, policy, tick, executor, token,
                 if rows is None:
                     raise ValueError("candle_contract_mismatch")
                 series = normalize_daily_candles(
-                    rows, market=market, symbol=symbol,
-                    completed_session=completed, adjustment_mode=adjustment,
+                    rows,
+                    market=market,
+                    symbol=symbol,
+                    completed_session=completed,
+                    adjustment_mode=adjustment,
                 )
                 if series.symbol != target.symbol:
                     raise ValueError("target_identity_mismatch")
                 pack = evaluate_market_regime_core_v1(series)
                 evaluated_at = deps.clock()
                 state.succeed(
-                    identity, input_digest=series.input_digest,
-                    pack_digest=pack.pack_digest, fetched_at=fetched_at,
-                    evaluated_at=evaluated_at, completed_session_date=completed,
+                    identity,
+                    input_digest=series.input_digest,
+                    pack_digest=pack.pack_digest,
+                    fetched_at=fetched_at,
+                    evaluated_at=evaluated_at,
+                    completed_session_date=completed,
                     normalized_bar_count=len(series.bars),
                     result_payload=_pack_payload(pack),
                 )
             except Exception as error:
-                state.fail(identity, failure_code=type(error).__name__,
-                           finished_at=deps.clock())
+                state.fail(
+                    identity,
+                    failure_code=type(error).__name__,
+                    finished_at=deps.clock(),
+                )
                 raise _ProviderFailure(type(error).__name__) from error
         return outcome
 

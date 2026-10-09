@@ -8,7 +8,7 @@ import os
 import stat
 import urllib.error
 import zipfile
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from email.message import Message
 from pathlib import Path
 
@@ -40,7 +40,7 @@ from tokmo.runtime.config import ConfigError, load_opendart_config
 FIXTURES = Path(__file__).parent / "fixtures"
 CORPCODE_XML = (FIXTURES / "opendart_corpcode_success.xml").read_bytes()
 LIST_BODY = (FIXTURES / "opendart_list_success.json").read_bytes()
-NOW = datetime(2026, 7, 27, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 27, 12, 0, 0, tzinfo=UTC)
 KEY_SECRET = "fixture-opendart-key-0000000000000000000"
 CORP = "00164779"
 
@@ -66,8 +66,12 @@ def prepare(home):
 def invoke(home, endpoint, transport, now=NOW):
     ids = iter(["record", "decision"])
     return run_dart(
-        home=home, endpoint=endpoint, transport=transport,
-        clock=lambda: now, id_factory=ids.__next__, run_id="run",
+        home=home,
+        endpoint=endpoint,
+        transport=transport,
+        clock=lambda: now,
+        id_factory=ids.__next__,
+        run_id="run",
     )
 
 
@@ -81,10 +85,16 @@ def confirm_corpcode(home, now=NOW):
 
 def probe_rows(count, outcome="timeout"):
     base = NOW - timedelta(seconds=3600)
-    return [{"sequence": index + 1, "endpoint_id": "opendart_corp_code",
-             "purpose": "confirm_000660_corp_mapping_schema",
-             "started_at": (base + timedelta(seconds=2 * index)).isoformat(),
-             "outcome": outcome} for index in range(count)]
+    return [
+        {
+            "sequence": index + 1,
+            "endpoint_id": "opendart_corp_code",
+            "purpose": "confirm_000660_corp_mapping_schema",
+            "started_at": (base + timedelta(seconds=2 * index)).isoformat(),
+            "outcome": outcome,
+        }
+        for index in range(count)
+    ]
 
 
 def write_state(path, **changes):
@@ -96,14 +106,21 @@ def write_state(path, **changes):
 
 def record_checkpoint(home, tranche, new_information=None):
     checkpoint_dart(
-        home=home, tranche=tranche, confirmed="confirmed-notes",
-        changed="changed-notes", unresolved="named-schema-hypothesis",
-        why_more_calls="why-more-calls", tests_green=True,
-        no_scope_expansion=True, new_information=new_information,
-        clock=lambda: NOW - timedelta(seconds=120))
+        home=home,
+        tranche=tranche,
+        confirmed="confirmed-notes",
+        changed="changed-notes",
+        unresolved="named-schema-hypothesis",
+        why_more_calls="why-more-calls",
+        tests_green=True,
+        no_scope_expansion=True,
+        new_information=new_information,
+        clock=lambda: NOW - timedelta(seconds=120),
+    )
 
 
 # --- transport wire behavior -------------------------------------------------
+
 
 class Response:
     status = 200
@@ -146,7 +163,8 @@ def test_corp_code_transport_makes_exact_official_get_once():
     assert request.get_method() == "GET"
     assert timeout == REQUEST_TIMEOUT_SECONDS == 10
     assert request.full_url == (
-        f"https://opendart.fss.or.kr/api/corpCode.xml?crtfc_key={KEY_SECRET}")
+        f"https://opendart.fss.or.kr/api/corpCode.xml?crtfc_key={KEY_SECRET}"
+    )
     assert request.get_header("Accept-encoding") == "identity"
 
 
@@ -154,46 +172,65 @@ def test_list_transport_uses_explicit_descending_first_page_query():
     transport = OpenDartLiveTransport()
     opener = CapturingOpener(Response(LIST_BODY))
     transport.opener = opener
-    outcome = transport(build_list_request(
-        corp_code=CORP, begin_date="20260428", end_date="20260727",
-        api_key=KEY_SECRET))
+    outcome = transport(
+        build_list_request(
+            corp_code=CORP,
+            begin_date="20260428",
+            end_date="20260727",
+            api_key=KEY_SECRET,
+        )
+    )
     request, _timeout = opener.calls[0]
 
     assert isinstance(outcome, _OpenDartTransportSuccess)
     assert request.full_url == (
         "https://opendart.fss.or.kr/api/list.json"
         f"?corp_code={CORP}&bgn_de=20260428&end_de=20260727"
-        f"&sort=date&sort_mth=desc&page_no=1&page_count=1&crtfc_key={KEY_SECRET}")
+        f"&sort=date&sort_mth=desc&page_no=1&page_count=1&crtfc_key={KEY_SECRET}"
+    )
 
 
-@pytest.mark.parametrize("corp_code,begin,end", [
-    (None, "20260428", "20260727"),
-    ("164779", "20260428", "20260727"),
-    (CORP, "2026-04-28", "20260727"),
-    (CORP, "20260428", "202607"),
-])
+@pytest.mark.parametrize(
+    "corp_code,begin,end",
+    [
+        (None, "20260428", "20260727"),
+        ("164779", "20260428", "20260727"),
+        (CORP, "2026-04-28", "20260727"),
+        (CORP, "20260428", "202607"),
+    ],
+)
 def test_list_transport_rejects_bad_identity_without_network(corp_code, begin, end):
     transport = OpenDartLiveTransport()
     opener = CapturingOpener(Response())
     transport.opener = opener
-    outcome = transport(build_list_request(
-        corp_code=corp_code, begin_date=begin, end_date=end, api_key=KEY_SECRET))
+    outcome = transport(
+        build_list_request(
+            corp_code=corp_code, begin_date=begin, end_date=end, api_key=KEY_SECRET
+        )
+    )
     assert outcome.code == "protocol_failure"
     assert opener.calls == []
 
 
 def test_opener_has_empty_proxy_policy_and_redirects_are_not_followed():
     transport = OpenDartLiveTransport()
-    assert not any(handler.__class__.__name__ == "ProxyHandler"
-                   for handler in transport.opener.handlers)
+    assert not any(
+        handler.__class__.__name__ == "ProxyHandler"
+        for handler in transport.opener.handlers
+    )
     redirect = urllib.error.HTTPError("masked", 302, "masked", Message(), None)
     transport.opener = CapturingOpener(redirect)
     assert transport(build_corp_code_request(api_key=KEY_SECRET)).code == "redirect"
 
 
-@pytest.mark.parametrize("status,code", [
-    (403, "auth_rejection"), (429, "http_429"), (503, "http_5xx"),
-])
+@pytest.mark.parametrize(
+    "status,code",
+    [
+        (403, "auth_rejection"),
+        (429, "http_429"),
+        (503, "http_5xx"),
+    ],
+)
 def test_http_errors_map_to_closed_codes(status, code):
     error = urllib.error.HTTPError("masked", status, "masked", Message(), None)
     transport = OpenDartLiveTransport()
@@ -214,22 +251,34 @@ def test_http_429_carries_provider_retry_after():
 def test_per_endpoint_body_caps_and_content_encoding_fail_closed():
     transport = OpenDartLiveTransport()
     transport.opener = CapturingOpener(Response(b"x" * (MAX_ZIP_BODY_BYTES + 1)))
-    assert transport(build_corp_code_request(
-        api_key=KEY_SECRET)).code == "body_too_large"
+    assert (
+        transport(build_corp_code_request(api_key=KEY_SECRET)).code == "body_too_large"
+    )
 
     transport.opener = CapturingOpener(Response(b"x" * (MAX_JSON_BODY_BYTES + 1)))
-    assert transport(build_list_request(
-        corp_code=CORP, begin_date="20260428", end_date="20260727",
-        api_key=KEY_SECRET)).code == "body_too_large"
+    assert (
+        transport(
+            build_list_request(
+                corp_code=CORP,
+                begin_date="20260428",
+                end_date="20260727",
+                api_key=KEY_SECRET,
+            )
+        ).code
+        == "body_too_large"
+    )
 
     gzipped = Response()
     gzipped.headers["Content-Encoding"] = "gzip"
     transport.opener = CapturingOpener(gzipped)
-    assert transport(build_corp_code_request(
-        api_key=KEY_SECRET)).code == "unsupported_content_encoding"
+    assert (
+        transport(build_corp_code_request(api_key=KEY_SECRET)).code
+        == "unsupported_content_encoding"
+    )
 
 
 # --- opendart config loader --------------------------------------------------
+
 
 def test_opendart_config_loader_reasons(tmp_path):
     with pytest.raises(ConfigError, match="config_missing"):
@@ -248,6 +297,7 @@ def test_opendart_config_loader_reasons(tmp_path):
 
 
 # --- bounded probe campaign state machine ------------------------------------
+
 
 def test_setup_dart_is_idempotent_and_private(tmp_path):
     setup_dart(home=tmp_path)
@@ -271,8 +321,9 @@ def test_corpcode_probe_stores_mapping_and_hypothesis_is_not_repeated(tmp_path):
 
     calls = []
     with pytest.raises(LiveRunError, match="already_confirmed"):
-        invoke(tmp_path, "corpcode", lambda r: calls.append(r),
-               NOW + timedelta(seconds=2))
+        invoke(
+            tmp_path, "corpcode", lambda r: calls.append(r), NOW + timedelta(seconds=2)
+        )
     assert calls == []
 
 
@@ -308,8 +359,7 @@ def test_list_probe_uses_bounded_window_and_runs_same_tracer_boundary(tmp_path):
 
     calls = []
     with pytest.raises(LiveRunError, match="already_confirmed"):
-        invoke(tmp_path, "list", lambda r: calls.append(r),
-               NOW + timedelta(seconds=10))
+        invoke(tmp_path, "list", lambda r: calls.append(r), NOW + timedelta(seconds=10))
     assert calls == []
 
 
@@ -337,12 +387,15 @@ def test_two_second_global_spacing_applies_across_endpoints(tmp_path):
     confirm_corpcode(tmp_path)
     calls = []
     with pytest.raises(LiveRunError, match="not_due"):
-        invoke(tmp_path, "list", lambda r: calls.append(r),
-               NOW + timedelta(seconds=1))
+        invoke(tmp_path, "list", lambda r: calls.append(r), NOW + timedelta(seconds=1))
     assert calls == []
     with pytest.raises(LiveRunError, match="timeout"):
-        invoke(tmp_path, "list", lambda _r: _OpenDartTransportFailure("timeout"),
-               NOW + timedelta(seconds=2))
+        invoke(
+            tmp_path,
+            "list",
+            lambda _r: _OpenDartTransportFailure("timeout"),
+            NOW + timedelta(seconds=2),
+        )
     assert len(state(state_path)["probes"]) == 2
 
 
@@ -353,8 +406,9 @@ def test_ceiling_thirty_started_makes_next_network_zero(tmp_path):
     record_checkpoint(tmp_path, 3, new_information="calls-11-20-new-info")
     calls = []
     with pytest.raises(LiveRunError, match="ceiling_exhausted"):
-        invoke(tmp_path, "corpcode", lambda r: calls.append(r),
-               NOW + timedelta(seconds=60))
+        invoke(
+            tmp_path, "corpcode", lambda r: calls.append(r), NOW + timedelta(seconds=60)
+        )
     assert calls == []
 
 
@@ -405,25 +459,32 @@ def test_malformed_state_fails_closed_with_no_network(tmp_path, content):
 def test_http_stop_outcomes_stop_future_probes(tmp_path):
     prepare(tmp_path)
     with pytest.raises(LiveRunError, match="http_429"):
-        invoke(tmp_path, "corpcode",
-               lambda _r: _OpenDartTransportFailure("http_429", retry_after=120))
+        invoke(
+            tmp_path,
+            "corpcode",
+            lambda _r: _OpenDartTransportFailure("http_429", retry_after=120),
+        )
     calls = []
     with pytest.raises(LiveRunError, match="fair_access_stop"):
-        invoke(tmp_path, "corpcode", lambda r: calls.append(r),
-               NOW + timedelta(seconds=3600))
+        invoke(
+            tmp_path,
+            "corpcode",
+            lambda r: calls.append(r),
+            NOW + timedelta(seconds=3600),
+        )
     assert calls == []
 
 
 def test_provider_status_key_rejection_stops_future_probes(tmp_path):
     prepare(tmp_path)
-    error_body = (b"<result><status>010</status><message>masked</message></result>")
+    error_body = b"<result><status>010</status><message>masked</message></result>"
     with pytest.raises(LiveRunError, match="provider_key_rejected"):
-        invoke(tmp_path, "corpcode",
-               lambda _r: _OpenDartTransportSuccess(error_body))
+        invoke(tmp_path, "corpcode", lambda _r: _OpenDartTransportSuccess(error_body))
     calls = []
     with pytest.raises(LiveRunError, match="fair_access_stop"):
-        invoke(tmp_path, "corpcode", lambda r: calls.append(r),
-               NOW + timedelta(seconds=60))
+        invoke(
+            tmp_path, "corpcode", lambda r: calls.append(r), NOW + timedelta(seconds=60)
+        )
     assert calls == []
 
 
@@ -434,8 +495,9 @@ def test_provider_retry_after_overrides_two_second_spacing(tmp_path):
     write_state(state_path, retry_after_seconds=120)
     calls = []
     with pytest.raises(LiveRunError, match="not_due"):
-        invoke(tmp_path, "corpcode", lambda r: calls.append(r),
-               NOW + timedelta(seconds=60))
+        invoke(
+            tmp_path, "corpcode", lambda r: calls.append(r), NOW + timedelta(seconds=60)
+        )
     assert calls == []
 
 
@@ -451,9 +513,16 @@ def test_non_private_opendart_config_is_rejected_before_network(tmp_path):
 def test_no_artifact_ever_contains_the_api_key(tmp_path):
     prepare(tmp_path)
     confirm_corpcode(tmp_path)
-    invoke(tmp_path, "list", lambda _r: _OpenDartTransportSuccess(LIST_BODY),
-           NOW + timedelta(seconds=2))
-    artifacts = [path for path in tmp_path.rglob("*")
-                 if path.is_file() and path.name != "opendart.env"]
+    invoke(
+        tmp_path,
+        "list",
+        lambda _r: _OpenDartTransportSuccess(LIST_BODY),
+        NOW + timedelta(seconds=2),
+    )
+    artifacts = [
+        path
+        for path in tmp_path.rglob("*")
+        if path.is_file() and path.name != "opendart.env"
+    ]
     assert artifacts
     assert all(KEY_SECRET.encode() not in path.read_bytes() for path in artifacts)

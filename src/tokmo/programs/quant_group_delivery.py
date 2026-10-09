@@ -23,23 +23,33 @@ environment, and no secret is accepted or persisted.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
-import re
 from types import MappingProxyType
 
 from tokmo.programs.quant_telegram_card import (
-    MESSAGE_CHAR_CAP, MarketMessageV1, run_quant_telegram_card_canary,
+    MESSAGE_CHAR_CAP,
+    MarketMessageV1,
+    run_quant_telegram_card_canary,
 )
-from tokmo.values.instrument_display import display_or_symbol
 from tokmo.records.quant_group_delivery_receipts import (
-    CYCLE_PURPOSES, LIVE_SEND_CAP, RCA_CYCLE, activation_id_for, valid_chat_id,
+    CYCLE_PURPOSES,
+    LIVE_SEND_CAP,
+    RCA_CYCLE,
+    activation_id_for,
+    valid_chat_id,
     valid_defect_ref,
 )
+from tokmo.values.instrument_display import display_or_symbol
 
-MARKER_RE = re.compile(r"QC(?P<cycle>[1-9])-(?P<market>KR|US)-(?P<sha12>[0-9a-f]{12}|noreport)/(?P<part>[1-9][0-9]*)")
+MARKER_RE = re.compile(
+    r"QC(?P<cycle>[1-9])-(?P<market>KR|US)-(?P<sha12>[0-9a-f]{12}|noreport)/(?P<part>[1-9][0-9]*)"
+)
 MARKER_PREFIX = "🔖 "
-NO_WRITES = MappingProxyType({"playbook_files": 0, "ledger": 0, "order": 0, "account": 0, "provider": 0})
+NO_WRITES = MappingProxyType(
+    {"playbook_files": 0, "ledger": 0, "order": 0, "account": 0, "provider": 0}
+)
 _SYMBOL_RE_CACHE: dict = {}
 
 
@@ -64,6 +74,7 @@ class ReplyBindingV1:
 
 # --- visible binding markers -------------------------------------------------
 
+
 def _chars(text: str) -> int:
     return len(text.encode("utf-16-le")) // 2
 
@@ -76,9 +87,14 @@ def marker_for(cycle: int, market: str, report_sha256: str, part_index: int) -> 
 def symbols_in_part(text: str, cards: tuple, *, market: str) -> tuple:
     """(symbol, name) pairs whose exact card heading line occurs in this part."""
     lines = set(text.split("\n"))
-    return tuple((symbol, name) for symbol, name in cards
-                 if ("• " + display_or_symbol(market, symbol, name) in lines
-                     or "• " + name + " (" + symbol + ")" in lines))
+    return tuple(
+        (symbol, name)
+        for symbol, name in cards
+        if (
+            "• " + display_or_symbol(market, symbol, name) in lines
+            or "• " + name + " (" + symbol + ")" in lines
+        )
+    )
 
 
 def bind_markers(messages: tuple, cards_by_market: dict, *, cycle: int) -> tuple:
@@ -97,16 +113,28 @@ def bind_markers(messages: tuple, cards_by_market: dict, *, cycle: int) -> tuple
                 raise ValueError("marker_overflow")
             new_parts.append(body)
             parts[f"{message.market}:{index}"] = {
-                "marker": marker, "market": message.market, "report_sha256": message.report_sha256,
+                "marker": marker,
+                "market": message.market,
+                "report_sha256": message.report_sha256,
                 "completed_session_date": message.completed_session_date,
-                "symbols": symbols_in_part(text, cards, market=message.market)}
-        marked.append(MarketMessageV1(message.market, message.completed_session_date, message.identity_sha256,
-                                      message.report_sha256, tuple(new_parts), message.grounded_sections,
-                                      message.unavailable_sections))
+                "symbols": symbols_in_part(text, cards, market=message.market),
+            }
+        marked.append(
+            MarketMessageV1(
+                message.market,
+                message.completed_session_date,
+                message.identity_sha256,
+                message.report_sha256,
+                tuple(new_parts),
+                message.grounded_sections,
+                message.unavailable_sections,
+            )
+        )
     return tuple(marked), parts
 
 
 # --- budget ------------------------------------------------------------------
+
 
 def _consumed_cycles(receipts, vertical_id: str) -> dict:
     """{cycle: receipt status} for every cycle of this vertical with a receipt."""
@@ -128,10 +156,18 @@ def budget_status(receipts, bindings, *, vertical_id: str) -> dict:
     else:
         rca = "available"
     next_cycle = next((cycle for cycle in (1, 2) if cycle not in consumed), None)
-    return {"vertical_id": vertical_id, "cap": LIVE_SEND_CAP, "consumed": len(consumed),
-            "remaining": LIVE_SEND_CAP - len(consumed),
-            "cycles": {str(cycle): consumed.get(cycle) for cycle in range(1, LIVE_SEND_CAP + 1)},
-            "planned_complete": planned_complete, "rca_reserve": rca, "next_cycle": next_cycle}
+    return {
+        "vertical_id": vertical_id,
+        "cap": LIVE_SEND_CAP,
+        "consumed": len(consumed),
+        "remaining": LIVE_SEND_CAP - len(consumed),
+        "cycles": {
+            str(cycle): consumed.get(cycle) for cycle in range(1, LIVE_SEND_CAP + 1)
+        },
+        "planned_complete": planned_complete,
+        "rca_reserve": rca,
+        "next_cycle": next_cycle,
+    }
 
 
 def admit_cycle(receipts, *, vertical_id: str, cycle, rca_defect_ref) -> str | None:
@@ -155,16 +191,38 @@ def admit_cycle(receipts, *, vertical_id: str, cycle, rca_defect_ref) -> str | N
 
 # --- one bounded live cycle ----------------------------------------------------
 
-def run_quant_group_delivery(*, activation: dict, chat_id: str, receipts, bindings, messages: tuple,
-                             cards_by_market: dict, telegram_send, now: datetime) -> dict:
+
+def run_quant_group_delivery(
+    *,
+    activation: dict,
+    chat_id: str,
+    receipts,
+    bindings,
+    messages: tuple,
+    cards_by_market: dict,
+    telegram_send,
+    now: datetime,
+) -> dict:
     """One explicit-chat, one-cycle, one-attempt delivery of the rendered cards.
 
     Order: gate → explicit chat match → budget admission → markers (cap
     check) → durable binding → existing one-attempt canary (reservation
     before transport, per-market settlement, UNKNOWN permanent)."""
-    result = {"off": None, "activation_id": None, "cycle": None, "chat_id": chat_id,
-              "rca_defect_ref": None, "markers": {}, "reserved": 0, "sent": 0, "failed": 0,
-              "unknown": 0, "skipped": 0, "deduped": {}, "parts": []}
+    result = {
+        "off": None,
+        "activation_id": None,
+        "cycle": None,
+        "chat_id": chat_id,
+        "rca_defect_ref": None,
+        "markers": {},
+        "reserved": 0,
+        "sent": 0,
+        "failed": 0,
+        "unknown": 0,
+        "skipped": 0,
+        "deduped": {},
+        "parts": [],
+    }
     if activation.get("mode") != "LIVE":
         result["off"] = activation.get("reason") or "mode"
         return result
@@ -173,7 +231,9 @@ def run_quant_group_delivery(*, activation: dict, chat_id: str, receipts, bindin
         return result
     vertical_id, cycle = activation.get("vertical_id"), activation.get("cycle")
     defect = activation.get("rca_defect_ref")
-    refusal = admit_cycle(receipts, vertical_id=vertical_id, cycle=cycle, rca_defect_ref=defect)
+    refusal = admit_cycle(
+        receipts, vertical_id=vertical_id, cycle=cycle, rca_defect_ref=defect
+    )
     if refusal is not None:
         result["off"] = refusal
         return result
@@ -186,23 +246,56 @@ def run_quant_group_delivery(*, activation: dict, chat_id: str, receipts, bindin
         return result
     # Report dedupe is decided by the inner canary; restrict the binding to
     # the markets it will actually attempt so the sidecar never over-claims.
-    attempted = _eligible_markets(receipts, marked, override=bool(activation.get("same_report_ok")))
+    attempted = _eligible_markets(
+        receipts, marked, override=bool(activation.get("same_report_ok"))
+    )
     parts = {key: value for key, value in parts.items() if value["market"] in attempted}
     if not parts:
         inner = run_quant_telegram_card_canary(
-            activation={"mode": "CANARY", "activation_id": activation_id}, receipts=receipts,
-            activation_id=activation_id, messages=marked, telegram_send=telegram_send, now=now,
-            override_report_dedupe=bool(activation.get("same_report_ok")))
+            activation={"mode": "CANARY", "activation_id": activation_id},
+            receipts=receipts,
+            activation_id=activation_id,
+            messages=marked,
+            telegram_send=telegram_send,
+            now=now,
+            override_report_dedupe=bool(activation.get("same_report_ok")),
+        )
         result.update({key: inner[key] for key in ("off", "deduped")})
         return result
-    bindings.write(activation_id, vertical_id=vertical_id, cycle=cycle, chat_id=chat_id,
-                   purpose=CYCLE_PURPOSES[cycle], parts=parts, now=now, rca_defect_ref=defect)
+    bindings.write(
+        activation_id,
+        vertical_id=vertical_id,
+        cycle=cycle,
+        chat_id=chat_id,
+        purpose=CYCLE_PURPOSES[cycle],
+        parts=parts,
+        now=now,
+        rca_defect_ref=defect,
+    )
     inner = run_quant_telegram_card_canary(
-        activation={"mode": "CANARY", "activation_id": activation_id}, receipts=receipts,
-        activation_id=activation_id, messages=marked, telegram_send=telegram_send, now=now,
-        override_report_dedupe=bool(activation.get("same_report_ok")))
-    result.update({key: inner[key] for key in ("off", "reserved", "sent", "failed", "unknown",
-                                               "skipped", "deduped", "parts")})
+        activation={"mode": "CANARY", "activation_id": activation_id},
+        receipts=receipts,
+        activation_id=activation_id,
+        messages=marked,
+        telegram_send=telegram_send,
+        now=now,
+        override_report_dedupe=bool(activation.get("same_report_ok")),
+    )
+    result.update(
+        {
+            key: inner[key]
+            for key in (
+                "off",
+                "reserved",
+                "sent",
+                "failed",
+                "unknown",
+                "skipped",
+                "deduped",
+                "parts",
+            )
+        }
+    )
     result["markers"] = {key: value["marker"] for key, value in parts.items()}
     return result
 
@@ -210,7 +303,11 @@ def run_quant_group_delivery(*, activation: dict, chat_id: str, receipts, bindin
 def _eligible_markets(receipts, messages: tuple, *, override: bool) -> set:
     eligible = set()
     for message in messages:
-        prior = receipts.report_attempted(message.report_sha256) if message.report_sha256 else None
+        prior = (
+            receipts.report_attempted(message.report_sha256)
+            if message.report_sha256
+            else None
+        )
         if prior is not None and (not override or prior[1] in ("UNKNOWN", "RESERVED")):
             continue
         eligible.add(message.market)
@@ -219,17 +316,23 @@ def _eligible_markets(receipts, messages: tuple, *, override: bool) -> set:
 
 # --- reply resolution (read-only) ---------------------------------------------
 
+
 def _symbol_pattern(symbol: str):
     pattern = _SYMBOL_RE_CACHE.get(symbol)
     if pattern is None:
-        pattern = re.compile(r"(?<![0-9A-Za-z.\-])" + re.escape(symbol) + r"(?![0-9A-Za-z.\-])")
+        pattern = re.compile(
+            r"(?<![0-9A-Za-z.\-])" + re.escape(symbol) + r"(?![0-9A-Za-z.\-])"
+        )
         _SYMBOL_RE_CACHE[symbol] = pattern
     return pattern
 
 
 def _mentioned(text: str, candidates: tuple) -> tuple:
-    return tuple((symbol, name) for symbol, name in candidates
-                 if _symbol_pattern(symbol).search(text) or (name and name in text))
+    return tuple(
+        (symbol, name)
+        for symbol, name in candidates
+        if _symbol_pattern(symbol).search(text) or (name and name in text)
+    )
 
 
 def _part_status(receipts, activation_id: str, part_key: str) -> str | None:
@@ -249,7 +352,10 @@ def _locate_by_reply(receipts, bindings, reply_to_message_id: int) -> tuple | No
         if receipt is None:
             continue
         for part in receipt.get("parts", ()):
-            if part.get("provider_message_id") == wanted and part.get("key") in binding["parts"]:
+            if (
+                part.get("provider_message_id") == wanted
+                and part.get("key") in binding["parts"]
+            ):
                 return binding, part["key"]
     return None
 
@@ -266,8 +372,9 @@ def _locate_by_marker(bindings, text: str) -> tuple | None:
     return None
 
 
-def resolve_group_reply(*, receipts, bindings, chat_id: str, reply_to_message_id: int | None,
-                        text: str) -> ReplyBindingV1:
+def resolve_group_reply(
+    *, receipts, bindings, chat_id: str, reply_to_message_id: int | None, text: str
+) -> ReplyBindingV1:
     """Map a user reply in the group to exact report/market, then one symbol.
 
     Resolution only: no preview, approval, playbook, Ledger, order or account
@@ -285,11 +392,19 @@ def resolve_group_reply(*, receipts, bindings, chat_id: str, reply_to_message_id
     if not valid_chat_id(chat_id) or chat_id != binding.get("chat_id"):
         return ReplyBindingV1("wrong_chat")
     part = binding["parts"][key]
-    candidates = tuple((str(symbol), str(name)) for symbol, name in part.get("symbols", ()))
-    common = dict(activation_id=binding["activation_id"], cycle=binding["cycle"], market=part["market"],
-                  report_sha256=part["report_sha256"], completed_session_date=part["completed_session_date"],
-                  part_key=key, part_status=_part_status(receipts, binding["activation_id"], key),
-                  candidates=candidates)
+    candidates = tuple(
+        (str(symbol), str(name)) for symbol, name in part.get("symbols", ())
+    )
+    common = dict(
+        activation_id=binding["activation_id"],
+        cycle=binding["cycle"],
+        market=part["market"],
+        report_sha256=part["report_sha256"],
+        completed_session_date=part["completed_session_date"],
+        part_key=key,
+        part_status=_part_status(receipts, binding["activation_id"], key),
+        candidates=candidates,
+    )
     mentioned = _mentioned(text, candidates)
     if len(mentioned) == 1:
         symbol, name = mentioned[0]

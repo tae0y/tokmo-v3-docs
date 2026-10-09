@@ -45,26 +45,26 @@ NOW = _utc("2026-08-20T21:10:00Z")
 
 
 def test_kr_renders_korean_name_then_code():
-    assert format_instrument(
-        InstrumentDisplayV1("KR", "005380", "현대차")) == "현대차(005380)"
+    assert (
+        format_instrument(InstrumentDisplayV1("KR", "005380", "현대차"))
+        == "현대차(005380)"
+    )
 
 
 def test_us_renders_ticker_then_korean_name():
-    assert format_instrument(
-        InstrumentDisplayV1("US", "MRNA", "모더나")) == "MRNA(모더나)"
+    assert (
+        format_instrument(InstrumentDisplayV1("US", "MRNA", "모더나")) == "MRNA(모더나)"
+    )
 
 
 def test_missing_name_fails_soft_to_symbol_only():
-    assert format_instrument(InstrumentDisplayV1("KR", "005380", None)) \
-        == "005380"
-    assert format_instrument(InstrumentDisplayV1("US", "MRNA", None)) \
-        == "MRNA"
+    assert format_instrument(InstrumentDisplayV1("KR", "005380", None)) == "005380"
+    assert format_instrument(InstrumentDisplayV1("US", "MRNA", None)) == "MRNA"
 
 
 def test_blank_or_non_string_name_is_treated_as_unavailable():
     for name in ("", "   ", "\n"):
-        assert format_instrument(InstrumentDisplayV1("US", "MRNA", name)) \
-            == "MRNA"
+        assert format_instrument(InstrumentDisplayV1("US", "MRNA", name)) == "MRNA"
 
 
 def test_display_value_rejects_unknown_market_and_empty_symbol():
@@ -103,7 +103,8 @@ def _playbook(root, *, scope_dir, market, code, name):
         f'instrument_name: "{name}"\n'
         "---\n\n"
         f"# {name}\n\n## 3층 — 매매이력\n",
-        encoding="utf-8")
+        encoding="utf-8",
+    )
     return target
 
 
@@ -114,17 +115,20 @@ def test_scope_dir_maps_toss_to_personal_and_pension_to_retirement():
 
 def test_resolver_reads_the_canonical_front_matter_name(tmp_path):
     root = tmp_path / "playbooks"
-    _playbook(root, scope_dir="personal", market="US", code="MRNA",
-              name="모더나")
-    assert read_instrument_name(
-        root, account_scope=TOSS_SCOPE, market="US", symbol="MRNA") == "모더나"
+    _playbook(root, scope_dir="personal", market="US", code="MRNA", name="모더나")
+    assert (
+        read_instrument_name(root, account_scope=TOSS_SCOPE, market="US", symbol="MRNA")
+        == "모더나"
+    )
 
 
 def test_resolver_returns_none_when_the_document_is_absent(tmp_path):
     root = tmp_path / "playbooks"
     root.mkdir()
-    assert read_instrument_name(
-        root, account_scope=TOSS_SCOPE, market="US", symbol="MRNA") is None
+    assert (
+        read_instrument_name(root, account_scope=TOSS_SCOPE, market="US", symbol="MRNA")
+        is None
+    )
 
 
 def test_resolver_returns_none_for_a_document_without_the_field(tmp_path):
@@ -132,40 +136,51 @@ def test_resolver_returns_none_for_a_document_without_the_field(tmp_path):
     target = root / "personal" / "US" / "MRNA.md"
     target.parent.mkdir(parents=True)
     target.write_text("# MRNA\n\n## 3층 — 매매이력\n", encoding="utf-8")
-    assert read_instrument_name(
-        root, account_scope=TOSS_SCOPE, market="US", symbol="MRNA") is None
+    assert (
+        read_instrument_name(root, account_scope=TOSS_SCOPE, market="US", symbol="MRNA")
+        is None
+    )
 
 
 def test_resolver_never_reads_outside_its_own_market_and_scope(tmp_path):
     root = tmp_path / "playbooks"
-    _playbook(root, scope_dir="retirement", market="US", code="MRNA",
-              name="모더나")
+    _playbook(root, scope_dir="retirement", market="US", code="MRNA", name="모더나")
     # the personal document does not exist: no cross-scope borrowing
-    assert read_instrument_name(
-        root, account_scope=TOSS_SCOPE, market="US", symbol="MRNA") is None
+    assert (
+        read_instrument_name(root, account_scope=TOSS_SCOPE, market="US", symbol="MRNA")
+        is None
+    )
 
 
 def test_resolver_refuses_traversal_shaped_symbols(tmp_path):
     root = tmp_path / "playbooks"
-    _playbook(root, scope_dir="personal", market="US", code="MRNA",
-              name="모더나")
+    _playbook(root, scope_dir="personal", market="US", code="MRNA", name="모더나")
     for symbol in ("../US/MRNA", "MRNA/../MRNA", "/etc/passwd", ""):
-        assert read_instrument_name(
-            root, account_scope=TOSS_SCOPE, market="US",
-            symbol=symbol) is None
+        assert (
+            read_instrument_name(
+                root, account_scope=TOSS_SCOPE, market="US", symbol=symbol
+            )
+            is None
+        )
 
 
 def test_resolver_is_none_for_unknown_scope_or_market(tmp_path):
     root = tmp_path / "playbooks"
-    _playbook(root, scope_dir="personal", market="US", code="MRNA",
-              name="모더나")
-    assert read_instrument_name(
-        root, account_scope="not-a-scope", market="US",
-        symbol="MRNA") is None
-    assert read_instrument_name(
-        root, account_scope=TOSS_SCOPE, market="JP", symbol="MRNA") is None
-    assert read_instrument_name(
-        None, account_scope=TOSS_SCOPE, market="US", symbol="MRNA") is None
+    _playbook(root, scope_dir="personal", market="US", code="MRNA", name="모더나")
+    assert (
+        read_instrument_name(
+            root, account_scope="not-a-scope", market="US", symbol="MRNA"
+        )
+        is None
+    )
+    assert (
+        read_instrument_name(root, account_scope=TOSS_SCOPE, market="JP", symbol="MRNA")
+        is None
+    )
+    assert (
+        read_instrument_name(None, account_scope=TOSS_SCOPE, market="US", symbol="MRNA")
+        is None
+    )
 
 
 # --- RED-D3: production renderers use the formatter ------------------------
@@ -173,51 +188,65 @@ def test_resolver_is_none_for_unknown_scope_or_market(tmp_path):
 
 def _times():
     return TradeEventTimesV1(
-        filled_at=_utc("2026-08-20T21:10:00Z"), provider_observed_at=None,
+        filled_at=_utc("2026-08-20T21:10:00Z"),
+        provider_observed_at=None,
         discovered_at=_utc("2026-08-20T21:12:00Z"),
-        stored_at=_utc("2026-08-20T21:12:00Z"), notified_at=None)
+        stored_at=_utc("2026-08-20T21:12:00Z"),
+        notified_at=None,
+    )
 
 
 def _event(symbol="MRNA", market="US", scope=TOSS_SCOPE):
     return NewTradeExecutionV1(
-        trade_event_id("toss-orders-v1", scope, "ord-1"), scope, "ord-1",
-        symbol, "BUY", "USD", "3", "25.5", "76.5", market, _times())
+        trade_event_id("toss-orders-v1", scope, "ord-1"),
+        scope,
+        "ord-1",
+        symbol,
+        "BUY",
+        "USD",
+        "3",
+        "25.5",
+        "76.5",
+        market,
+        _times(),
+    )
 
 
 def test_trade_question_header_uses_the_us_display_form(tmp_path):
     root = tmp_path / "playbooks"
-    _playbook(root, scope_dir="personal", market="US", code="MRNA",
-              name="모더나")
+    _playbook(root, scope_dir="personal", market="US", code="MRNA", name="모더나")
     message = build_trade_question_message(
-        _event(), evaluation=None, playbook_root=root)
+        _event(), evaluation=None, playbook_root=root
+    )
     assert message.startswith("모더나(MRNA)\n매수 체결 확인\n")
 
 
 def test_trade_question_header_uses_the_kr_display_form(tmp_path):
     root = tmp_path / "playbooks"
-    _playbook(root, scope_dir="personal", market="KR", code="005380",
-              name="현대차")
+    _playbook(root, scope_dir="personal", market="KR", code="005380", name="현대차")
     message = build_trade_question_message(
-        _event(symbol="005380", market="KR"), evaluation=None,
-        playbook_root=root)
+        _event(symbol="005380", market="KR"), evaluation=None, playbook_root=root
+    )
     assert message.startswith("현대차(005380)\n매수 체결 확인\n")
 
 
 def test_trade_question_header_falls_back_to_the_bare_symbol(tmp_path):
     message = build_trade_question_message(
-        _event(), evaluation=None, playbook_root=tmp_path / "playbooks")
+        _event(), evaluation=None, playbook_root=tmp_path / "playbooks"
+    )
     assert message.startswith("MRNA\n매수 체결 확인\n")
     message_without_root = build_trade_question_message(
-        _event(), evaluation=None, playbook_root=None)
+        _event(), evaluation=None, playbook_root=None
+    )
     assert message_without_root.startswith("MRNA\n매수 체결 확인\n")
 
 
 def test_trade_question_never_leaks_the_playbook_path(tmp_path):
     root = tmp_path / "playbooks"
-    _playbook(root, scope_dir="personal", market="US", code="MRNA",
-              name="모더나")
+    _playbook(root, scope_dir="personal", market="US", code="MRNA", name="모더나")
     message = build_trade_question_message(
-        _event(), evaluation=None, playbook_root=root)
+        _event(), evaluation=None, playbook_root=root
+    )
     assert str(tmp_path) not in message
     assert "playbooks" not in message
     assert TOSS_SCOPE not in message
@@ -225,23 +254,29 @@ def test_trade_question_never_leaks_the_playbook_path(tmp_path):
 
 def test_conditional_question_leads_with_the_instrument_display():
     message = build_conditional_fill_question(
-        account_scope=TOSS_SCOPE, symbol="MRNA", market_class="US",
-        instrument_name="모더나")
+        account_scope=TOSS_SCOPE,
+        symbol="MRNA",
+        market_class="US",
+        instrument_name="모더나",
+    )
     assert message.splitlines()[0] == "모더나(MRNA)"
     assert message.splitlines()[1] == "조건에 도달해 주문이 접수됐어요."
 
 
 def test_conditional_question_falls_back_to_the_bare_symbol():
     message = build_conditional_fill_question(
-        account_scope=TOSS_SCOPE, symbol="MRNA", market_class="US",
-        instrument_name=None)
+        account_scope=TOSS_SCOPE, symbol="MRNA", market_class="US", instrument_name=None
+    )
     assert message.splitlines()[0] == "MRNA"
 
 
 def test_conditional_question_keeps_the_confirmed_body_lines():
     message = build_conditional_fill_question(
-        account_scope=TOSS_SCOPE, symbol="005380", market_class="KR",
-        instrument_name="현대차")
+        account_scope=TOSS_SCOPE,
+        symbol="005380",
+        market_class="KR",
+        instrument_name="현대차",
+    )
     assert message.splitlines() == [
         "현대차(005380)",
         "조건에 도달해 주문이 접수됐어요.",

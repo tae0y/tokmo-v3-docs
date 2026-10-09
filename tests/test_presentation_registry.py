@@ -1,14 +1,16 @@
 """Registry contract tests for the presentation layer."""
 
+from datetime import UTC
+
 import pytest
 
-from tokmo.presentation.options import FormatOptions, NUMBER
+from tokmo.presentation import build_default_registry, format_value
+from tokmo.presentation.options import FormatOptions
 from tokmo.presentation.registry import (
+    DuplicateRegistrationError,
     PresentationRegistry,
     UnsupportedPresentationType,
-    DuplicateRegistrationError,
 )
-from tokmo.presentation import build_default_registry, format_value
 
 
 class TestRegistryCore:
@@ -78,7 +80,7 @@ class TestRegistryCore:
         assert registry.format(MyValue(), options=FormatOptions()) == "custom"
 
     def test_custom_registry_owns_domain_default_without_prior_global_call(self):
-        from datetime import date, datetime, timezone
+        from datetime import date, datetime
         from decimal import Decimal
 
         from tokmo.presentation.formatters.market import register_market_formatters
@@ -92,7 +94,7 @@ class TestRegistryCore:
             period=date(2026, 7, 25),
             value=Decimal("78.42"),
             units="$/BBL",
-            observed_at=datetime(2026, 7, 25, tzinfo=timezone.utc),
+            observed_at=datetime(2026, 7, 25, tzinfo=UTC),
         )
 
         assert format_value(fact, registry=registry) == (
@@ -116,38 +118,54 @@ class TestRegistryCore:
 class TestDefaultRegistry:
     def test_has_wti_formatter(self):
         from tokmo.values import WtiFact
+
         registry = build_default_registry()
         from datetime import date, datetime
         from decimal import Decimal
+
         fact = WtiFact(
-            source="eia_wti_rwtc", series="RWTC",
-            period=date(2026, 7, 25), value=Decimal("78.42"),
-            units="$/BBL", observed_at=datetime(2026, 7, 25, tzinfo=__import__("datetime").timezone.utc),
+            source="eia_wti_rwtc",
+            series="RWTC",
+            period=date(2026, 7, 25),
+            value=Decimal("78.42"),
+            units="$/BBL",
+            observed_at=datetime(
+                2026, 7, 25, tzinfo=__import__("datetime").timezone.utc
+            ),
         )
         result = registry.format(fact, options=FormatOptions())
         assert "78.42" in result
 
     def test_has_yield_curve_formatter(self):
         from tokmo.values import YieldCurveFact
+
         registry = build_default_registry()
         from datetime import date, datetime
         from decimal import Decimal
+
         fact = YieldCurveFact(
-            source="us_treasury_daily_par_yield_curve", market="US",
+            source="us_treasury_daily_par_yield_curve",
+            market="US",
             rate_date=date(2026, 7, 25),
-            two_year_percent=Decimal("4.25"), ten_year_percent=Decimal("4.40"),
-            observed_at=datetime(2026, 7, 25, tzinfo=__import__("datetime").timezone.utc),
+            two_year_percent=Decimal("4.25"),
+            ten_year_percent=Decimal("4.40"),
+            observed_at=datetime(
+                2026, 7, 25, tzinfo=__import__("datetime").timezone.utc
+            ),
         )
         result = registry.format(fact, options=FormatOptions())
         assert "4.25" in result
 
     def test_has_unavailable_formatter(self):
         from tokmo.values import UnavailableFact
+
         registry = build_default_registry()
-        from datetime import datetime, timezone
+        from datetime import datetime
+
         fact = UnavailableFact(
-            source="eia_wti_rwtc", reason="config_missing",
-            observed_at=datetime(2026, 7, 25, tzinfo=timezone.utc),
+            source="eia_wti_rwtc",
+            reason="config_missing",
+            observed_at=datetime(2026, 7, 25, tzinfo=UTC),
         )
         result = registry.format(fact, options=FormatOptions())
         assert "조회 불가" in result

@@ -7,11 +7,11 @@ allowlists exactly this file for the direct clock call.
 """
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def sleep_seconds(seconds: float) -> None:

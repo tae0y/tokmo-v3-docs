@@ -8,20 +8,19 @@ the new binary's active _DDL or _METADATA.
 The offline migration tool (tools/migrate_holdings_snapshots_v1_to_v2.py)
 imports these functions.
 """
+
 from __future__ import annotations
 
 import hashlib
 import os
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-import sqlite3
-
+from tokmo.records.durability import fsync_directory
 from tokmo.records.private_sqlite import (
     connect_private,
-    prepare_private_path,
 )
-from tokmo.records.durability import fsync_directory
 
 
 @dataclass(frozen=True)
@@ -49,11 +48,11 @@ class GenerationR2Inventory:
 # whole point of this module is to compare a live file against what the store
 # looked like BEFORE the binary changed.
 _V1_DDL = (
-"""CREATE TABLE storage_metadata (
+    """CREATE TABLE storage_metadata (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 ) STRICT""",
-"""CREATE TABLE holdings_snapshots (
+    """CREATE TABLE holdings_snapshots (
     snapshot_id              TEXT PRIMARY KEY,
     source                   TEXT NOT NULL,
     captured_at              TEXT NOT NULL,
@@ -82,14 +81,14 @@ _V1_DDL = (
     CHECK (length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9a-f]*'),
     CHECK (schema_version = 1)
 ) STRICT""",
-"""CREATE TABLE holdings_snapshot_accounts (
+    """CREATE TABLE holdings_snapshot_accounts (
     snapshot_id      TEXT NOT NULL REFERENCES holdings_snapshots(snapshot_id)
                          ON DELETE RESTRICT,
     account_ordinal  INTEGER NOT NULL,
     PRIMARY KEY (snapshot_id, account_ordinal),
     CHECK (account_ordinal >= 1)
 ) STRICT""",
-"""CREATE TABLE holdings_snapshot_items (
+    """CREATE TABLE holdings_snapshot_items (
     snapshot_id      TEXT NOT NULL,
     account_ordinal  INTEGER NOT NULL,
     symbol           TEXT NOT NULL,
@@ -119,13 +118,15 @@ _V1_DDL = (
     CHECK (name IS NULL OR length(name) BETWEEN 1 AND 256),
     CHECK (asset_type IS NULL OR length(asset_type) BETWEEN 1 AND 64)
 ) STRICT""",
-"""CREATE INDEX holdings_snapshots_capture_order
+    """CREATE INDEX holdings_snapshots_capture_order
     ON holdings_snapshots (captured_at, snapshot_id)""",
 )
-_V1_METADATA = frozenset({
-    ("holdings_snapshot_schema_version", "1"),
-    ("holdings_snapshot_adapter", "tokmo-holdings-snapshots-v1"),
-})
+_V1_METADATA = frozenset(
+    {
+        ("holdings_snapshot_schema_version", "1"),
+        ("holdings_snapshot_adapter", "tokmo-holdings-snapshots-v1"),
+    }
+)
 
 # The store carries its version in storage_metadata, not in user_version, so
 # user_version must still be the SQLite default. A shifted value means someone
@@ -141,85 +142,143 @@ _TABLE_XINFO = {
     ),
     "holdings_snapshots": tuple(
         (cid, name, kind, 1, None, int(cid == 0), 0)
-        for cid, (name, kind) in enumerate((
-            ("snapshot_id", "TEXT"), ("source", "TEXT"),
-            ("captured_at", "TEXT"), ("discovered_account_count", "INTEGER"),
-            ("content_hash", "TEXT"), ("criteria_version", "TEXT"),
-            ("purpose_kind", "TEXT"), ("program_name", "TEXT"),
-            ("authorized_at", "TEXT"), ("stored_at", "TEXT"),
-            ("schema_version", "INTEGER"),
-        ))
+        for cid, (name, kind) in enumerate(
+            (
+                ("snapshot_id", "TEXT"),
+                ("source", "TEXT"),
+                ("captured_at", "TEXT"),
+                ("discovered_account_count", "INTEGER"),
+                ("content_hash", "TEXT"),
+                ("criteria_version", "TEXT"),
+                ("purpose_kind", "TEXT"),
+                ("program_name", "TEXT"),
+                ("authorized_at", "TEXT"),
+                ("stored_at", "TEXT"),
+                ("schema_version", "INTEGER"),
+            )
+        )
     ),
     "holdings_snapshot_accounts": (
         (0, "snapshot_id", "TEXT", 1, None, 1, 0),
         (1, "account_ordinal", "INTEGER", 1, None, 2, 0),
     ),
     "holdings_snapshot_items": tuple(
-        (cid, name, "TEXT" if cid != 1 else "INTEGER",
-         int(cid <= 5), None, cid + 1 if cid <= 2 else 0, 0)
-        for cid, name in enumerate((
-            "snapshot_id", "account_ordinal", "symbol", "quantity",
-            "avg_price", "avg_price_field", "currency", "market_raw",
-            "market_field", "name", "asset_type",
-        ))
+        (
+            cid,
+            name,
+            "TEXT" if cid != 1 else "INTEGER",
+            int(cid <= 5),
+            None,
+            cid + 1 if cid <= 2 else 0,
+            0,
+        )
+        for cid, name in enumerate(
+            (
+                "snapshot_id",
+                "account_ordinal",
+                "symbol",
+                "quantity",
+                "avg_price",
+                "avg_price_field",
+                "currency",
+                "market_raw",
+                "market_field",
+                "name",
+                "asset_type",
+            )
+        )
     ),
 }
 _FOREIGN_KEYS = {
     "storage_metadata": (),
     "holdings_snapshots": (),
     "holdings_snapshot_accounts": (
-        (0, 0, "holdings_snapshots", "snapshot_id", "snapshot_id",
-         "NO ACTION", "RESTRICT", "NONE"),
+        (
+            0,
+            0,
+            "holdings_snapshots",
+            "snapshot_id",
+            "snapshot_id",
+            "NO ACTION",
+            "RESTRICT",
+            "NONE",
+        ),
     ),
     "holdings_snapshot_items": (
-        (0, 0, "holdings_snapshot_accounts", "snapshot_id", "snapshot_id",
-         "NO ACTION", "RESTRICT", "NONE"),
-        (0, 1, "holdings_snapshot_accounts", "account_ordinal",
-         "account_ordinal", "NO ACTION", "RESTRICT", "NONE"),
+        (
+            0,
+            0,
+            "holdings_snapshot_accounts",
+            "snapshot_id",
+            "snapshot_id",
+            "NO ACTION",
+            "RESTRICT",
+            "NONE",
+        ),
+        (
+            0,
+            1,
+            "holdings_snapshot_accounts",
+            "account_ordinal",
+            "account_ordinal",
+            "NO ACTION",
+            "RESTRICT",
+            "NONE",
+        ),
     ),
 }
 _INDEX_LIST = {
-    "storage_metadata": (
-        (0, "sqlite_autoindex_storage_metadata_1", 1, "pk", 0),),
+    "storage_metadata": ((0, "sqlite_autoindex_storage_metadata_1", 1, "pk", 0),),
     "holdings_snapshots": (
         (0, "holdings_snapshots_capture_order", 0, "c", 0),
         (1, "sqlite_autoindex_holdings_snapshots_1", 1, "pk", 0),
     ),
     "holdings_snapshot_accounts": (
-        (0, "sqlite_autoindex_holdings_snapshot_accounts_1", 1, "pk", 0),),
+        (0, "sqlite_autoindex_holdings_snapshot_accounts_1", 1, "pk", 0),
+    ),
     "holdings_snapshot_items": (
-        (0, "sqlite_autoindex_holdings_snapshot_items_1", 1, "pk", 0),),
+        (0, "sqlite_autoindex_holdings_snapshot_items_1", 1, "pk", 0),
+    ),
 }
 _INDEX_XINFO = {
     "sqlite_autoindex_storage_metadata_1": (
-        (0, 0, "key", 0, "BINARY", 1), (1, -1, None, 0, "BINARY", 0)),
+        (0, 0, "key", 0, "BINARY", 1),
+        (1, -1, None, 0, "BINARY", 0),
+    ),
     "holdings_snapshots_capture_order": (
         (0, 2, "captured_at", 0, "BINARY", 1),
         (1, 0, "snapshot_id", 0, "BINARY", 1),
-        (2, -1, None, 0, "BINARY", 0)),
+        (2, -1, None, 0, "BINARY", 0),
+    ),
     "sqlite_autoindex_holdings_snapshots_1": (
         (0, 0, "snapshot_id", 0, "BINARY", 1),
-        (1, -1, None, 0, "BINARY", 0)),
+        (1, -1, None, 0, "BINARY", 0),
+    ),
     "sqlite_autoindex_holdings_snapshot_accounts_1": (
         (0, 0, "snapshot_id", 0, "BINARY", 1),
         (1, 1, "account_ordinal", 0, "BINARY", 1),
-        (2, -1, None, 0, "BINARY", 0)),
+        (2, -1, None, 0, "BINARY", 0),
+    ),
     "sqlite_autoindex_holdings_snapshot_items_1": (
         (0, 0, "snapshot_id", 0, "BINARY", 1),
         (1, 1, "account_ordinal", 0, "BINARY", 1),
         (2, 2, "symbol", 0, "BINARY", 1),
-        (3, -1, None, 0, "BINARY", 0)),
+        (3, -1, None, 0, "BINARY", 0),
+    ),
 }
 
 
 def _normalized(sql: str) -> str:
     return " ".join(sql.split())
 
+
 # Frozen generation-2 DDL and metadata
-_GEN2_METADATA = frozenset({
-    ("holdings_snapshot_schema_version", "2"),
-    ("holdings_snapshot_adapter", "tokmo-holdings-snapshots-v1"),
-})
+_GEN2_METADATA = frozenset(
+    {
+        ("holdings_snapshot_schema_version", "2"),
+        ("holdings_snapshot_adapter", "tokmo-holdings-snapshots-v1"),
+    }
+)
 
 
 def _assert_exact_schema(conn, ddl, metadata, *, label: str) -> None:
@@ -238,23 +297,25 @@ def _assert_exact_schema(conn, ddl, metadata, *, label: str) -> None:
         ("table", "holdings_snapshot_items"): ddl[3],
         ("index", "holdings_snapshots_capture_order"): ddl[4],
     }
-    observed_rows = conn.execute(
-        "SELECT type, name, sql FROM sqlite_master").fetchall()
+    observed_rows = conn.execute("SELECT type, name, sql FROM sqlite_master").fetchall()
     observed_names = {(kind, name) for kind, name, _ in observed_rows}
     expected_names = set(expected_objects) | {
-        ("index", name) for name in _INDEX_XINFO
-        if name.startswith("sqlite_autoindex_")}
+        ("index", name) for name in _INDEX_XINFO if name.startswith("sqlite_autoindex_")
+    }
     if observed_names != expected_names:
         raise SidecarBuildError(f"{label}_object_inventory_mismatch")
     observed = {
-        (kind, name): sql for kind, name, sql in observed_rows
-        if not name.startswith("sqlite_autoindex_")}
+        (kind, name): sql
+        for kind, name, sql in observed_rows
+        if not name.startswith("sqlite_autoindex_")
+    }
     for key, sql in expected_objects.items():
         if _normalized(observed[key]) != _normalized(sql):
             raise SidecarBuildError(f"{label}_object_sql_mismatch")
 
     strict = {
-        row[1]: row[5] for row in conn.execute("PRAGMA table_list")
+        row[1]: row[5]
+        for row in conn.execute("PRAGMA table_list")
         if row[1] in _MIGRATION_TABLES
     }
     if strict != {table: 1 for table in _MIGRATION_TABLES}:
@@ -263,14 +324,19 @@ def _assert_exact_schema(conn, ddl, metadata, *, label: str) -> None:
     for table in _MIGRATION_TABLES:
         if tuple(conn.execute(f"PRAGMA table_xinfo({table})")) != _TABLE_XINFO[table]:
             raise SidecarBuildError(f"{label}_table_xinfo_mismatch:{table}")
-        if tuple(conn.execute(f"PRAGMA foreign_key_list({table})")) != _FOREIGN_KEYS[table]:
+        if (
+            tuple(conn.execute(f"PRAGMA foreign_key_list({table})"))
+            != _FOREIGN_KEYS[table]
+        ):
             raise SidecarBuildError(f"{label}_foreign_key_mismatch:{table}")
         indexes = tuple(conn.execute(f"PRAGMA index_list({table})"))
         if indexes != _INDEX_LIST[table]:
             raise SidecarBuildError(f"{label}_index_list_mismatch:{table}")
         for index in indexes:
-            if tuple(conn.execute(
-                    f"PRAGMA index_xinfo('{index[1]}')")) != _INDEX_XINFO[index[1]]:
+            if (
+                tuple(conn.execute(f"PRAGMA index_xinfo('{index[1]}')"))
+                != _INDEX_XINFO[index[1]]
+            ):
                 raise SidecarBuildError(f"{label}_index_xinfo_mismatch:{index[1]}")
 
     if set(conn.execute("SELECT key, value FROM storage_metadata")) != metadata:
@@ -292,8 +358,7 @@ def inspect_v1(path: Path) -> V1Inventory:
             _assert_exact_schema(conn, _V1_DDL, _V1_METADATA, label="source")
         except SidecarBuildError as error:
             try:
-                _assert_exact_schema(
-                    conn, _GEN2_DDL, _GEN2_METADATA, label="source")
+                _assert_exact_schema(conn, _GEN2_DDL, _GEN2_METADATA, label="source")
             except SidecarBuildError:
                 raise error from None
             raise SidecarBuildError("source_not_generation_one") from error
@@ -326,19 +391,21 @@ def backup_v1(path: Path, backup: Path, manifest: Path) -> BackupReceipt:
 
 
 _MIGRATION_TABLES = (
-    "storage_metadata", "holdings_snapshots",
-    "holdings_snapshot_accounts", "holdings_snapshot_items",
+    "storage_metadata",
+    "holdings_snapshots",
+    "holdings_snapshot_accounts",
+    "holdings_snapshot_items",
 )
 
 # Frozen generation-2 DDL, owned here and deliberately NOT imported from the
 # active store binary. It differs from the frozen generation-1 schema in
 # exactly one place: the ``source`` CHECK also admits the pension source.
 _GEN2_DDL = (
-"""CREATE TABLE storage_metadata (
+    """CREATE TABLE storage_metadata (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 ) STRICT""",
-"""CREATE TABLE holdings_snapshots (
+    """CREATE TABLE holdings_snapshots (
     snapshot_id              TEXT PRIMARY KEY,
     source                   TEXT NOT NULL,
     captured_at              TEXT NOT NULL,
@@ -367,14 +434,14 @@ _GEN2_DDL = (
     CHECK (length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9a-f]*'),
     CHECK (schema_version = 1)
 ) STRICT""",
-"""CREATE TABLE holdings_snapshot_accounts (
+    """CREATE TABLE holdings_snapshot_accounts (
     snapshot_id      TEXT NOT NULL REFERENCES holdings_snapshots(snapshot_id)
                          ON DELETE RESTRICT,
     account_ordinal  INTEGER NOT NULL,
     PRIMARY KEY (snapshot_id, account_ordinal),
     CHECK (account_ordinal >= 1)
 ) STRICT""",
-"""CREATE TABLE holdings_snapshot_items (
+    """CREATE TABLE holdings_snapshot_items (
     snapshot_id      TEXT NOT NULL,
     account_ordinal  INTEGER NOT NULL,
     symbol           TEXT NOT NULL,
@@ -404,7 +471,7 @@ _GEN2_DDL = (
     CHECK (name IS NULL OR length(name) BETWEEN 1 AND 256),
     CHECK (asset_type IS NULL OR length(asset_type) BETWEEN 1 AND 64)
 ) STRICT""",
-"""CREATE INDEX holdings_snapshots_capture_order
+    """CREATE INDEX holdings_snapshots_capture_order
     ON holdings_snapshots (captured_at, snapshot_id)""",
 )
 
@@ -418,16 +485,11 @@ class SidecarBuildError(ValueError):
 
 
 def _copy_table(source_conn, target_conn, table: str) -> int:
-    columns = [
-        row[1] for row in source_conn.execute(f"PRAGMA table_info({table})")
-    ]
+    columns = [row[1] for row in source_conn.execute(f"PRAGMA table_info({table})")]
     placeholders = ", ".join("?" for _ in columns)
-    rows = source_conn.execute(
-        f"SELECT {', '.join(columns)} FROM {table}"
-    ).fetchall()
+    rows = source_conn.execute(f"SELECT {', '.join(columns)} FROM {table}").fetchall()
     for row in rows:
-        target_conn.execute(
-            f"INSERT INTO {table} VALUES ({placeholders})", row)
+        target_conn.execute(f"INSERT INTO {table} VALUES ({placeholders})", row)
     return len(rows)
 
 
@@ -448,14 +510,14 @@ def build_generation_r2_sidecar(v1: Path, sidecar: Path) -> GenerationR2Inventor
     source_conn = connect_private(source_path, mode="ro")
     try:
         try:
-            _assert_exact_schema(
-                source_conn, _V1_DDL, _V1_METADATA, label="source")
+            _assert_exact_schema(source_conn, _V1_DDL, _V1_METADATA, label="source")
         except SidecarBuildError as error:
             # An already-migrated store is a distinct, friendlier answer than
             # "your schema is wrong"; anything else keeps its precise reason.
             try:
                 _assert_exact_schema(
-                    source_conn, _GEN2_DDL, _GEN2_METADATA, label="source")
+                    source_conn, _GEN2_DDL, _GEN2_METADATA, label="source"
+                )
             except SidecarBuildError:
                 raise error from None
             raise SidecarBuildError("source_not_generation_one") from error
@@ -477,8 +539,11 @@ def build_generation_r2_sidecar(v1: Path, sidecar: Path) -> GenerationR2Inventor
             )
             counts = {"storage_metadata": len(_GEN2_METADATA)}
             # FK-safe order: parents before children.
-            for table in ("holdings_snapshots", "holdings_snapshot_accounts",
-                          "holdings_snapshot_items"):
+            for table in (
+                "holdings_snapshots",
+                "holdings_snapshot_accounts",
+                "holdings_snapshot_items",
+            ):
                 counts[table] = _copy_table(source_conn, target_conn, table)
             target_conn.execute("COMMIT")
         except BaseException:
@@ -501,7 +566,8 @@ def build_generation_r2_sidecar(v1: Path, sidecar: Path) -> GenerationR2Inventor
 
 
 def verify_generation_r2_sidecar(
-    v1: V1Inventory, sidecar: Path,
+    v1: V1Inventory,
+    sidecar: Path,
 ) -> GenerationR2Inventory:
     """Independently verify the generation-2 sidecar.
 
@@ -519,8 +585,7 @@ def verify_generation_r2_sidecar(
     source_conn = connect_private(source_path, mode="ro")
     try:
         # M-02: the sidecar is held to the same exactness as the source.
-        _assert_exact_schema(
-            target_conn, _GEN2_DDL, _GEN2_METADATA, label="sidecar")
+        _assert_exact_schema(target_conn, _GEN2_DDL, _GEN2_METADATA, label="sidecar")
         if target_conn.execute("PRAGMA quick_check").fetchone() != ("ok",):
             raise SidecarBuildError("sidecar_corrupt")
         if target_conn.execute("PRAGMA foreign_key_check").fetchone():
@@ -528,21 +593,23 @@ def verify_generation_r2_sidecar(
 
         counts: dict[str, int] = {}
         for table in _MIGRATION_TABLES:
-            observed = target_conn.execute(
-                f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            observed = target_conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[
+                0
+            ]
             counts[table] = observed
             if table == "storage_metadata":
                 continue
             if observed != v1.row_counts[table]:
                 raise SidecarBuildError(f"row_count_mismatch:{table}")
             columns = [
-                row[1] for row in source_conn.execute(
-                    f"PRAGMA table_info({table})")
+                row[1] for row in source_conn.execute(f"PRAGMA table_info({table})")
             ]
             order = ", ".join(columns)
             query = f"SELECT {order} FROM {table} ORDER BY {order}"
-            if (source_conn.execute(query).fetchall()
-                    != target_conn.execute(query).fetchall()):
+            if (
+                source_conn.execute(query).fetchall()
+                != target_conn.execute(query).fetchall()
+            ):
                 raise SidecarBuildError(f"row_content_mismatch:{table}")
     finally:
         target_conn.close()

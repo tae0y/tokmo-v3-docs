@@ -7,45 +7,49 @@ official primary-evidence ref (never a model claim, never repeated media
 coverage); the model contributes bounded claims that the derivation applies
 in the downward direction only.
 """
-from dataclasses import dataclass
+
 import re
 import unicodedata
+from dataclasses import dataclass
 
-CONFIRMATION_STATES_V1 = frozenset({
-    "OFFICIAL_CONFIRMED",        # §D.3 official primary-evidence ref only
-    "MULTI_MEDIA_UNCONFIRMED",   # FACT-role independent sources >= 2, no ref
-    "SINGLE_MEDIA_UNCONFIRMED",  # exactly one FACT-role source
-    "ANALYSIS_OPINION",          # OPINION-role dominant / no factual source
-})
+CONFIRMATION_STATES_V1 = frozenset(
+    {
+        "OFFICIAL_CONFIRMED",  # §D.3 official primary-evidence ref only
+        "MULTI_MEDIA_UNCONFIRMED",  # FACT-role independent sources >= 2, no ref
+        "SINGLE_MEDIA_UNCONFIRMED",  # exactly one FACT-role source
+        "ANALYSIS_OPINION",  # OPINION-role dominant / no factual source
+    }
+)
 
 CONFIRMATION_LABELS_KO = {
-    "OFFICIAL_CONFIRMED":       "공식 확인(공시·1차 출처)",
-    "MULTI_MEDIA_UNCONFIRMED":  "복수 언론 보도, 공식 확인 전",
+    "OFFICIAL_CONFIRMED": "공식 확인(공시·1차 출처)",
+    "MULTI_MEDIA_UNCONFIRMED": "복수 언론 보도, 공식 확인 전",
     "SINGLE_MEDIA_UNCONFIRMED": "단일 언론 보도, 미확인",
-    "ANALYSIS_OPINION":         "분석·의견·전망",
+    "ANALYSIS_OPINION": "분석·의견·전망",
 }
 
-EVENT_TYPES_V1 = frozenset({
-    "CORPORATE_ACTION_DECIDED",   # 결의·결정·체결된 자본/지배구조 행위
-    "CORPORATE_ACTION_PROPOSED",  # 검토·추진·계획 보도
-    "EARNINGS_GUIDANCE",          # 실적/가이던스 발표·쇼크
-    "DIVIDEND_ROUTINE",           # 정기·예상부합 배당
-    "DIVIDEND_CHANGE",            # 배당 정책/금액 변경
-    "MACRO_POLICY_EMERGENCY",     # 중앙은행·정부 긴급조치
-    "WAR_MARKET_DISRUPTION",      # 전쟁·시장 폐쇄·대형 신용사건
-    "CONSUMER_MILESTONE",         # 앱 회원·가입자·다운로드류 지표
-    "ANALYST_OPINION",            # 애널리스트 의견·목표가·여력 추측
-    "RUMOR_SINGLE_CLAIM",         # 미확인 단독 주장
-    "OTHER",
-})
+EVENT_TYPES_V1 = frozenset(
+    {
+        "CORPORATE_ACTION_DECIDED",  # 결의·결정·체결된 자본/지배구조 행위
+        "CORPORATE_ACTION_PROPOSED",  # 검토·추진·계획 보도
+        "EARNINGS_GUIDANCE",  # 실적/가이던스 발표·쇼크
+        "DIVIDEND_ROUTINE",  # 정기·예상부합 배당
+        "DIVIDEND_CHANGE",  # 배당 정책/금액 변경
+        "MACRO_POLICY_EMERGENCY",  # 중앙은행·정부 긴급조치
+        "WAR_MARKET_DISRUPTION",  # 전쟁·시장 폐쇄·대형 신용사건
+        "CONSUMER_MILESTONE",  # 앱 회원·가입자·다운로드류 지표
+        "ANALYST_OPINION",  # 애널리스트 의견·목표가·여력 추측
+        "RUMOR_SINGLE_CLAIM",  # 미확인 단독 주장
+        "OTHER",
+    }
+)
 
 SURPRISE_CLAIMS_V1 = frozenset({"ROUTINE", "SURPRISE", "UNKNOWN"})
 
 # Relevance closed vocabulary (A1 §Q.2, decisions 13·14): the ONLY axis a
 # model claim may promote — and only with citations resolving into the
 # supplied public evidence keys.
-RELEVANCE_CLAIMS_V1 = frozenset(
-    {"NONE", "INDIRECT_MATERIAL", "THEMATIC_MATERIAL"})
+RELEVANCE_CLAIMS_V1 = frozenset({"NONE", "INDIRECT_MATERIAL", "THEMATIC_MATERIAL"})
 
 # Official-report-name substring patterns (§D.3): applied to the OpenDART
 # ``report_nm`` form name ONLY — never to article titles.
@@ -61,9 +65,15 @@ CORP_ACTION_PATTERNS_V1 = {
 # may promote at all, and the action families each admits. Every other
 # event type maps to the empty set — no official promotion, no query.
 EVENT_ACTION_FAMILIES_V1 = {
-    "CORPORATE_ACTION_DECIDED": frozenset({
-        "BUYBACK_RETIREMENT", "BUYBACK", "DIVIDEND_DECISION",
-        "CAPITAL_INCREASE", "MERGER_ACQUISITION"}),
+    "CORPORATE_ACTION_DECIDED": frozenset(
+        {
+            "BUYBACK_RETIREMENT",
+            "BUYBACK",
+            "DIVIDEND_DECISION",
+            "CAPITAL_INCREASE",
+            "MERGER_ACQUISITION",
+        }
+    ),
     "DIVIDEND_CHANGE": frozenset({"DIVIDEND_DECISION"}),
     "DIVIDEND_ROUTINE": frozenset({"DIVIDEND_DECISION"}),
 }
@@ -83,8 +93,7 @@ _ACTION_TOKEN = re.compile(r"[0-9a-z]+|[가-힣]+")
 
 
 def _action_tokens(text):
-    return _ACTION_TOKEN.findall(
-        unicodedata.normalize("NFKC", str(text)).casefold())
+    return _ACTION_TOKEN.findall(unicodedata.normalize("NFKC", str(text)).casefold())
 
 
 def derive_article_action_families(headlines):
@@ -92,12 +101,10 @@ def derive_article_action_families(headlines):
     titles (§Z3-2): a family qualifies when any of its anchor tokens
     matches a headline token exactly or at a Korean token head."""
     families = set()
-    tokens = [token for headline in headlines
-              for token in _action_tokens(headline)]
+    tokens = [token for headline in headlines for token in _action_tokens(headline)]
     for family, anchors in ARTICLE_ACTION_TOKENS_V1.items():
         for anchor in anchors:
-            if any(token == anchor or token.startswith(anchor)
-                   for token in tokens):
+            if any(token == anchor or token.startswith(anchor) for token in tokens):
                 families.add(family)
                 break
     return frozenset(families)
@@ -107,11 +114,12 @@ def derive_article_action_families(headlines):
 class OfficialEvidenceRefV1:
     """Deterministic official primary-evidence ref — code-owned; a model
     output can never construct one (§D.3)."""
-    source: str          # "opendart" (v1 only)
-    ref_id: str          # rcept_no (14 digits)
-    report_name: str     # report_nm as stored
-    stock_code: str      # 6 digits
-    receipt_date: str    # YYYY-MM-DD
+
+    source: str  # "opendart" (v1 only)
+    ref_id: str  # rcept_no (14 digits)
+    report_name: str  # report_nm as stored
+    stock_code: str  # 6 digits
+    receipt_date: str  # YYYY-MM-DD
     matched_action: str  # CORP_ACTION_PATTERNS_V1 key
 
 
@@ -131,8 +139,11 @@ def derive_relevance(direct_holding, claim, citations, evidence):
     if direct_holding:
         return "DIRECT"
     cited = tuple(citations or ())
-    if claim in ("INDIRECT_MATERIAL", "THEMATIC_MATERIAL") and cited \
-            and set(cited) <= set(evidence):
+    if (
+        claim in ("INDIRECT_MATERIAL", "THEMATIC_MATERIAL")
+        and cited
+        and set(cited) <= set(evidence)
+    ):
         return claim
     return "NONE"
 
@@ -151,7 +162,9 @@ def derive_confirmation(official_ref, fact_n, opinion_n, model_claim):
         base = "SINGLE_MEDIA_UNCONFIRMED"
     else:
         base = "ANALYSIS_OPINION"
-    if model_claim in _CONFIRMATION_RANK \
-            and _CONFIRMATION_RANK[model_claim] < _CONFIRMATION_RANK[base]:
+    if (
+        model_claim in _CONFIRMATION_RANK
+        and _CONFIRMATION_RANK[model_claim] < _CONFIRMATION_RANK[base]
+    ):
         return model_claim
     return base

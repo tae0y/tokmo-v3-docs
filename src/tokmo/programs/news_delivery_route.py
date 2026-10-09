@@ -1,8 +1,9 @@
 """Select a NEWS-only destination; the existing dialogue sender is unchanged."""
+
 import json
-from pathlib import Path
 import re
 import stat
+from pathlib import Path
 
 
 class NewsRouteError(ValueError):
@@ -45,13 +46,16 @@ def build_news_sender(root, stock_sender, send_message):
             if route.get("destination") != "TOKMO_GROUP":
                 raise ValueError("unsupported news destination")
             chat_id = route.get("chat_id")
-            if not isinstance(chat_id, str) or not re.fullmatch(r"-[1-9][0-9]{0,19}", chat_id):
+            if not isinstance(chat_id, str) or not re.fullmatch(
+                r"-[1-9][0-9]{0,19}", chat_id
+            ):
                 raise ValueError("news group chat id required")
             token = read_group_identity(route["credential_file"])
         except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
-            raise NewsRouteError('톡모그룹 전달 경로/인증 파일 확인 필요') from error
-        message_id = send_message(body_text=text, bot_token=token, chat_id=chat_id,
-                                  reply_markup=reply_markup)
+            raise NewsRouteError("톡모그룹 전달 경로/인증 파일 확인 필요") from error
+        message_id = send_message(
+            body_text=text, bot_token=token, chat_id=chat_id, reply_markup=reply_markup
+        )
         return f"telegram-group:{chat_id}:{message_id}"
 
     return send

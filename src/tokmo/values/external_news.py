@@ -1,10 +1,10 @@
 """Immutable values for the N1 direct-URL NEWS storage seam."""
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from enum import StrEnum
 import ipaddress
 import re
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from enum import StrEnum
 from urllib.parse import urlsplit
 
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
@@ -52,10 +52,14 @@ class TimeInterpretation(StrEnum):
 
 
 def canonical_utc(value: datetime, name: str) -> str:
-    if (not isinstance(value, datetime) or value.tzinfo is None
-            or value.utcoffset() is None or value.utcoffset().total_seconds() != 0):
+    if (
+        not isinstance(value, datetime)
+        or value.tzinfo is None
+        or value.utcoffset() is None
+        or value.utcoffset().total_seconds() != 0
+    ):
         raise ValueError(f"{name} must be UTC-aware")
-    return value.astimezone(timezone.utc).isoformat(timespec="microseconds")
+    return value.astimezone(UTC).isoformat(timespec="microseconds")
 
 
 def _nonempty(value: str, name: str) -> None:
@@ -90,9 +94,13 @@ class NewsWrite:
             ascii_host = (parsed.hostname or "").encode("idna").decode("ascii")
         except (UnicodeError, ValueError) as error:
             raise ValueError("canonical_url has an invalid host or port") from error
-        if (parsed.scheme.lower() not in {"http", "https"} or not ascii_host
-                or parsed.username is not None or parsed.password is not None
-                or ascii_host.endswith(".")):
+        if (
+            parsed.scheme.lower() not in {"http", "https"}
+            or not ascii_host
+            or parsed.username is not None
+            or parsed.password is not None
+            or ascii_host.endswith(".")
+        ):
             raise ValueError("canonical_url must be credential-free absolute HTTP(S)")
         del port  # Access above is validation; canonicalization handles default ports.
         try:
@@ -101,17 +109,24 @@ class NewsWrite:
             pass
         else:
             raise ValueError("canonical_url must use a registrable domain")
-        if any(not label or label.startswith("-") or label.endswith("-")
-               or re.fullmatch(r"[a-zA-Z0-9-]+", label) is None
-               for label in ascii_host.split(".")):
+        if any(
+            not label
+            or label.startswith("-")
+            or label.endswith("-")
+            or re.fullmatch(r"[a-zA-Z0-9-]+", label) is None
+            for label in ascii_host.split(".")
+        ):
             raise ValueError("canonical_url has an invalid host")
-        if not all(isinstance(value, expected) for value, expected in (
-            (self.content_mode, ContentMode),
-            (self.content_state, ContentState),
-            (self.license_state, LicenseState),
-            (self.evidence_role, EvidenceRole),
-            (self.time_interpretation, TimeInterpretation),
-        )):
+        if not all(
+            isinstance(value, expected)
+            for value, expected in (
+                (self.content_mode, ContentMode),
+                (self.content_state, ContentState),
+                (self.license_state, LicenseState),
+                (self.evidence_role, EvidenceRole),
+                (self.time_interpretation, TimeInterpretation),
+            )
+        ):
             raise ValueError("content enum fields must use their typed enum values")
         if type(self.alert_eligible) is not bool:
             raise ValueError("alert_eligible must be bool")
@@ -120,8 +135,11 @@ class NewsWrite:
         if self.published_at is not None:
             canonical_utc(self.published_at, "published_at")
         for name in (
-            "source_article_id", "publisher_name", "publisher_site_url",
-            "summary_text", "body_text",
+            "source_article_id",
+            "publisher_name",
+            "publisher_site_url",
+            "summary_text",
+            "body_text",
         ):
             value = getattr(self, name)
             if value is not None:
@@ -130,31 +148,45 @@ class NewsWrite:
             publisher = urlsplit(self.publisher_site_url)
             try:
                 publisher_port = publisher.port
-                publisher_host = (publisher.hostname or "").encode(
-                    "idna").decode("ascii")
+                publisher_host = (
+                    (publisher.hostname or "").encode("idna").decode("ascii")
+                )
             except (UnicodeError, ValueError) as error:
                 raise ValueError(
-                    "publisher_site_url has an invalid host or port") from error
-            if (publisher.scheme != "https" or not publisher_host
-                    or publisher.username is not None or publisher.password is not None
-                    or publisher_host.endswith(".")):
-                raise ValueError("publisher_site_url must be credential-free absolute HTTPS")
+                    "publisher_site_url has an invalid host or port"
+                ) from error
+            if (
+                publisher.scheme != "https"
+                or not publisher_host
+                or publisher.username is not None
+                or publisher.password is not None
+                or publisher_host.endswith(".")
+            ):
+                raise ValueError(
+                    "publisher_site_url must be credential-free absolute HTTPS"
+                )
             del publisher_port
             try:
                 ipaddress.ip_address(publisher_host)
             except ValueError:
                 pass
             else:
-                raise ValueError(
-                    "publisher_site_url must use a registrable domain")
-            if any(not label or label.startswith("-") or label.endswith("-")
-                   or re.fullmatch(r"[a-zA-Z0-9-]+", label) is None
-                   for label in publisher_host.split(".")):
+                raise ValueError("publisher_site_url must use a registrable domain")
+            if any(
+                not label
+                or label.startswith("-")
+                or label.endswith("-")
+                or re.fullmatch(r"[a-zA-Z0-9-]+", label) is None
+                for label in publisher_host.split(".")
+            ):
                 raise ValueError("publisher_site_url has an invalid host")
         if self.content_hash is not None and not _HEX64.fullmatch(self.content_hash):
             raise ValueError("content_hash must be lowercase sha256")
         if self.content_state is ContentState.BODY_AVAILABLE:
-            if self.body_text is None or self.license_state is not LicenseState.PERMITTED:
+            if (
+                self.body_text is None
+                or self.license_state is not LicenseState.PERMITTED
+            ):
                 raise ValueError("available body requires text and permitted license")
         elif self.body_text is not None:
             raise ValueError("body_text requires BODY_AVAILABLE")

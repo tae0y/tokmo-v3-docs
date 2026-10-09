@@ -16,11 +16,11 @@ from typing import Any
 from tokmo.presentation.options import FormatOptions
 
 __all__ = [
+    "CurrencyConflictError",
+    "DuplicateRegistrationError",
     "Formatter",
     "PresentationRegistry",
     "UnsupportedPresentationType",
-    "DuplicateRegistrationError",
-    "CurrencyConflictError",
 ]
 
 Formatter = Callable[[Any, FormatOptions], str]
@@ -77,7 +77,5 @@ class PresentationRegistry:
             )
         result = formatter(value, options)
         if not isinstance(result, str):
-            raise TypeError(
-                f"formatter_returned_non_str:{type(result).__name__}"
-            )
+            raise TypeError(f"formatter_returned_non_str:{type(result).__name__}")
         return result

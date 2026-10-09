@@ -6,12 +6,12 @@ quantity, cost basis, current price, or holding-state facts.
 
 from __future__ import annotations
 
-from datetime import datetime
 import json
 import os
-from pathlib import Path
 import re
 import tempfile
+from datetime import datetime
+from pathlib import Path
 
 from tokmo.values.session_gate import Market
 
@@ -38,7 +38,9 @@ def _aware_timestamp(value: object) -> bool:
     return parsed.tzinfo is not None and parsed.utcoffset() is not None
 
 
-def validate_watchlist_file(payload: object, *, expected_market: str) -> tuple[dict, ...]:
+def validate_watchlist_file(
+    payload: object, *, expected_market: str
+) -> tuple[dict, ...]:
     if not isinstance(payload, dict) or set(payload) != _TOP_KEYS:
         raise WatchlistError("invalid_top_level")
     if payload["schema_version"] != 1 or payload["market"] != expected_market:
@@ -71,9 +73,11 @@ def validate_watchlist_file(payload: object, *, expected_market: str) -> tuple[d
         if status == "retired":
             if not {"retired_at", "retire_reason"} <= set(raw):
                 raise WatchlistError("missing_retirement")
-            if (not _aware_timestamp(raw["retired_at"])
-                    or not isinstance(raw["retire_reason"], str)
-                    or not raw["retire_reason"].strip()):
+            if (
+                not _aware_timestamp(raw["retired_at"])
+                or not isinstance(raw["retire_reason"], str)
+                or not raw["retire_reason"].strip()
+            ):
                 raise WatchlistError("invalid_retirement")
             superseded = raw.get("superseded_by")
             if superseded is not None and (
@@ -88,7 +92,10 @@ def validate_watchlist_file(payload: object, *, expected_market: str) -> tuple[d
 
 
 def write_watchlist_file(
-    path: Path, payload: object, *, expected_market: str,
+    path: Path,
+    payload: object,
+    *,
+    expected_market: str,
 ) -> None:
     """Validate and atomically persist a canonically ordered registry."""
     destination = Path(path)
@@ -102,8 +109,10 @@ def write_watchlist_file(
     temporary = None
     try:
         with tempfile.NamedTemporaryFile(
-            mode="wb", dir=destination.parent,
-            prefix=f".{destination.name}.", delete=False,
+            mode="wb",
+            dir=destination.parent,
+            prefix=f".{destination.name}.",
+            delete=False,
         ) as stream:
             temporary = Path(stream.name)
             stream.write(encoded)
@@ -154,7 +163,6 @@ def load_watchlist_identities(
     for market in Market:
         entries = _read(root / f"{market.value}.json", market.value)
         result[market] = tuple(
-            (row["symbol"], row["name"]) for row in entries
-            if row["status"] == "active"
+            (row["symbol"], row["name"]) for row in entries if row["status"] == "active"
         )
     return result

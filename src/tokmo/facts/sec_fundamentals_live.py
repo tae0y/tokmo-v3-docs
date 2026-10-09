@@ -56,7 +56,8 @@ class SECCompanyFactsLiveTransport:
         self.opener = build_live_opener(https_handler)
 
     def __call__(
-        self, request: SECCompanyFactsRequest,
+        self,
+        request: SECCompanyFactsRequest,
     ) -> SECCompanyFactsTransportSuccess | SECCompanyFactsTransportFailure:
         try:
             url = self._wire_url(request)
@@ -71,9 +72,7 @@ class SECCompanyFactsLiveTransport:
                     "Accept-Encoding": "identity",
                 },
             )
-            with self.opener.open(
-                wire, timeout=request.timeout_seconds
-            ) as response:
+            with self.opener.open(wire, timeout=request.timeout_seconds) as response:
                 return _read_success(response)
         except urllib.error.HTTPError as err:
             return _map_http_error(err)
@@ -135,9 +134,7 @@ def _read_success(
             if int(declared) > MAX_COMPANYFACTS_BODY_BYTES:
                 return SECCompanyFactsTransportFailure(code="body_too_large")
         except ValueError:
-            return SECCompanyFactsTransportFailure(
-                code="unsupported_content_encoding"
-            )
+            return SECCompanyFactsTransportFailure(code="unsupported_content_encoding")
     body = response.read(MAX_COMPANYFACTS_BODY_BYTES + 1)
     if len(body) > MAX_COMPANYFACTS_BODY_BYTES:
         return SECCompanyFactsTransportFailure(code="body_too_large")

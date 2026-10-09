@@ -1,5 +1,5 @@
 from dataclasses import FrozenInstanceError, replace
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -22,8 +22,7 @@ from tokmo.values.official_membership_observation import (
     SourceReceiptLinkV1,
 )
 
-
-NOW = datetime(2026, 8, 13, 1, 30, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 13, 1, 30, tzinfo=UTC)
 
 
 def request_identity(path_template="/directory/{family}.txt"):
@@ -184,13 +183,16 @@ def test_acquisition_payloads_and_sic_snapshot_normalize_deterministically():
     )
     assert acquisition.sic_snapshot.source_ref == same_codes.source_ref
     assert acquisition.listings[0].source_ref.startswith("omsrcv1:sha256:")
-    assert payload(
-        ObservationSourceKindV1.SEC_ISSUER,
-        "AAPL",
-    ).payload_sha256 != payload(
-        ObservationSourceKindV1.SEC_ISSUER,
-        "MSFT",
-    ).payload_sha256
+    assert (
+        payload(
+            ObservationSourceKindV1.SEC_ISSUER,
+            "AAPL",
+        ).payload_sha256
+        != payload(
+            ObservationSourceKindV1.SEC_ISSUER,
+            "MSFT",
+        ).payload_sha256
+    )
 
 
 @pytest.mark.parametrize(

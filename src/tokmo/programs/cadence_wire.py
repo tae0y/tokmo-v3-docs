@@ -20,8 +20,8 @@ hidden inside an adapter cannot bypass it because the in-memory bearer itself
 is acquired through :class:`LazyWireTokenV1` as an admitted TOKEN wire.
 """
 
+from collections.abc import Callable
 from datetime import datetime
-from typing import Callable
 
 from tokmo.values.cadence_policy import (
     CadencePolicyV1,
@@ -59,12 +59,22 @@ class WireClaimV1:
     """
 
     __slots__ = (
-        "policy_version", "scheduled_for_utc", "operation", "operation_group",
-        "native_identity", "_live",
+        "_live",
+        "native_identity",
+        "operation",
+        "operation_group",
+        "policy_version",
+        "scheduled_for_utc",
     )
 
-    def __init__(self, policy_version: str, scheduled_for_utc: datetime,
-                 operation: str, operation_group: str, native_identity: str):
+    def __init__(
+        self,
+        policy_version: str,
+        scheduled_for_utc: datetime,
+        operation: str,
+        operation_group: str,
+        native_identity: str,
+    ):
         if _ISSUER_GUARD.get("token") is not _ISSUER_CAPABILITY:
             raise PermissionError("wire claims are executor-issued only")
         self.policy_version = policy_version
@@ -104,18 +114,27 @@ class CadenceWireExecutorV1:
     raised before the callback runs.
     """
 
-    def __init__(self, *, ops_kernel, role, policy: CadencePolicyV1,
-                 scheduled_for_utc: datetime, clock: Callable[[], datetime],
-                 child_limits: TradesChildLimitsV1,
-                 lane_registry: OperationLaneRegistryV1,
-                 lane: OperationLane):
+    def __init__(
+        self,
+        *,
+        ops_kernel,
+        role,
+        policy: CadencePolicyV1,
+        scheduled_for_utc: datetime,
+        clock: Callable[[], datetime],
+        child_limits: TradesChildLimitsV1,
+        lane_registry: OperationLaneRegistryV1,
+        lane: OperationLane,
+    ):
         if not isinstance(policy, CadencePolicyV1):
             raise ValueError("executor requires a cadence policy")
         if not isinstance(child_limits, TradesChildLimitsV1):
             raise ValueError("executor requires trades child limits")
-        if (not isinstance(scheduled_for_utc, datetime)
-                or scheduled_for_utc.tzinfo is None
-                or scheduled_for_utc.utcoffset() is None):
+        if (
+            not isinstance(scheduled_for_utc, datetime)
+            or scheduled_for_utc.tzinfo is None
+            or scheduled_for_utc.utcoffset() is None
+        ):
             raise ValueError("scheduled_for_utc must be an aware datetime")
         if not callable(clock):
             raise ValueError("executor requires an injected clock")
@@ -145,7 +164,10 @@ class CadenceWireExecutorV1:
         _ISSUER_GUARD["token"] = _ISSUER_CAPABILITY
         try:
             return WireClaimV1(
-                self._policy.policy_version, self._slot, operation, group,
+                self._policy.policy_version,
+                self._slot,
+                operation,
+                group,
                 native_identity,
             )
         finally:
@@ -153,13 +175,15 @@ class CadenceWireExecutorV1:
 
     def _settle(self, native_identity, outcome) -> None:
         self._kernel.settle_cadence_request(
-            self._role, policy_version=self._policy.policy_version,
-            scheduled_for_utc=self._slot, native_identity=native_identity,
-            outcome=outcome, now=self._clock(),
+            self._role,
+            policy_version=self._policy.policy_version,
+            scheduled_for_utc=self._slot,
+            native_identity=native_identity,
+            outcome=outcome,
+            now=self._clock(),
         )
 
-    def execute(self, operation: str, native_identity: str,
-                callback: Callable):
+    def execute(self, operation: str, native_identity: str, callback: Callable):
         """Admit, run, and settle exactly one provider wire.
 
         Validation, durable planning, and the atomic STARTED transition all
@@ -174,21 +198,30 @@ class CadenceWireExecutorV1:
             entry = self._lane_registry.entries.get(operation)
             if entry is None:
                 raise OperationOwnershipError(
-                    f"operation has no lane owner: {operation}")
+                    f"operation has no lane owner: {operation}"
+                )
             if active_owner(entry, epoch=self._epoch) is not self._lane:
                 raise OperationOwnershipError(
                     f"executor lane {self._lane.value} is not the active owner "
-                    f"of {operation} at epoch {self._epoch}")
+                    f"of {operation} at epoch {self._epoch}"
+                )
         group = validate_cadence_operation(operation, native_identity)
         self._kernel.plan_cadence_requests(
-            self._role, self._policy, scheduled_for_utc=self._slot,
-            requests=((operation, native_identity),), now=self._clock(),
+            self._role,
+            self._policy,
+            scheduled_for_utc=self._slot,
+            requests=((operation, native_identity),),
+            now=self._clock(),
             child_limits=self._child_limits,
         )
         self._kernel.start_cadence_request(
-            self._role, self._policy, scheduled_for_utc=self._slot,
-            operation=operation, native_identity=native_identity,
-            now=self._clock(), child_limits=self._child_limits,
+            self._role,
+            self._policy,
+            scheduled_for_utc=self._slot,
+            operation=operation,
+            native_identity=native_identity,
+            now=self._clock(),
+            child_limits=self._child_limits,
         )
         claim = self._issue_claim(operation, group, native_identity)
         try:
@@ -218,8 +251,7 @@ class LazyWireTokenV1:
     tick that needs no metered operation therefore acquires no token.
     """
 
-    def __init__(self, *, executor: CadenceWireExecutorV1,
-                 token_fetch: Callable):
+    def __init__(self, *, executor: CadenceWireExecutorV1, token_fetch: Callable):
         if not isinstance(executor, CadenceWireExecutorV1):
             raise ValueError("lazy token requires the wire executor")
         if not callable(token_fetch):

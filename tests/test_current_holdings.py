@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -24,8 +24,7 @@ from tokmo.values.current_holdings import (
 from tokmo.values.receipt_v1 import ACCOUNT_SCOPE_RE
 from tokmo.values.session_gate import Market
 
-
-NOW = datetime(2026, 7, 30, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 30, tzinfo=UTC)
 
 
 def test_identity_derivation_is_deterministic_domain_separated_and_order_independent():
@@ -37,13 +36,21 @@ def test_identity_derivation_is_deterministic_domain_separated_and_order_indepen
     fingerprints = [derive_raw_identity_fingerprint(value) for value in seqs]
     assert all(len(value) == 64 for value in fingerprints)
     assert fingerprints[0] != fingerprints[1]
-    assert derive_account_scope("123").removeprefix("toss-acct-") != fingerprints[0][:24]
+    assert (
+        derive_account_scope("123").removeprefix("toss-acct-") != fingerprints[0][:24]
+    )
 
 
 @pytest.mark.parametrize(
     ("raw", "expected"),
-    [("KR", Market.KR), ("US", Market.US), ("UNKNOWN", None),
-     (None, None), ("KOREA", None), ("NASDAQ", None)],
+    [
+        ("KR", Market.KR),
+        ("US", Market.US),
+        ("UNKNOWN", None),
+        (None, None),
+        ("KOREA", None),
+        ("NASDAQ", None),
+    ],
 )
 def test_market_classifier_is_observed_only(raw, expected):
     assert CLASSIFY_MARKET_VERSION == 1
@@ -55,18 +62,24 @@ def test_current_holdings_is_frozen_validated_and_canonical():
     identity = AccountScopeIdentityV1(scope, None, 1, None)
     item = HoldingItemV1("005930", "1", "70000", "KRW", "KR", "market")
     state = CurrentHoldingsV1(
-        1, (AccountHoldingsV1(scope, 1, (item,)),), True, NOW,
+        1,
+        (AccountHoldingsV1(scope, 1, (item,)),),
+        True,
+        NOW,
         {scope: identity},
     )
     encoded = canonical_holdings_bytes(state)
     assert encoded == (
-        b'{"accounts":[{"account_scope":"' + scope.encode() +
-        b'","holdings":[{"avg_price":"70000","currency":"KRW",'
+        b'{"accounts":[{"account_scope":"'
+        + scope.encode()
+        + b'","holdings":[{"avg_price":"70000","currency":"KRW",'
         b'"market_field":"market","market_raw":"KR","quantity":"1",'
         b'"symbol":"005930"}],"ordinal":1}],"captured_at":'
-        b'"2026-07-30T00:00:00Z","global_inventory":true,"identity_map":{"' +
-        scope.encode() + b'":{"account_scope":"' + scope.encode() +
-        b'","account_type_label":null,"masked_name":null,"ordinal":1}},'
+        b'"2026-07-30T00:00:00Z","global_inventory":true,"identity_map":{"'
+        + scope.encode()
+        + b'":{"account_scope":"'
+        + scope.encode()
+        + b'","account_type_label":null,"masked_name":null,"ordinal":1}},'
         b'"schema_version":1}'
     )
     with pytest.raises(Exception):
@@ -95,12 +108,17 @@ def test_store_replaces_latest_and_reads_typed_with_private_0600_identity_map(tm
     store = CurrentHoldingsStore(path, clock=lambda: NOW)
     state = _state()
     scope = state.accounts[0].account_scope
-    store.replace(state, identity_fingerprints={
-        scope: derive_raw_identity_fingerprint("123"),
-    })
+    store.replace(
+        state,
+        identity_fingerprints={
+            scope: derive_raw_identity_fingerprint("123"),
+        },
+    )
     assert store.read() == state
     assert path.stat().st_mode & 0o777 == 0o600
-    assert path.with_name("current_holdings.identity.json").stat().st_mode & 0o777 == 0o600
+    assert (
+        path.with_name("current_holdings.identity.json").stat().st_mode & 0o777 == 0o600
+    )
 
 
 def test_store_collision_is_fingerprint_only_and_fail_closed(tmp_path):
@@ -127,6 +145,7 @@ def test_store_allows_actual_ordinal_reorder_and_updates_latest_ordinal(tmp_path
         scope: derive_raw_identity_fingerprint(seq)
         for scope, seq in zip(scopes, ("123", "456"))
     }
+
     def state(order):
         identities = {
             scope: AccountScopeIdentityV1(scope, None, ordinal, None)
@@ -137,6 +156,7 @@ def test_store_allows_actual_ordinal_reorder_and_updates_latest_ordinal(tmp_path
             for ordinal, scope in enumerate(order, 1)
         )
         return CurrentHoldingsV1(1, accounts, True, NOW, identities)
+
     store.replace(state(scopes), identity_fingerprints=fingerprints)
     reordered = state(tuple(reversed(scopes)))
     store.replace(reordered, identity_fingerprints=fingerprints)
@@ -146,17 +166,21 @@ def test_store_allows_actual_ordinal_reorder_and_updates_latest_ordinal(tmp_path
 
 
 def test_identity_commit_before_state_failure_prevents_later_collision_bypass(
-        tmp_path, monkeypatch):
+    tmp_path, monkeypatch
+):
     path = tmp_path / "current_holdings.json"
     store = CurrentHoldingsStore(path, clock=lambda: NOW)
     state = _state()
     scope = state.accounts[0].account_scope
     import tokmo.records.current_holdings_store as module
+
     real_write = module.write_atomic_json
+
     def fail_state(target, raw, **kwargs):
         if target == path:
             raise OSError("injected state crash")
         return real_write(target, raw, **kwargs)
+
     monkeypatch.setattr(module, "write_atomic_json", fail_state)
     with pytest.raises(OSError):
         store.replace(state, identity_fingerprints={scope: "a" * 64})
@@ -169,12 +193,14 @@ def test_identity_derivation_rejects_duplicate_scope_by_fingerprint():
     same_scope = lambda value: "toss-acct-" + "0" * 24
     with pytest.raises(ValueError, match="duplicate account scope"):
         _derive_account_identities_from_seqs(
-            ("123", "123"), scope_deriver=same_scope,
+            ("123", "123"),
+            scope_deriver=same_scope,
             fingerprint_deriver=derive_raw_identity_fingerprint,
         )
     with pytest.raises(AccountScopeCollisionError):
         _derive_account_identities_from_seqs(
-            ("123", "456"), scope_deriver=same_scope,
+            ("123", "456"),
+            scope_deriver=same_scope,
             fingerprint_deriver=derive_raw_identity_fingerprint,
         )
 
@@ -184,7 +210,10 @@ def test_current_holdings_rejects_non_datetime_with_value_error(captured):
     scope = derive_account_scope("123")
     with pytest.raises(ValueError, match="captured_at"):
         CurrentHoldingsV1(
-            1, (AccountHoldingsV1(scope, 1, ()),), True, captured,
+            1,
+            (AccountHoldingsV1(scope, 1, ()),),
+            True,
+            captured,
             {scope: AccountScopeIdentityV1(scope, None, 1, None)},
         )
 
@@ -193,7 +222,10 @@ def test_store_rejects_non_account_and_corrupt_private_identity_typed(tmp_path):
     scope = derive_account_scope("123")
     with pytest.raises(ValueError, match="accounts"):
         CurrentHoldingsV1(
-            1, (object(),), True, NOW,
+            1,
+            (object(),),
+            True,
+            NOW,
             {scope: AccountScopeIdentityV1(scope, None, 1, None)},
         )
     path = tmp_path / "current_holdings.json"
@@ -201,7 +233,8 @@ def test_store_rejects_non_account_and_corrupt_private_identity_typed(tmp_path):
     identity.write_bytes(b"{")
     with pytest.raises(CurrentHoldingsCorruptError):
         CurrentHoldingsStore(path, clock=lambda: NOW).replace(
-            _state(), identity_fingerprints={
+            _state(),
+            identity_fingerprints={
                 scope: derive_raw_identity_fingerprint("123"),
             },
         )
@@ -213,12 +246,16 @@ def test_sixty_replacements_keep_one_state_and_bounded_identity_map(tmp_path):
     state = _state()
     scope = state.accounts[0].account_scope
     for _ in range(60):
-        store.replace(state, identity_fingerprints={
-            scope: derive_raw_identity_fingerprint("123"),
-        })
+        store.replace(
+            state,
+            identity_fingerprints={
+                scope: derive_raw_identity_fingerprint("123"),
+            },
+        )
     assert store.read() == state
     assert sorted(item.name for item in tmp_path.iterdir()) == [
-        "current_holdings.identity.json", "current_holdings.json",
+        "current_holdings.identity.json",
+        "current_holdings.json",
     ]
 
 

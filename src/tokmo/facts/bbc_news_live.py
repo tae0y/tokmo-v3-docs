@@ -18,22 +18,31 @@ class BbcBusinessConnector:
     def __init__(self, http) -> None:
         self._http = http
 
-    def fetch(self, request: BbcBusinessRequest, *, observed_at: datetime) -> NewsFetchResult:
+    def fetch(
+        self, request: BbcBusinessRequest, *, observed_at: datetime
+    ) -> NewsFetchResult:
         if type(request) is not BbcBusinessRequest:
             return NewsFetchResult(NewsFetchStatus.CONTRACT_MISMATCH)
-        response: NewsHttpResponse = self._http.get(ClosedNewsGet(
-            host="feeds.bbci.co.uk", path="/news/business/rss.xml"
-        ))
+        response: NewsHttpResponse = self._http.get(
+            ClosedNewsGet(host="feeds.bbci.co.uk", path="/news/business/rss.xml")
+        )
         if response.status is not NewsFetchStatus.COLLECTED:
-            return NewsFetchResult(response.status, http_status=response.http_status,
-                                   failure_class=response.failure_class)
+            return NewsFetchResult(
+                response.status,
+                http_status=response.http_status,
+                failure_class=response.failure_class,
+            )
         body = _deduplicate_section_repeats(response.body)
         if body is None:
-            return NewsFetchResult(NewsFetchStatus.CONTRACT_MISMATCH,
-                                   http_status=response.http_status,
-                                   bytes_received=len(response.body))
+            return NewsFetchResult(
+                NewsFetchStatus.CONTRACT_MISMATCH,
+                http_status=response.http_status,
+                bytes_received=len(response.body),
+            )
         parsed = parse_rss_news(body, observed_at=observed_at, max_items=100)
-        return NewsFetchResult(parsed.status, parsed.items, response.http_status, len(response.body))
+        return NewsFetchResult(
+            parsed.status, parsed.items, response.http_status, len(response.body)
+        )
 
 
 def _deduplicate_section_repeats(body: bytes) -> bytes | None:
@@ -49,9 +58,15 @@ def _deduplicate_section_repeats(body: bytes) -> bytes | None:
         for item in list(channel.findall("item")):
             link = (item.findtext("link") or "").strip()
             identity = link.split("?", 1)[0]
-            payload = tuple((item.findtext(name) or "").strip() for name in (
-                "title", "link", "description", "pubDate",
-            ))
+            payload = tuple(
+                (item.findtext(name) or "").strip()
+                for name in (
+                    "title",
+                    "link",
+                    "description",
+                    "pubDate",
+                )
+            )
             if identity not in seen:
                 seen[identity] = payload
                 continue

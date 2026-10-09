@@ -24,19 +24,20 @@ Decision order (deterministic):
 """
 
 from tokmo.values.ops_kernel import (
+    _SEMANTIC_HIGH_OVERLAP,
     ClassifierHintV1,
     SemanticClassification,
     SemanticDecisionV1,
     SemanticProfileV1,
-    _SEMANTIC_HIGH_OVERLAP,
 )
 
 
-def _material_conflicts(left: SemanticProfileV1,
-                        right: SemanticProfileV1) -> tuple:
+def _material_conflicts(left: SemanticProfileV1, right: SemanticProfileV1) -> tuple:
     conflicts = []
-    if (left.trigger_kind is not right.trigger_kind
-            or left.trigger_norm != right.trigger_norm):
+    if (
+        left.trigger_kind is not right.trigger_kind
+        or left.trigger_norm != right.trigger_norm
+    ):
         conflicts.append("trigger")
     if left.invalidation != right.invalidation:
         conflicts.append("invalidation")
@@ -47,12 +48,16 @@ def _material_conflicts(left: SemanticProfileV1,
     return tuple(conflicts)
 
 
-def classify_semantic_profiles(left: SemanticProfileV1,
-                               right: SemanticProfileV1, *,
-                               same_canonical_identity: bool = False,
-                               hint: ClassifierHintV1 | None = None) -> SemanticDecisionV1:
+def classify_semantic_profiles(
+    left: SemanticProfileV1,
+    right: SemanticProfileV1,
+    *,
+    same_canonical_identity: bool = False,
+    hint: ClassifierHintV1 | None = None,
+) -> SemanticDecisionV1:
     if not isinstance(left, SemanticProfileV1) or not isinstance(
-        right, SemanticProfileV1,
+        right,
+        SemanticProfileV1,
     ):
         raise ValueError("invalid semantic profile")
     if hint is not None and not isinstance(hint, ClassifierHintV1):
@@ -77,9 +82,7 @@ def classify_semantic_profiles(left: SemanticProfileV1,
         )
     # 3. complete structural equality -> same hypothesis, new sighting
     left_keys = left.entities | left.metrics | left.effects | left.source_events
-    right_keys = (
-        right.entities | right.metrics | right.effects | right.source_events
-    )
+    right_keys = right.entities | right.metrics | right.effects | right.source_events
     if left_keys == right_keys:
         return SemanticDecisionV1(
             classification=SemanticClassification.SAME_HYPOTHESIS_NEW_SIGHTING,

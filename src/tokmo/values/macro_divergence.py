@@ -9,10 +9,9 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field, fields, is_dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from enum import Enum
-
 from typing import Any
 
 from tokmo.values import canonical_decimal
@@ -20,19 +19,33 @@ from tokmo.values.macro_observations import MacroCoverageState, MacroSourceRefV1
 
 __all__ = [
     # Constants (§5.1)
-    "LOOKBACK_MAX", "LOOKBACK_MIN", "COMMON_WINDOW_MIN",
-    "OUTFLOW_WINDOW", "EXHAUSTION_PRIOR_WINDOW", "EXHAUSTION_MIN_INVESTOR",
-    "FX_RETURN_WINDOW", "EXHAUSTION_IMPROVEMENT_RATIO",
-    "HIGH_PERCENTILE_THRESHOLD", "FOREIGN_OUTFLOW_STRESS_THRESHOLD",
-    "EXHAUSTION_FX_RETURN_THRESHOLD", "STALENESS_CEILING_CALENDAR_DAYS",
-    "FORMULA_VERSION", "PACK_BYTE_CAP",
+    "LOOKBACK_MAX",
+    "LOOKBACK_MIN",
+    "COMMON_WINDOW_MIN",
+    "OUTFLOW_WINDOW",
+    "EXHAUSTION_PRIOR_WINDOW",
+    "EXHAUSTION_MIN_INVESTOR",
+    "FX_RETURN_WINDOW",
+    "EXHAUSTION_IMPROVEMENT_RATIO",
+    "HIGH_PERCENTILE_THRESHOLD",
+    "FOREIGN_OUTFLOW_STRESS_THRESHOLD",
+    "EXHAUSTION_FX_RETURN_THRESHOLD",
+    "STALENESS_CEILING_CALENDAR_DAYS",
+    "FORMULA_VERSION",
+    "PACK_BYTE_CAP",
     # Enums
-    "MacroDivergenceComponent", "MacroDivergenceState", "ConfidenceCeiling",
+    "MacroDivergenceComponent",
+    "MacroDivergenceState",
+    "ConfidenceCeiling",
     # Data types
-    "MacroDivergenceComponentV1", "MacroWindowSummaryV1",
-    "MacroSymbolContactV1", "MacroDivergencePackV1",
+    "MacroDivergenceComponentV1",
+    "MacroWindowSummaryV1",
+    "MacroSymbolContactV1",
+    "MacroDivergencePackV1",
     # Functions
-    "compute_pack_digest", "percentile_rank", "map_confidence_ceiling",
+    "compute_pack_digest",
+    "percentile_rank",
+    "map_confidence_ceiling",
 ]
 
 
@@ -50,7 +63,7 @@ FX_RETURN_WINDOW = 8
 
 EXHAUSTION_IMPROVEMENT_RATIO = Decimal("0.5")
 HIGH_PERCENTILE_THRESHOLD = Decimal("0.90")
-FOREIGN_OUTFLOW_STRESS_THRESHOLD = Decimal("-20000000000000")
+FOREIGN_OUTFLOW_STRESS_THRESHOLD = Decimal(-20000000000000)
 EXHAUSTION_FX_RETURN_THRESHOLD = Decimal("-0.03")
 STALENESS_CEILING_CALENDAR_DAYS = 4
 FORMULA_VERSION = "macro-divergence-v1"
@@ -60,6 +73,7 @@ PACK_BYTE_CAP = 32768
 # ==========================================================================
 # §6.2  MacroDivergenceState
 # ==========================================================================
+
 
 class MacroDivergenceState(Enum):
     INSUFFICIENT_DATA = "INSUFFICIENT_DATA"
@@ -72,6 +86,7 @@ class MacroDivergenceState(Enum):
 # ==========================================================================
 # §6.1  MacroDivergenceComponent
 # ==========================================================================
+
 
 class MacroDivergenceComponent(Enum):
     INDEX_HIGH_FX_PROXY_HIGH = "INDEX_HIGH_FX_PROXY_HIGH"
@@ -89,6 +104,7 @@ class ConfidenceCeiling(Enum):
 # §5.2  Percentile rank (max-rank, inclusive <=)
 # ==========================================================================
 
+
 def percentile_rank(window: list[Decimal], current: Decimal) -> Decimal:
     """Empirical percentile using max-rank: count(close <= current) / len.
 
@@ -105,12 +121,9 @@ def percentile_rank(window: list[Decimal], current: Decimal) -> Decimal:
 # ==========================================================================
 
 _CONFIDENCE_CEILING: dict[str, ConfidenceCeiling] = {
-    MacroDivergenceState.INDEX_HIGH_FX_PROXY_HIGH.value:
-        ConfidenceCeiling.PROXY_ROLL_SENSITIVE,
-    MacroDivergenceState.FOREIGN_OUTFLOW_CONFIRMATION.value:
-        ConfidenceCeiling.DIRECT_FLOW_DATA,
-    MacroDivergenceState.OUTFLOW_EXHAUSTION_FX_PROXY_REVERSAL.value:
-        ConfidenceCeiling.PROXY_ROLL_SENSITIVE,
+    MacroDivergenceState.INDEX_HIGH_FX_PROXY_HIGH.value: ConfidenceCeiling.PROXY_ROLL_SENSITIVE,
+    MacroDivergenceState.FOREIGN_OUTFLOW_CONFIRMATION.value: ConfidenceCeiling.DIRECT_FLOW_DATA,
+    MacroDivergenceState.OUTFLOW_EXHAUSTION_FX_PROXY_REVERSAL.value: ConfidenceCeiling.PROXY_ROLL_SENSITIVE,
 }
 
 
@@ -154,6 +167,7 @@ class MacroDivergenceComponentV1:
 # §6.3  MacroWindowSummaryV1
 # ==========================================================================
 
+
 @dataclass(frozen=True)
 class MacroWindowSummaryV1:
     as_of: str
@@ -172,6 +186,7 @@ class MacroWindowSummaryV1:
 # §6.4  MacroSymbolContactV1
 # ==========================================================================
 
+
 @dataclass(frozen=True)
 class MacroSymbolContactV1:
     symbol: str
@@ -183,6 +198,7 @@ class MacroSymbolContactV1:
 # ==========================================================================
 # §6.6  Canonical digest algorithm
 # ==========================================================================
+
 
 def _serialize_for_digest(obj: Any) -> Any:
     """Recursively convert dataclass/enum/Decimal/date to canonical forms.
@@ -200,15 +216,13 @@ def _serialize_for_digest(obj: Any) -> Any:
     if isinstance(obj, Decimal):
         return canonical_decimal(obj)
     if isinstance(obj, datetime):
-        from datetime import timezone as _tz
-        utc = obj.astimezone(_tz.utc)
+        utc = obj.astimezone(UTC)
         return f"{utc:%Y-%m-%dT%H:%M:%S}.{utc.microsecond:06d}Z"
     if isinstance(obj, date):
         return obj.isoformat()
     if is_dataclass(obj) and not isinstance(obj, type):
         return {
-            f.name: _serialize_for_digest(getattr(obj, f.name))
-            for f in fields(obj)
+            f.name: _serialize_for_digest(getattr(obj, f.name)) for f in fields(obj)
         }
     if isinstance(obj, dict):
         return {k: _serialize_for_digest(v) for k, v in obj.items()}
@@ -252,8 +266,12 @@ def _apply_byte_cap(fields_dict: dict) -> dict:
     result = copy.deepcopy(fields_dict)
     for _ in range(100):  # safety bound on iterations
         candidate = json.dumps(
-            result, sort_keys=True, ensure_ascii=False,
-            separators=(",", ":"), allow_nan=False, default=str,
+            result,
+            sort_keys=True,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            allow_nan=False,
+            default=str,
         )
         if len(candidate.encode("utf-8")) <= PACK_BYTE_CAP:
             return result
@@ -351,9 +369,7 @@ class MacroDivergencePackV1:
                 )
         else:
             if not isinstance(self.coverage_state, MacroCoverageState):
-                raise ValueError(
-                    "coverage_state must be MacroCoverageState or None"
-                )
+                raise ValueError("coverage_state must be MacroCoverageState or None")
             if self.lifecycle_reason not in eval_reasons:
                 raise ValueError(
                     f"coverage_state is non-None but lifecycle_reason "

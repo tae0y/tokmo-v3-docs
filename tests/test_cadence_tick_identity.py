@@ -10,8 +10,7 @@ mutation, or analysis transition. A self-consistent mask for a different
 policy or slot — even with the same attempted ``tick_id`` — is rejected.
 """
 
-from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from types import MappingProxyType, SimpleNamespace
 
 import pytest
@@ -37,12 +36,12 @@ from tokmo.values.session_gate import Market, SessionVerdict
 from tokmo.values.toss_market_calendar import CalendarSession
 
 POLICY = "cadence-300s-v1"
-SLOT = datetime(2026, 8, 3, 14, 0, tzinfo=timezone.utc)
+SLOT = datetime(2026, 8, 3, 14, 0, tzinfo=UTC)
 TICK = cadence_tick_v1(POLICY, SLOT)
 
 SESSION = CalendarSession(
-    datetime(2026, 8, 3, 13, 30, tzinfo=timezone.utc),
-    datetime(2026, 8, 3, 20, 0, tzinfo=timezone.utc),
+    datetime(2026, 8, 3, 13, 30, tzinfo=UTC),
+    datetime(2026, 8, 3, 20, 0, tzinfo=UTC),
 )
 
 
@@ -53,7 +52,8 @@ def mask_at(tick, kr_reason="after_close", us_reason="open"):
     )
     return build_open_market_mask(
         policy_version=tick.policy_version,
-        scheduled_for_utc=tick.scheduled_for_utc, tick_id=tick.tick_id,
+        scheduled_for_utc=tick.scheduled_for_utc,
+        tick_id=tick.tick_id,
         verdicts=verdicts,
         local_dates={Market.KR: date(2026, 8, 4), Market.US: date(2026, 8, 3)},
     )
@@ -103,7 +103,8 @@ def test_unaligned_or_non_utc_slot_is_rejected():
 def test_mask_rejects_non_canonical_tick_identity():
     with pytest.raises(ValueError):
         build_open_market_mask(
-            policy_version=POLICY, scheduled_for_utc=SLOT,
+            policy_version=POLICY,
+            scheduled_for_utc=SLOT,
             tick_id=TICK.tick_id + 1,
             verdicts=(
                 SessionVerdict(Market.KR, False, "after_close", SESSION),
@@ -130,9 +131,14 @@ def test_require_tick_mask_binding_rejects_foreign_slot_mask():
 
 def test_require_tick_mask_binding_requires_canonical_carrier():
     with pytest.raises(MaskBindingError):
-        require_tick_mask_binding(US_ONLY, SimpleNamespace(
-            policy_version=POLICY, scheduled_for_utc=SLOT, tick_id=TICK.tick_id,
-        ))
+        require_tick_mask_binding(
+            US_ONLY,
+            SimpleNamespace(
+                policy_version=POLICY,
+                scheduled_for_utc=SLOT,
+                tick_id=TICK.tick_id,
+            ),
+        )
     with pytest.raises(MaskBindingError):
         require_tick_mask_binding("not-a-mask", TICK)
 
@@ -141,18 +147,23 @@ def foreign_policy_mask_with_same_tick_id(monkeypatch):
     """A self-consistent mask under a different policy whose derivation lands
     on the same attempted tick_id (60s policy at tick_id*60)."""
     foreign = CadencePolicyV1(
-        policy_version="cadence-60s-test", cadence_seconds=60,
-        max_start_lag_seconds=12, child_timeout_seconds=50,
+        policy_version="cadence-60s-test",
+        cadence_seconds=60,
+        max_start_lag_seconds=12,
+        child_timeout_seconds=50,
         termination_margin_seconds=10,
     )
     monkeypatch.setattr(
-        cadence_policy, "CADENCE_POLICY_REGISTRY",
-        MappingProxyType({
-            CADENCE_POLICY_V1.policy_version: CADENCE_POLICY_V1,
-            foreign.policy_version: foreign,
-        }),
+        cadence_policy,
+        "CADENCE_POLICY_REGISTRY",
+        MappingProxyType(
+            {
+                CADENCE_POLICY_V1.policy_version: CADENCE_POLICY_V1,
+                foreign.policy_version: foreign,
+            }
+        ),
     )
-    slot60 = datetime.fromtimestamp(TICK.tick_id * 60, tz=timezone.utc)
+    slot60 = datetime.fromtimestamp(TICK.tick_id * 60, tz=UTC)
     foreign_tick = cadence_tick_v1("cadence-60s-test", slot60)
     assert foreign_tick.tick_id == TICK.tick_id
     return mask_at(foreign_tick)
@@ -204,12 +215,16 @@ def test_holdings_seam_rejects_every_foreign_identity(tmp_path, monkeypatch):
         receipts = ReceiptSink()
         with pytest.raises(MaskBindingError):
             run_holdings_sync(
-                tick=TICK, mask=mask,
+                tick=TICK,
+                mask=mask,
                 holdings_provider=lambda: pytest.fail("provider must not run"),
-                store=NoStore(), pack_writer=NoPacks(), receipt_store=receipts,
+                store=NoStore(),
+                pack_writer=NoPacks(),
+                receipt_store=receipts,
                 reservation_seal=lambda *args: None,
                 incident_writer=lambda *args: None,
-                clock=lambda: SLOT, now=SLOT,
+                clock=lambda: SLOT,
+                now=SLOT,
                 job_lock_path=tmp_path / f"h{index}.lock",
             )
         assert receipts.value is None
@@ -221,13 +236,17 @@ def test_quotes_seam_rejects_every_foreign_identity(tmp_path, monkeypatch):
         receipts = ReceiptSink()
         with pytest.raises(MaskBindingError):
             run_quotes_sync(
-                tick=TICK, mask=mask, holdings=None,
+                tick=TICK,
+                mask=mask,
+                holdings=None,
                 quotes_provider=lambda batch: pytest.fail("provider must not run"),
                 quote_store=lambda outcome: pytest.fail("store must not mutate"),
-                pack_writer=NoPacks(), receipt_store=receipts,
+                pack_writer=NoPacks(),
+                receipt_store=receipts,
                 reservation_seal=lambda *args: None,
                 incident_writer=lambda *args: None,
-                clock=lambda: SLOT, now=SLOT,
+                clock=lambda: SLOT,
+                now=SLOT,
                 job_lock_path=tmp_path / f"q{index}.lock",
             )
         assert receipts.value is None
@@ -240,18 +259,22 @@ def test_trades_seam_rejects_every_foreign_identity(tmp_path, monkeypatch):
         scan_path = tmp_path / f"scan{index}.sqlite3"
         with pytest.raises(MaskBindingError):
             run_trades_sync(
-                tick=TICK, mask=mask, holdings=None,
+                tick=TICK,
+                mask=mask,
+                holdings=None,
                 orders_provider=lambda **kwargs: pytest.fail("provider must not run"),
                 detail_provider=lambda **kwargs: pytest.fail("detail must not run"),
                 store=NoStore(),
                 scan_state=OrderScanStateStore(scan_path, clock=lambda: SLOT),
-                pack_writer=NoPacks(), receipt_store=receipts,
+                pack_writer=NoPacks(),
+                receipt_store=receipts,
                 reservation_seal=lambda *args: pytest.fail("no reservation"),
                 incident_writer=lambda *args: None,
                 regular_session_dates=SimpleNamespace(
                     regular_session_dates=lambda *args: pytest.fail("no calendar"),
                 ),
-                clock=lambda: SLOT, now=SLOT,
+                clock=lambda: SLOT,
+                now=SLOT,
                 job_lock_path=tmp_path / f"t{index}.lock",
             )
         assert receipts.value is None
@@ -264,7 +287,8 @@ def test_barrier_seam_rejects_every_foreign_identity(monkeypatch):
     for mask in _seam_masks(monkeypatch):
         with pytest.raises(MaskBindingError):
             assemble_analysis_materials(
-                tick=TICK, mask=mask,
+                tick=TICK,
+                mask=mask,
                 receipt_readers={
                     job: (lambda job=job: pytest.fail("receipts must not be read"))
                     for job in __import__(

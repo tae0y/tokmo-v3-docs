@@ -29,6 +29,7 @@ Usage:
 
 DO NOT RUN during cadence operation.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -84,7 +85,7 @@ FAULT_ENV = "TOKMO_MIGRATION_FAULT"
 FAULT_AFTER_REPLACE = "after_replace"
 FAULT_AT_FSYNC = "at_fsync"
 FAULT_AT_POST_VERIFY = "post_verify"
-FAULT_RESTORE_PREFIX = "restore:"   # + the primitive's stage name
+FAULT_RESTORE_PREFIX = "restore:"  # + the primitive's stage name
 
 
 def _fault(point: str) -> None:
@@ -100,8 +101,9 @@ def _fault(point: str) -> None:
         raise _FaultAt(point)
 
 
-def _restore(source: Path, backup: Path, manifest: Path, *,
-             target_already_replaced: bool = False) -> int:
+def _restore(
+    source: Path, backup: Path, manifest: Path, *, target_already_replaced: bool = False
+) -> int:
     """Durably put the verified backup back, never consuming it.
 
     Delegates to the one shared primitive so there is no second, subtly
@@ -118,34 +120,51 @@ def _restore(source: Path, backup: Path, manifest: Path, *,
     # The restore has its own stage vocabulary; namespace it so an install
     # fault and a restore fault of the same name cannot collide.
     outcome = durable_restore_from_backup(
-        target=Path(source), backup=Path(backup),
+        target=Path(source),
+        backup=Path(backup),
         expected_sha256=expected,
-        fault=lambda stage: _fault(f"{FAULT_RESTORE_PREFIX}{stage}"))
+        fault=lambda stage: _fault(f"{FAULT_RESTORE_PREFIX}{stage}"),
+    )
 
     if outcome.ok:
         if not _verify_restored_schema(Path(source)):
-            print("ERROR: restored file does not carry the expected schema",
-                  file=sys.stderr)
-            print("UNCERTAIN: bytes match the manifest but the schema check "
-                  "failed. Backup and manifest are intact.", file=sys.stderr)
+            print(
+                "ERROR: restored file does not carry the expected schema",
+                file=sys.stderr,
+            )
+            print(
+                "UNCERTAIN: bytes match the manifest but the schema check "
+                "failed. Backup and manifest are intact.",
+                file=sys.stderr,
+            )
             return EXIT_RESTORE_FAILED
-        print(f"Restored from backup; sha256 {expected[:16]}... and schema "
-              f"verified. Backup and manifest preserved and re-verified.")
+        print(
+            f"Restored from backup; sha256 {expected[:16]}... and schema "
+            f"verified. Backup and manifest preserved and re-verified."
+        )
         return EXIT_RESTORED
 
-    print(f"ERROR: restore failed at stage '{outcome.stage}': {outcome.detail}",
-          file=sys.stderr)
+    print(
+        f"ERROR: restore failed at stage '{outcome.stage}': {outcome.detail}",
+        file=sys.stderr,
+    )
     if outcome.replacement_may_have_occurred or target_already_replaced:
         # Either the restore itself may have replaced, or the install already
         # did and the restore did not finish undoing it. Both mean the target
         # is not known to be the original.
-        print("UNCERTAIN: the target is not known to hold the original bytes. "
-              "The backup and manifest are intact and were not overwritten; "
-              "rerun --restore.", file=sys.stderr)
+        print(
+            "UNCERTAIN: the target is not known to hold the original bytes. "
+            "The backup and manifest are intact and were not overwritten; "
+            "rerun --restore.",
+            file=sys.stderr,
+        )
     else:
-        print("The target was NOT replaced by this restore and the install had "
-              "not replaced it either. The backup and manifest are intact and "
-              "were not overwritten.", file=sys.stderr)
+        print(
+            "The target was NOT replaced by this restore and the install had "
+            "not replaced it either. The backup and manifest are intact and "
+            "were not overwritten.",
+            file=sys.stderr,
+        )
     return EXIT_RESTORE_FAILED
 
 
@@ -153,17 +172,22 @@ def _verify_restored_schema(source: Path) -> bool:
     """A restored registry must reopen as the original generation."""
     try:
         from tokmo.records.pension_revisions import PensionRegistryStore
-        return PensionRegistryStore(
-            source, clock=lambda: None).schema_generation() == 1
+
+        return PensionRegistryStore(source, clock=lambda: None).schema_generation() == 1
     except Exception:  # noqa: BLE001 - any doubt is a failed restore
         return False
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Offline pension registry current-read-model migration")
-    parser.add_argument("--root", type=Path, required=True,
-                        help="root holding stores/; no production default")
+        description="Offline pension registry current-read-model migration"
+    )
+    parser.add_argument(
+        "--root",
+        type=Path,
+        required=True,
+        help="root holding stores/; no production default",
+    )
     parser.add_argument("--backup", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--authorization-record", type=Path, default=None)
@@ -193,16 +217,20 @@ def main(argv: list[str] | None = None) -> int:
             SCHEMA_GENERATION_TWO,
             HoldingsSnapshotStore,
         )
+
         connection, snapshot_generation = HoldingsSnapshotStore(
-            snapshot_path, clock=lambda: None)._open_read_generation()
+            snapshot_path, clock=lambda: None
+        )._open_read_generation()
         connection.close()
     except Exception as error:  # noqa: BLE001 - any doubt refuses
         print(f"ERROR: snapshot store unreadable: {error}", file=sys.stderr)
         return EXIT_REFUSED
     if snapshot_generation != SCHEMA_GENERATION_TWO:
-        print("ERROR: migrate the snapshot store first; the registry cannot "
-              "install current state without pension snapshots",
-              file=sys.stderr)
+        print(
+            "ERROR: migrate the snapshot store first; the registry cannot "
+            "install current state without pension snapshots",
+            file=sys.stderr,
+        )
         return EXIT_REFUSED
     print("  snapshot store already admits the pension source.")
 
@@ -223,20 +251,22 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_OK
 
     if args.authorization_record is None or not args.authorization_record.exists():
-        print("ERROR: --authorization-record naming the source sha256 is "
-              "required", file=sys.stderr)
+        print(
+            "ERROR: --authorization-record naming the source sha256 is required",
+            file=sys.stderr,
+        )
         return EXIT_REFUSED
-    if inventory.sha256 not in args.authorization_record.read_text(
-            encoding="utf-8"):
-        print("ERROR: authorization record does not name the source sha256",
-              file=sys.stderr)
+    if inventory.sha256 not in args.authorization_record.read_text(encoding="utf-8"):
+        print(
+            "ERROR: authorization record does not name the source sha256",
+            file=sys.stderr,
+        )
         return EXIT_REFUSED
 
     print(f"Backing up to {args.backup} ...")
     digest = _write_backup(registry_path, args.backup, args.manifest)
     if digest != inventory.sha256:
-        print("ERROR: backup does not match the inspected registry",
-              file=sys.stderr)
+        print("ERROR: backup does not match the inspected registry", file=sys.stderr)
         return EXIT_REFUSED
     print(f"  backup sha256 verified: {digest[:16]}...")
 
@@ -253,8 +283,9 @@ def main(argv: list[str] | None = None) -> int:
         except OSError:
             pass
         if _sha256(registry_path) != inventory.sha256:
-            print("ERROR: registry changed despite a pre-install failure",
-                  file=sys.stderr)
+            print(
+                "ERROR: registry changed despite a pre-install failure", file=sys.stderr
+            )
             return EXIT_REFUSED
         print("Registry is byte-identical; nothing was installed.")
         return EXIT_REFUSED
@@ -279,8 +310,11 @@ def main(argv: list[str] | None = None) -> int:
         _fault(FAULT_AT_POST_VERIFY)
         from tokmo.records.pension_revisions import (
             SCHEMA_GENERATION_TWO as REGISTRY_GENERATION_TWO,
+        )
+        from tokmo.records.pension_revisions import (
             PensionRegistryStore,
         )
+
         store = PensionRegistryStore(registry_path, clock=lambda: None)
         if store.schema_generation() != REGISTRY_GENERATION_TWO:
             raise ValueError("installed registry is not the current read model")
@@ -303,18 +337,28 @@ def main(argv: list[str] | None = None) -> int:
             if _sha256(registry_path) == inventory.sha256:
                 print("Replacement did not occur; registry is byte-identical.")
                 return EXIT_REFUSED
-            print("UNCERTAIN: replacement did not report success but the "
-                  "registry changed; restoring.", file=sys.stderr)
+            print(
+                "UNCERTAIN: replacement did not report success but the "
+                "registry changed; restoring.",
+                file=sys.stderr,
+            )
         else:
-            print("Replacement occurred; restoring the verified backup ...",
-                  file=sys.stderr)
-        return _restore(registry_path, args.backup, args.manifest,
-                        target_already_replaced=replaced)
+            print(
+                "Replacement occurred; restoring the verified backup ...",
+                file=sys.stderr,
+            )
+        return _restore(
+            registry_path, args.backup, args.manifest, target_already_replaced=replaced
+        )
 
-    print("Migration complete and verified. The registry is a current read "
-          "model; snapshot history is the sole holdings-history payload.")
-    print(f"Recovery, if ever needed: --restore --root {args.root} "
-          f"--backup {args.backup} --manifest {args.manifest}")
+    print(
+        "Migration complete and verified. The registry is a current read "
+        "model; snapshot history is the sole holdings-history payload."
+    )
+    print(
+        f"Recovery, if ever needed: --restore --root {args.root} "
+        f"--backup {args.backup} --manifest {args.manifest}"
+    )
     return EXIT_OK
 
 

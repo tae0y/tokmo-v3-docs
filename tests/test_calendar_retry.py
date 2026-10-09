@@ -8,8 +8,8 @@ atomically only at STARTED. Expectations for delays and attempt counts are
 derived from the central policy declaration, never re-typed.
 """
 
-from datetime import date, datetime, timedelta, timezone
 import sqlite3
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -29,19 +29,25 @@ from tokmo.values.ops_kernel import (
 from tokmo.values.session_gate import Market
 
 LOCAL_DATE = date(2026, 8, 3)
-BASE = datetime(2026, 8, 2, 20, 0, tzinfo=timezone.utc)
+BASE = datetime(2026, 8, 2, 20, 0, tzinfo=UTC)
 ROLE = ProducerRole.COLLECTOR
 CHILD_LIMITS = TradesChildLimitsV1(orders_page_starts=0, order_detail_starts=0)
 
 
 def policy():
     return CadencePolicyV1(
-        policy_version="cadence-test-v1", cadence_seconds=60,
-        max_start_lag_seconds=10, child_timeout_seconds=40,
+        policy_version="cadence-test-v1",
+        cadence_seconds=60,
+        max_start_lag_seconds=10,
+        child_timeout_seconds=40,
         termination_margin_seconds=10,
         request_limits=TickRequestLimitsV1(
-            total_wire_starts=27, token_starts=0, calendar_starts=2,
-            holdings_starts=0, quote_starts=0, trades_starts=0,
+            total_wire_starts=27,
+            token_starts=0,
+            calendar_starts=2,
+            holdings_starts=0,
+            quote_starts=0,
+            trades_starts=0,
         ),
     )
 
@@ -56,21 +62,37 @@ def slot_at(minutes):
 
 def plan(store, minutes, *, market=Market.KR, local_date=LOCAL_DATE):
     return store.plan_calendar_slot(
-        ROLE, market, local_date, slot_at(minutes), now=slot_at(minutes),
+        ROLE,
+        market,
+        local_date,
+        slot_at(minutes),
+        now=slot_at(minutes),
     )
 
 
 def start(store, minutes, *, market=Market.KR, local_date=LOCAL_DATE, now=None):
     return store.start_calendar_attempt(
-        ROLE, policy(), scheduled_for_utc=slot_at(minutes), market=market,
-        market_local_date=local_date, eligible_slot_utc=slot_at(minutes),
-        now=now or slot_at(minutes), child_limits=CHILD_LIMITS,
+        ROLE,
+        policy(),
+        scheduled_for_utc=slot_at(minutes),
+        market=market,
+        market_local_date=local_date,
+        eligible_slot_utc=slot_at(minutes),
+        now=now or slot_at(minutes),
+        child_limits=CHILD_LIMITS,
     )
 
 
-def settle(store, ordinal, outcome, minutes, *, market=Market.KR, local_date=LOCAL_DATE):
+def settle(
+    store, ordinal, outcome, minutes, *, market=Market.KR, local_date=LOCAL_DATE
+):
     return store.settle_calendar_attempt(
-        ROLE, market, local_date, ordinal, outcome, now=slot_at(minutes),
+        ROLE,
+        market,
+        local_date,
+        ordinal,
+        outcome,
+        now=slot_at(minutes),
     )
 
 
@@ -94,7 +116,7 @@ def test_duplicate_planned_slot_resolves_to_same_row_with_wire_zero(tmp_path):
 
 def test_unstarted_slot_consumes_no_ordinal_and_start_binds_wire_identity(tmp_path):
     store = make_store(tmp_path)
-    plan(store, 0)   # cancelled/unstarted slot: consumes nothing
+    plan(store, 0)  # cancelled/unstarted slot: consumes nothing
     plan(store, 5)
     started = start(store, 5)
     assert isinstance(started, CalendarStartReceiptV1)
@@ -225,10 +247,12 @@ def test_crash_after_started_reconciles_same_ordinal_unknown_then_next(tmp_path)
     assert next_receipt.attempt_ordinal == 1
     connection = sqlite3.connect(reopened.path)
     try:
-        states = dict(connection.execute(
-            "SELECT attempt_ordinal,state FROM cadence_calendar_attempts "
-            "ORDER BY attempt_ordinal"
-        ).fetchall())
+        states = dict(
+            connection.execute(
+                "SELECT attempt_ordinal,state FROM cadence_calendar_attempts "
+                "ORDER BY attempt_ordinal"
+            ).fetchall()
+        )
     finally:
         connection.close()
     assert states == {0: "UNKNOWN", 1: "STARTED"}
@@ -264,15 +288,25 @@ def test_calendar_start_requires_versioned_tick_binding(tmp_path):
     plan(store, 0)
     with pytest.raises(CadenceBindingError):
         store.start_calendar_attempt(
-            ROLE, None, scheduled_for_utc=slot_at(0), market=Market.KR,
-            market_local_date=LOCAL_DATE, eligible_slot_utc=slot_at(0),
-            now=slot_at(0), child_limits=CHILD_LIMITS,
+            ROLE,
+            None,
+            scheduled_for_utc=slot_at(0),
+            market=Market.KR,
+            market_local_date=LOCAL_DATE,
+            eligible_slot_utc=slot_at(0),
+            now=slot_at(0),
+            child_limits=CHILD_LIMITS,
         )
     with pytest.raises(CadenceBindingError):
         store.start_calendar_attempt(
-            ROLE, policy(), scheduled_for_utc=None, market=Market.KR,
-            market_local_date=LOCAL_DATE, eligible_slot_utc=slot_at(0),
-            now=slot_at(0), child_limits=CHILD_LIMITS,
+            ROLE,
+            policy(),
+            scheduled_for_utc=None,
+            market=Market.KR,
+            market_local_date=LOCAL_DATE,
+            eligible_slot_utc=slot_at(0),
+            now=slot_at(0),
+            child_limits=CHILD_LIMITS,
         )
     assert wire_rows(store) == []
     connection = sqlite3.connect(store.path)

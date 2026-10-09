@@ -12,11 +12,11 @@ import itertools
 import sqlite3
 import stat
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
-import tokmo.records.trade_ledger_store as trade_ledger_store
+from tokmo.records import trade_ledger_store
 from tokmo.records.trade_ledger_preflight import SOURCE_CONTRACTS, SourceContract
 from tokmo.records.trade_ledger_privacy import (
     StoreCorruptError,
@@ -26,8 +26,7 @@ from tokmo.records.trade_ledger_privacy import (
 from tokmo.records.trade_ledger_store import TradeLedgerStore
 from tokmo.values.trade_ledger import ImportAuditMeta, TradeLedgerEvent
 
-
-NOW = datetime(2026, 7, 28, 1, 2, 3, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 28, 1, 2, 3, tzinfo=UTC)
 SOURCE = "retirement_excel_v1"
 SCOPE = "retirement_pension_1"
 _ID_COUNTER = itertools.count(1)
@@ -96,9 +95,7 @@ def make_store(path, *, clock=None, contracts=None):
 
 
 def future_store(path):
-    return make_store(
-        path, contracts={**SOURCE_CONTRACTS, FUTURE.source: FUTURE}
-    )
+    return make_store(path, contracts={**SOURCE_CONTRACTS, FUTURE.source: FUTURE})
 
 
 def counts(receipt):
@@ -155,6 +152,7 @@ class FailingConnection:
 
 # --- failure audit -----------------------------------------------------------
 
+
 def test_rejected_batch_persists_one_sanitized_failure_audit_row(tmp_path):
     path = tmp_path / "private" / "ledger.sqlite3"
     store = make_store(path)
@@ -175,9 +173,7 @@ def test_rejected_batch_persists_one_sanitized_failure_audit_row(tmp_path):
 
 def test_preflight_rejection_also_persists_a_failure_audit_row(tmp_path):
     path = tmp_path / "private" / "ledger.sqlite3"
-    receipt = make_store(path).append_batch(
-        (ledger_event(50),), import_audit=audit()
-    )
+    receipt = make_store(path).append_batch((ledger_event(50),), import_audit=audit())
     assert receipt.reason == "source_contract_violation"
     assert batch_rows(path) == [
         ("FAILED", "source_contract_violation", 1, 0, 0, 0, 0, 1),
@@ -202,9 +198,7 @@ def test_failure_audit_write_failure_degrades_to_audit_write_failed(
             arm_after="ROLLBACK",
         )
 
-    monkeypatch.setattr(
-        trade_ledger_store.sqlite3, "connect", failing_connect
-    )
+    monkeypatch.setattr(trade_ledger_store.sqlite3, "connect", failing_connect)
     drifted = (stored[0], ledger_event(2, amount="9999"))
     receipt = store.append_batch(drifted, import_audit=audit())
     monkeypatch.setattr(trade_ledger_store.sqlite3, "connect", real_connect)
@@ -230,26 +224,22 @@ def test_store_level_failures_do_not_masquerade_as_audit_failures(
     def failing_connect(*args, **kwargs):
         return FailingConnection(real_connect(*args, **kwargs), "COMMIT")
 
-    monkeypatch.setattr(
-        trade_ledger_store.sqlite3, "connect", failing_connect
-    )
-    receipt = store.append_batch(
-        original + (ledger_event(3),), import_audit=audit()
-    )
+    monkeypatch.setattr(trade_ledger_store.sqlite3, "connect", failing_connect)
+    receipt = store.append_batch(original + (ledger_event(3),), import_audit=audit())
     monkeypatch.setattr(trade_ledger_store.sqlite3, "connect", real_connect)
 
     assert receipt.status == "FAILED"
     assert receipt.reason == "store_write_failed"
     assert receipt.inserted_count == 0
     assert event_rows(path) == [
-        (event.source_record_key, event.quantity, event.unit_price,
-         event.amount)
+        (event.source_record_key, event.quantity, event.unit_price, event.amount)
         for event in original
     ]
     assert batch_rows(path) == [("SAVED", "", 2, 2, 2, 0, 0, 0)]
 
 
 # --- linked supersession (synthetic future source) ---------------------------
+
 
 def test_valid_linked_correction_chain_appends_atomically(tmp_path):
     path = tmp_path / "private" / "ledger.sqlite3"
@@ -263,16 +253,12 @@ def test_valid_linked_correction_chain_appends_atomically(tmp_path):
     assert counts(receipt) == (2, 2, 2, 0, 0, 0)
 
     chained = store.append_batch(
-        (future_event(
-            "fix-cccc", kind="CORRECTION", supersedes="fix-bbbb"
-        ),),
+        (future_event("fix-cccc", kind="CORRECTION", supersedes="fix-bbbb"),),
         import_audit=audit(),
     )
     assert chained.status == "SAVED"
 
-    read_back = store.read_scope(
-        source=FUTURE.source, account_scope="fixture_scope_1"
-    )
+    read_back = store.read_scope(source=FUTURE.source, account_scope="fixture_scope_1")
     assert len(read_back) == 3
     assert read_back[1].supersedes_source_record_key == "fix-aaaa"
     assert read_back[1].currency_raw == "FIX"
@@ -300,21 +286,20 @@ def test_reimporting_an_identical_linked_correction_is_a_duplicate_noop(
 def test_second_supersession_of_a_superseded_target_is_a_conflict(tmp_path):
     path = tmp_path / "private" / "ledger.sqlite3"
     store = future_store(path)
-    assert store.append_batch(
-        (
-            future_event("fix-aaaa"),
-            future_event(
-                "fix-bbbb", kind="CORRECTION", supersedes="fix-aaaa"
+    assert (
+        store.append_batch(
+            (
+                future_event("fix-aaaa"),
+                future_event("fix-bbbb", kind="CORRECTION", supersedes="fix-aaaa"),
             ),
-        ),
-        import_audit=audit(),
-    ).status == "SAVED"
+            import_audit=audit(),
+        ).status
+        == "SAVED"
+    )
     before = event_rows(path)
 
     receipt = store.append_batch(
-        (future_event(
-            "fix-dddd", kind="CORRECTION", supersedes="fix-aaaa"
-        ),),
+        (future_event("fix-dddd", kind="CORRECTION", supersedes="fix-aaaa"),),
         import_audit=audit(),
     )
 
@@ -329,37 +314,28 @@ def test_missing_self_and_later_batch_targets_fail_atomically(tmp_path):
     store = future_store(path)
 
     missing = store.append_batch(
-        (future_event(
-            "fix-aaaa", kind="CORRECTION", supersedes="fix-zzzz"
-        ),),
+        (future_event("fix-aaaa", kind="CORRECTION", supersedes="fix-zzzz"),),
         import_audit=audit(),
     )
-    assert (missing.status, missing.reason) == (
-        "FAILED", "supersession_invalid"
-    )
+    assert (missing.status, missing.reason) == ("FAILED", "supersession_invalid")
     assert counts(missing) == (1, 0, 0, 0, 0, 1)
 
     selfref = store.append_batch(
-        (future_event(
-            "fix-aaaa", kind="CORRECTION", supersedes="fix-aaaa"
-        ),),
+        (future_event("fix-aaaa", kind="CORRECTION", supersedes="fix-aaaa"),),
         import_audit=audit(),
     )
-    assert (selfref.status, selfref.reason) == (
-        "FAILED", "supersession_invalid"
-    )
+    assert (selfref.status, selfref.reason) == ("FAILED", "supersession_invalid")
 
     later_target = store.append_batch(
         (
-            future_event(
-                "fix-aaaa", kind="CORRECTION", supersedes="fix-bbbb"
-            ),
+            future_event("fix-aaaa", kind="CORRECTION", supersedes="fix-bbbb"),
             future_event("fix-bbbb"),
         ),
         import_audit=audit(),
     )
     assert (later_target.status, later_target.reason) == (
-        "FAILED", "supersession_invalid"
+        "FAILED",
+        "supersession_invalid",
     )
     assert counts(later_target) == (2, 1, 0, 0, 0, 1)
     assert event_rows(path) == []
@@ -369,21 +345,21 @@ def test_supersession_never_mutates_the_superseded_row(tmp_path):
     path = tmp_path / "private" / "ledger.sqlite3"
     store = future_store(path)
     original = future_event("fix-aaaa")
-    assert store.append_batch(
-        (original,), import_audit=audit()
-    ).status == "SAVED"
-    assert store.append_batch(
-        (future_event("fix-bbbb", kind="CORRECTION", supersedes="fix-aaaa"),),
-        import_audit=audit(),
-    ).status == "SAVED"
-
-    read_back = store.read_scope(
-        source=FUTURE.source, account_scope="fixture_scope_1"
+    assert store.append_batch((original,), import_audit=audit()).status == "SAVED"
+    assert (
+        store.append_batch(
+            (future_event("fix-bbbb", kind="CORRECTION", supersedes="fix-aaaa"),),
+            import_audit=audit(),
+        ).status
+        == "SAVED"
     )
+
+    read_back = store.read_scope(source=FUTURE.source, account_scope="fixture_scope_1")
     assert original in read_back
 
 
 # --- stored-row reconstruction and corruption --------------------------------
+
 
 def test_tampered_payload_hash_is_store_corrupt_on_append_and_read(tmp_path):
     path = tmp_path / "private" / "ledger.sqlite3"
@@ -392,8 +368,7 @@ def test_tampered_payload_hash_is_store_corrupt_on_append_and_read(tmp_path):
     assert store.append_batch(events, import_audit=audit()).status == "SAVED"
     with sqlite3.connect(path) as connection:
         connection.execute(
-            "UPDATE trade_ledger_events SET payload_hash=? "
-            "WHERE source_record_key=?",
+            "UPDATE trade_ledger_events SET payload_hash=? WHERE source_record_key=?",
             ("00" * 32, "row-000002"),
         )
 
@@ -412,8 +387,7 @@ def test_tampered_semantic_column_is_store_corrupt_not_conflict(tmp_path):
     assert store.append_batch(events, import_audit=audit()).status == "SAVED"
     with sqlite3.connect(path) as connection:
         connection.execute(
-            "UPDATE trade_ledger_events SET amount='4242' "
-            "WHERE source_record_key=?",
+            "UPDATE trade_ledger_events SET amount='4242' WHERE source_record_key=?",
             ("row-000002",),
         )
 
@@ -428,9 +402,9 @@ def test_tampered_semantic_column_is_store_corrupt_not_conflict(tmp_path):
 def test_semantically_malformed_row_is_store_corrupt_on_read(tmp_path):
     path = tmp_path / "private" / "ledger.sqlite3"
     store = make_store(path)
-    assert store.append_batch(
-        (ledger_event(1),), import_audit=audit()
-    ).status == "SAVED"
+    assert (
+        store.append_batch((ledger_event(1),), import_audit=audit()).status == "SAVED"
+    )
     with sqlite3.connect(path) as connection:
         connection.execute(
             "UPDATE trade_ledger_events SET trade_date='fixture-not-a-date'"
@@ -461,12 +435,13 @@ def test_garbage_file_is_store_corrupt_and_preserved(tmp_path):
 
 # --- locking and environment -------------------------------------------------
 
+
 def test_lock_is_bounded_and_leaves_the_ledger_unchanged(tmp_path):
     path = tmp_path / "private" / "ledger.sqlite3"
     store = make_store(path)
-    assert store.append_batch(
-        (ledger_event(1),), import_audit=audit()
-    ).status == "SAVED"
+    assert (
+        store.append_batch((ledger_event(1),), import_audit=audit()).status == "SAVED"
+    )
     before = event_rows(path)
 
     blocker = sqlite3.connect(path, isolation_level=None)
@@ -488,16 +463,14 @@ def test_lock_is_bounded_and_leaves_the_ledger_unchanged(tmp_path):
 def test_read_works_under_another_writers_begin_immediate(tmp_path):
     path = tmp_path / "private" / "ledger.sqlite3"
     store = make_store(path)
-    assert store.append_batch(
-        (ledger_event(1),), import_audit=audit()
-    ).status == "SAVED"
+    assert (
+        store.append_batch((ledger_event(1),), import_audit=audit()).status == "SAVED"
+    )
     before = path.read_bytes()
     journal = path.with_name(path.name + "-journal")
 
     blocker = sqlite3.connect(path, isolation_level=None)
-    assert blocker.execute("PRAGMA journal_mode=DELETE").fetchone() == (
-        "delete",
-    )
+    assert blocker.execute("PRAGMA journal_mode=DELETE").fetchone() == ("delete",)
     blocker.execute("BEGIN IMMEDIATE")
     try:
         read_back = store.read_scope(source=SOURCE, account_scope=SCOPE)
@@ -510,14 +483,10 @@ def test_read_works_under_another_writers_begin_immediate(tmp_path):
     assert path.read_bytes() == before
 
 
-def test_old_sqlite_gate_fails_closed_for_append_and_read(
-    tmp_path, monkeypatch
-):
+def test_old_sqlite_gate_fails_closed_for_append_and_read(tmp_path, monkeypatch):
     path = tmp_path / "private" / "ledger.sqlite3"
     store = make_store(path)
-    monkeypatch.setattr(
-        trade_ledger_store.sqlite3, "sqlite_version_info", (3, 36, 0)
-    )
+    monkeypatch.setattr(trade_ledger_store.sqlite3, "sqlite_version_info", (3, 36, 0))
     receipt = store.append_batch((ledger_event(1),), import_audit=audit())
     assert receipt.reason == "schema_mismatch"
     assert not path.exists()
@@ -531,9 +500,7 @@ def test_unsafe_parent_permissions_fail_before_initialization(tmp_path):
     unsafe.mkdir(mode=0o755)
     unsafe.chmod(0o755)
     path = unsafe / "ledger.sqlite3"
-    receipt = make_store(path).append_batch(
-        (ledger_event(1),), import_audit=audit()
-    )
+    receipt = make_store(path).append_batch((ledger_event(1),), import_audit=audit())
     assert receipt.reason == "store_write_failed"
     assert not path.exists()
 
@@ -542,25 +509,21 @@ def test_blocked_ancestor_path_is_a_closed_write_failure(tmp_path):
     ancestor = tmp_path / "not-a-directory"
     ancestor.write_bytes(b"fixture")
     path = ancestor / "private" / "ledger.sqlite3"
-    receipt = make_store(path).append_batch(
-        (ledger_event(1),), import_audit=audit()
-    )
+    receipt = make_store(path).append_batch((ledger_event(1),), import_audit=audit())
     assert (receipt.status, receipt.reason) == ("FAILED", "store_write_failed")
 
 
 def test_rollback_journal_is_private_while_writing(tmp_path):
     path = tmp_path / "private" / "ledger.sqlite3"
     store = make_store(path)
-    assert store.append_batch(
-        (ledger_event(1),), import_audit=audit()
-    ).status == "SAVED"
+    assert (
+        store.append_batch((ledger_event(1),), import_audit=audit()).status == "SAVED"
+    )
     connection = sqlite3.connect(path, isolation_level=None)
     journal = path.with_name(path.name + "-journal")
     connection.execute("PRAGMA journal_mode=DELETE")
     connection.execute("BEGIN IMMEDIATE")
-    connection.execute(
-        "UPDATE trade_ledger_import_batches SET stored_at='2026-07-28'"
-    )
+    connection.execute("UPDATE trade_ledger_import_batches SET stored_at='2026-07-28'")
     assert journal.exists()
     assert stat.S_IMODE(journal.stat().st_mode) == 0o600
     connection.execute("ROLLBACK")
@@ -570,6 +533,7 @@ def test_rollback_journal_is_private_while_writing(tmp_path):
 
 # --- privacy -----------------------------------------------------------------
 
+
 def test_no_receipt_or_error_surface_leaks_values_paths_or_sql(tmp_path):
     path = tmp_path / "private" / "ledger.sqlite3"
     store = make_store(path)
@@ -578,9 +542,7 @@ def test_no_receipt_or_error_surface_leaks_values_paths_or_sql(tmp_path):
     drifted = store.append_batch(
         (events[0], ledger_event(2, amount="9999")), import_audit=audit()
     )
-    preflight = store.append_batch(
-        (ledger_event(9),), import_audit=audit()
-    )
+    preflight = store.append_batch((ledger_event(9),), import_audit=audit())
     with sqlite3.connect(path) as connection:
         connection.execute(
             "UPDATE trade_ledger_events SET payload_hash=?", ("00" * 32,)
@@ -592,18 +554,36 @@ def test_no_receipt_or_error_surface_leaks_values_paths_or_sql(tmp_path):
     except StoreCorruptError as error:
         read_error = error
 
-    rendered = "".join((
-        repr(saved), str(saved),
-        repr(drifted), str(drifted),
-        repr(preflight), str(preflight),
-        repr(corrupt), str(corrupt),
-        repr(read_error), str(read_error),
-        repr(store),
-    ))
+    rendered = "".join(
+        (
+            repr(saved),
+            str(saved),
+            repr(drifted),
+            str(drifted),
+            repr(preflight),
+            str(preflight),
+            repr(corrupt),
+            str(corrupt),
+            repr(read_error),
+            str(read_error),
+            repr(store),
+        )
+    )
     for private_value in (
-        "row-000001", "row-000002", "Fixture", "매수", "1001", "1002",
-        "2026-01", str(path), str(tmp_path), "SELECT", "INSERT",
-        "sqlite3", "file is not a database", "UNIQUE constraint",
+        "row-000001",
+        "row-000002",
+        "Fixture",
+        "매수",
+        "1001",
+        "1002",
+        "2026-01",
+        str(path),
+        str(tmp_path),
+        "SELECT",
+        "INSERT",
+        "sqlite3",
+        "file is not a database",
+        "UNIQUE constraint",
     ):
         assert private_value not in rendered
     assert read_error.__cause__ is None
@@ -617,9 +597,9 @@ def test_locked_and_read_errors_expose_reason_tokens_only(tmp_path):
         store.read_scope(source=SOURCE, account_scope=SCOPE)
     assert repr(captured.value) == "<StoreReadError reason='store_read_failed'>"
 
-    assert store.append_batch(
-        (ledger_event(1),), import_audit=audit()
-    ).status == "SAVED"
+    assert (
+        store.append_batch((ledger_event(1),), import_audit=audit()).status == "SAVED"
+    )
     blocker = sqlite3.connect(path, isolation_level=None)
     blocker.execute("PRAGMA locking_mode=EXCLUSIVE")
     blocker.execute("BEGIN EXCLUSIVE")

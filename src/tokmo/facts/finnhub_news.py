@@ -1,16 +1,27 @@
 """Strict Finnhub company/market news JSON parser."""
 
-from datetime import datetime, timezone
 import json
+from datetime import UTC, datetime
 
 from tokmo.values.news_connectors import (
-    NewsConnectorItem, NewsFetchResult, NewsFetchStatus,
+    NewsConnectorItem,
+    NewsFetchResult,
+    NewsFetchStatus,
 )
 
-_REQUIRED = frozenset({
-    "category", "datetime", "headline", "id", "image", "related",
-    "source", "summary", "url",
-})
+_REQUIRED = frozenset(
+    {
+        "category",
+        "datetime",
+        "headline",
+        "id",
+        "image",
+        "related",
+        "source",
+        "summary",
+        "url",
+    }
+)
 
 
 def _unique_object(pairs):
@@ -22,8 +33,9 @@ def _unique_object(pairs):
     return result
 
 
-def parse_finnhub_news(body: bytes, *, observed_at,
-                       max_items: int = 500) -> NewsFetchResult:
+def parse_finnhub_news(
+    body: bytes, *, observed_at, max_items: int = 500
+) -> NewsFetchResult:
     if type(body) is not bytes or not 1 <= max_items <= 500:
         return NewsFetchResult(NewsFetchStatus.CONTRACT_MISMATCH)
     try:
@@ -34,21 +46,38 @@ def parse_finnhub_news(body: bytes, *, observed_at,
         for raw in rows:
             if type(raw) is not dict or not _REQUIRED <= set(raw):
                 raise ValueError
-            if (type(raw["datetime"]) is not int or type(raw["id"]) is not int
-                    or any(type(raw[k]) is not str for k in
-                           ("headline", "source", "summary", "url"))):
+            if (
+                type(raw["datetime"]) is not int
+                or type(raw["id"]) is not int
+                or any(
+                    type(raw[k]) is not str
+                    for k in ("headline", "source", "summary", "url")
+                )
+            ):
                 raise ValueError
-            published = datetime.fromtimestamp(raw["datetime"], tz=timezone.utc)
-            items.append(NewsConnectorItem(
-                canonical_url=raw["url"], title=raw["headline"],
-                observed_at=observed_at, source_article_id=str(raw["id"]),
-                summary_text=raw["summary"] or None, published_at=published,
-                publisher_name=raw["source"] or None,
-            ))
-    except (UnicodeDecodeError, json.JSONDecodeError, ValueError, TypeError,
-            OverflowError, OSError):
+            published = datetime.fromtimestamp(raw["datetime"], tz=UTC)
+            items.append(
+                NewsConnectorItem(
+                    canonical_url=raw["url"],
+                    title=raw["headline"],
+                    observed_at=observed_at,
+                    source_article_id=str(raw["id"]),
+                    summary_text=raw["summary"] or None,
+                    published_at=published,
+                    publisher_name=raw["source"] or None,
+                )
+            )
+    except (
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        ValueError,
+        TypeError,
+        OverflowError,
+        OSError,
+    ):
         return NewsFetchResult(NewsFetchStatus.CONTRACT_MISMATCH)
     if not items:
         return NewsFetchResult(NewsFetchStatus.EMPTY)
-    return NewsFetchResult(NewsFetchStatus.COLLECTED, tuple(items),
-                           bytes_received=len(body))
+    return NewsFetchResult(
+        NewsFetchStatus.COLLECTED, tuple(items), bytes_received=len(body)
+    )

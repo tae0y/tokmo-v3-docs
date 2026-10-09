@@ -10,7 +10,6 @@ from tokmo.values.cadence_policy import CadencePolicyV1, validate_cadence_operat
 from tokmo.values.current_holdings import CurrentHoldingsV1
 from tokmo.values.session_gate import Market
 
-
 PER_START_BUDGET_SECONDS = 10.0
 DEADLINE_MARGIN_SECONDS = 30
 
@@ -98,7 +97,10 @@ def _validate_symbols(symbols: tuple[str, ...]) -> None:
 
 
 def membership_native_identity(
-    *, endpoint: str, session_date: date, symbol: str | None = None,
+    *,
+    endpoint: str,
+    session_date: date,
+    symbol: str | None = None,
 ) -> str:
     _validate_session_date(session_date)
     if endpoint not in _ENDPOINT_OPERATIONS:
@@ -112,7 +114,8 @@ def membership_native_identity(
 
 
 def membership_operation_plan(
-    symbols: tuple[str, ...], session_date: date,
+    symbols: tuple[str, ...],
+    session_date: date,
 ) -> tuple[tuple[str, str], ...]:
     _validate_session_date(session_date)
     _validate_symbols(symbols)
@@ -140,7 +143,11 @@ def membership_operation_plan(
 
 
 def quant_candle_native_identity(
-    *, market: Market, symbol: str, session_date: date, page_index: int,
+    *,
+    market: Market,
+    symbol: str,
+    session_date: date,
+    page_index: int,
 ) -> str:
     return candle_native_identity("qt", market, symbol, session_date, page_index)
 
@@ -152,8 +159,9 @@ def sufficient_deadline(
     observed_now_utc: datetime,
     planned_starts: int,
 ) -> bool:
-    remaining = policy.child_timeout_seconds - (
-        observed_now_utc - scheduled_for_utc
-    ).total_seconds()
+    remaining = (
+        policy.child_timeout_seconds
+        - (observed_now_utc - scheduled_for_utc).total_seconds()
+    )
     required = planned_starts * PER_START_BUDGET_SECONDS + DEADLINE_MARGIN_SECONDS
     return remaining >= required

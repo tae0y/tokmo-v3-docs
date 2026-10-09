@@ -23,21 +23,21 @@ loading is a separate operator step.
 """
 
 import argparse
-from dataclasses import dataclass
-from datetime import datetime
 import json
 import os
-from pathlib import Path
 import plistlib
 import subprocess
 import sys
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 
 _TOOL_DIR = Path(__file__).resolve().parent
 _DEFAULT_PROJECT_ROOT = _TOOL_DIR.parent
 if str(_DEFAULT_PROJECT_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_DEFAULT_PROJECT_ROOT / "src"))
 
-from tokmo.records.prelaunch_markers import (  # noqa: E402
+from tokmo.records.prelaunch_markers import (
     MarkerError,
     verify_pass_marker,
 )
@@ -65,12 +65,12 @@ class AgentPaths:
     review_marker: Path
 
 
-def resolve_paths(home: Path | None = None,
-                  project_root: Path | None = None) -> AgentPaths:
+def resolve_paths(
+    home: Path | None = None, project_root: Path | None = None
+) -> AgentPaths:
     home = Path(home) if home is not None else Path.home()
     project_root = (
-        Path(project_root) if project_root is not None
-        else _DEFAULT_PROJECT_ROOT
+        Path(project_root) if project_root is not None else _DEFAULT_PROJECT_ROOT
     )
     runtime_root = home / ".hermes" / "runtime" / "tokmo-v3" / "48h-shadow"
     evidence = project_root / ".hermes" / "evidence" / "stage4"
@@ -111,26 +111,28 @@ source "$HOME/.zshrc" >/dev/null 2>&1
 # names so it cannot accidentally pick up the Hermes bot.
 export TELEGRAM_STOCK_BOT_TOKEN="${{TELEGRAM_STOCK_BOT:-}}"
 export TELEGRAM_STOCK_BOT_CHAT_ID="${{TELEGRAM_CHAT_ID:-}}"
-export PYTHONPATH="{paths.project_root / 'src'}"
-exec "{paths.venv_python}" "{paths.project_root / 'tools' / 'run_48h_shadow.py'}" \\
+export PYTHONPATH="{paths.project_root / "src"}"
+exec "{paths.venv_python}" "{paths.project_root / "tools" / "run_48h_shadow.py"}" \\
   --config "{paths.config}"
 """
 
 
 def generate_plist(paths: AgentPaths) -> str:
-    return plistlib.dumps({
-        "Label": AGENT_LABEL,
-        "ProgramArguments": [str(paths.wrapper)],
-        "RunAtLoad": True,
-        "KeepAlive": {"SuccessfulExit": False},
-        "StandardOutPath": str(paths.stdout_log),
-        "StandardErrorPath": str(paths.stderr_log),
-        "WorkingDirectory": str(paths.project_root),
-        "EnvironmentVariables": {
-            "PATH": "/usr/bin:/bin",
-            "HOME": str(paths.home),
-        },
-    }).decode()
+    return plistlib.dumps(
+        {
+            "Label": AGENT_LABEL,
+            "ProgramArguments": [str(paths.wrapper)],
+            "RunAtLoad": True,
+            "KeepAlive": {"SuccessfulExit": False},
+            "StandardOutPath": str(paths.stdout_log),
+            "StandardErrorPath": str(paths.stderr_log),
+            "WorkingDirectory": str(paths.project_root),
+            "EnvironmentVariables": {
+                "PATH": "/usr/bin:/bin",
+                "HOME": str(paths.home),
+            },
+        }
+    ).decode()
 
 
 def generate_config(paths: AgentPaths, *, expected_commit: str) -> dict:
@@ -154,9 +156,7 @@ def _owned_plist_or_absent(paths: AgentPaths) -> None:
     try:
         current = plistlib.loads(paths.plist.read_bytes())
     except Exception as error:
-        raise ValueError(
-            f"refusing unreadable plist at {paths.plist}"
-        ) from error
+        raise ValueError(f"refusing unreadable plist at {paths.plist}") from error
     if current.get("Label") != AGENT_LABEL:
         raise ValueError(
             f"refusing to touch unrelated plist {current.get('Label')!r} "
@@ -164,25 +164,35 @@ def _owned_plist_or_absent(paths: AgentPaths) -> None:
         )
 
 
-def install(paths: AgentPaths, *, expected_commit: str,
-            dry_run: bool) -> list:
+def install(paths: AgentPaths, *, expected_commit: str, dry_run: bool) -> list:
     """Write (or print) every artifact; idempotent and owned-paths-only."""
     artifacts = [
         ("wrapper", paths.wrapper, generate_wrapper(paths), 0o755),
-        ("config", paths.config,
-         json.dumps(generate_config(paths, expected_commit=expected_commit),
-                    indent=1, sort_keys=True) + "\n", 0o600),
+        (
+            "config",
+            paths.config,
+            json.dumps(
+                generate_config(paths, expected_commit=expected_commit),
+                indent=1,
+                sort_keys=True,
+            )
+            + "\n",
+            0o600,
+        ),
         ("plist", paths.plist, generate_plist(paths), 0o644),
     ]
     if dry_run:
         return [
-            {"action": "would-write", "artifact": name, "path": str(path),
-             "content": content}
+            {
+                "action": "would-write",
+                "artifact": name,
+                "path": str(path),
+                "content": content,
+            }
             for name, path, content, _mode in artifacts
         ]
     _owned_plist_or_absent(paths)
-    for directory in (paths.runtime_root, paths.stdout_log.parent,
-                      paths.shadow_root):
+    for directory in (paths.runtime_root, paths.stdout_log.parent, paths.shadow_root):
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.chmod(directory, 0o700)
     paths.plist.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
@@ -190,8 +200,7 @@ def install(paths: AgentPaths, *, expected_commit: str,
     for name, path, content, mode in artifacts:
         path.write_text(content)
         os.chmod(path, mode)
-        actions.append({"action": "wrote", "artifact": name,
-                        "path": str(path)})
+        actions.append({"action": "wrote", "artifact": name, "path": str(path)})
     return actions
 
 
@@ -199,12 +208,14 @@ def uninstall(paths: AgentPaths) -> list:
     """Remove exactly the owned artifacts; shadow evidence is preserved."""
     _owned_plist_or_absent(paths)
     actions = []
-    for name, path in (("plist", paths.plist), ("wrapper", paths.wrapper),
-                       ("config", paths.config)):
+    for name, path in (
+        ("plist", paths.plist),
+        ("wrapper", paths.wrapper),
+        ("config", paths.config),
+    ):
         if path.exists():
             path.unlink()
-            actions.append({"action": "removed", "artifact": name,
-                            "path": str(path)})
+            actions.append({"action": "removed", "artifact": name, "path": str(path)})
     return actions
 
 
@@ -214,7 +225,9 @@ def uninstall(paths: AgentPaths) -> list:
 def _git_head(project_root: Path) -> str | None:
     completed = subprocess.run(
         ["git", "-C", str(project_root), "rev-parse", "HEAD"],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     return completed.stdout.strip() if completed.returncode == 0 else None
 
@@ -235,19 +248,26 @@ def doctor(paths: AgentPaths, *, offline: bool = False) -> list:
     if paths.plist.is_file():
         lint = subprocess.run(
             ["plutil", "-lint", str(paths.plist)],
-            capture_output=True, text=True, check=False,
+            capture_output=True,
+            text=True,
+            check=False,
         )
         report("plist_lint", lint.returncode == 0, lint.stdout.strip())
         try:
             plist = plistlib.loads(paths.plist.read_bytes())
         except Exception:
             plist = None
-        report("plist_label", plist is not None
-               and plist.get("Label") == AGENT_LABEL, str(paths.plist))
+        report(
+            "plist_label",
+            plist is not None and plist.get("Label") == AGENT_LABEL,
+            str(paths.plist),
+        )
         report(
             "plist_paths_absolute",
-            plist is not None and all(
-                Path(value).is_absolute() for value in (
+            plist is not None
+            and all(
+                Path(value).is_absolute()
+                for value in (
                     *plist.get("ProgramArguments", ["relative"]),
                     plist.get("StandardOutPath", "relative"),
                     plist.get("StandardErrorPath", "relative"),
@@ -258,8 +278,7 @@ def doctor(paths: AgentPaths, *, offline: bool = False) -> list:
         mode = paths.plist.stat().st_mode & 0o777
         report("plist_mode", mode == 0o644, oct(mode))
     else:
-        for name in ("plist_lint", "plist_label", "plist_paths_absolute",
-                     "plist_mode"):
+        for name in ("plist_lint", "plist_label", "plist_paths_absolute", "plist_mode"):
             report(name, False, f"absent {paths.plist}")
 
     report(
@@ -274,12 +293,10 @@ def doctor(paths: AgentPaths, *, offline: bool = False) -> list:
     )
 
     # every owned artifact belongs to the invoking user
-    owned_artifacts = [paths.plist, paths.wrapper, paths.config,
-                       paths.runtime_root]
+    owned_artifacts = [paths.plist, paths.wrapper, paths.config, paths.runtime_root]
     present_artifacts = [path for path in owned_artifacts if path.exists()]
     uid = _current_uid()
-    foreign = [str(path) for path in present_artifacts
-               if path.stat().st_uid != uid]
+    foreign = [str(path) for path in present_artifacts if path.stat().st_uid != uid]
     report(
         "artifacts_owner",
         bool(present_artifacts) and not foreign,
@@ -289,12 +306,13 @@ def doctor(paths: AgentPaths, *, offline: bool = False) -> list:
     # runtime root private and writable
     if paths.runtime_root.is_dir():
         mode = paths.runtime_root.stat().st_mode & 0o777
-        report("runtime_root_private_writable",
-               mode == 0o700 and os.access(paths.runtime_root, os.W_OK),
-               oct(mode))
+        report(
+            "runtime_root_private_writable",
+            mode == 0o700 and os.access(paths.runtime_root, os.W_OK),
+            oct(mode),
+        )
     else:
-        report("runtime_root_private_writable", False,
-               f"absent {paths.runtime_root}")
+        report("runtime_root_private_writable", False, f"absent {paths.runtime_root}")
 
     # config: parse, commit, timestamps
     config = None
@@ -322,22 +340,26 @@ def doctor(paths: AgentPaths, *, offline: bool = False) -> list:
             )
         except (KeyError, ValueError, TypeError):
             timestamps_ok = False
-    report("start_end_timestamps", timestamps_ok,
-           f"start_at={None if config is None else config.get('start_at')} "
-           f"duration={None if config is None else config.get('duration_seconds')}")
+    report(
+        "start_end_timestamps",
+        timestamps_ok,
+        f"start_at={None if config is None else config.get('start_at')} "
+        f"duration={None if config is None else config.get('duration_seconds')}",
+    )
 
     # PASS markers verify against the pinned commit (hashes, not booleans)
     for check, marker_path, kind in (
         ("marker_full_suite", paths.full_suite_marker, "full-suite"),
-        ("marker_independent_review", paths.review_marker,
-         "pilot-acceptance"),
+        ("marker_independent_review", paths.review_marker, "pilot-acceptance"),
     ):
         if config is None or expected_commit is None:
             report(check, False, "config unavailable")
             continue
         try:
             verify_pass_marker(
-                marker_path, kind=kind, expected_commit=expected_commit,
+                marker_path,
+                kind=kind,
+                expected_commit=expected_commit,
             )
             report(check, True, str(marker_path))
         except MarkerError as error:
@@ -378,10 +400,13 @@ def doctor(paths: AgentPaths, *, offline: bool = False) -> list:
     else:
         status = subprocess.run(
             ["launchctl", "print", f"gui/{os.getuid()}/{AGENT_LABEL}"],
-            capture_output=True, text=True, check=False,
+            capture_output=True,
+            text=True,
+            check=False,
         )
         report(
-            "launchctl_status", status.returncode == 0,
+            "launchctl_status",
+            status.returncode == 0,
             "loaded" if status.returncode == 0 else "not loaded",
         )
     return checks
@@ -406,11 +431,13 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     actions = [args.dry_run, args.install, args.doctor, args.uninstall]
     if sum(actions) != 1:
-        print("exactly one of --dry-run/--install/--doctor/--uninstall",
-              file=sys.stderr)
+        print(
+            "exactly one of --dry-run/--install/--doctor/--uninstall", file=sys.stderr
+        )
         return 1
     paths = resolve_paths(
-        home=args.home, project_root=args.project_root,
+        home=args.home,
+        project_root=args.project_root,
     )
     if args.dry_run or args.install:
         expected_commit = args.expected_commit or _git_head(paths.project_root)
@@ -419,7 +446,9 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         try:
             results = install(
-                paths, expected_commit=expected_commit, dry_run=args.dry_run,
+                paths,
+                expected_commit=expected_commit,
+                dry_run=args.dry_run,
             )
         except ValueError as error:
             print(str(error), file=sys.stderr)
@@ -440,9 +469,7 @@ def main(argv: list[str] | None = None) -> int:
     checks = doctor(paths, offline=args.offline)
     for entry in checks:
         print(f"{entry['status']:>7}  {entry['check']}  {entry['detail']}")
-    return 0 if all(
-        entry["status"] in ("ok", "skipped") for entry in checks
-    ) else 1
+    return 0 if all(entry["status"] in ("ok", "skipped") for entry in checks) else 1
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -2,10 +2,10 @@
 """Run exactly five bounded pilot invocations; ordinary success is silent."""
 
 import argparse
-from pathlib import Path
 import json
 import sys
 import time
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -13,7 +13,8 @@ for bootstrap in (ROOT, SRC):
     if str(bootstrap) not in sys.path:
         sys.path.insert(0, str(bootstrap))
 
-from tools.opendart_bulk import main as bulk_main, failure_details
+from tools.opendart_bulk import failure_details
+from tools.opendart_bulk import main as bulk_main
 
 
 def run_five_polls(*, call, monotonic=time.monotonic, sleep=time.sleep):
@@ -36,16 +37,23 @@ def main(argv=None):
     args = parser.parse_args(argv)
     completed = 0
     details = {}
+
     def call():
         nonlocal completed
-        code = bulk_main(["pilot-tick", "--home", str(args.home)],
-                         emit=lambda value: details.update(failure_details(value)))
+        code = bulk_main(
+            ["pilot-tick", "--home", str(args.home)],
+            emit=lambda value: details.update(failure_details(value)),
+        )
         if code == 0:
             completed += 1
         return code
+
     code = run_five_polls(call=call)
-    summary = {"status": "complete", "polls": completed} if code == 0 else {
-        "status": "failed", "completed_polls": completed, **details}
+    summary = (
+        {"status": "complete", "polls": completed}
+        if code == 0
+        else {"status": "failed", "completed_polls": completed, **details}
+    )
     print(json.dumps(summary, sort_keys=True, separators=(",", ":")))
     return code
 

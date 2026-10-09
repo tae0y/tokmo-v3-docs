@@ -1,9 +1,9 @@
 """Pure authority, execution and rendering seams for Quant market close."""
 
-from dataclasses import dataclass
-from datetime import date, datetime, timezone
 import json
-from typing import Callable, Mapping
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from datetime import UTC, date, datetime
 
 from tokmo.values.ops_kernel import AlertOutboxV1, ProducerRole
 from tokmo.values.quant_recurring import QuantCloseMarketV1, QuantDueIdentityV1
@@ -18,12 +18,17 @@ class OfficialCloseEvidenceV1:
     source_identity: str
 
     def __post_init__(self):
-        if self.market not in {"KR", "US"} or self.verdict not in {"regular", "no_regular"}:
+        if self.market not in {"KR", "US"} or self.verdict not in {
+            "regular",
+            "no_regular",
+        }:
             raise ValueError("authority")
         if self.verdict == "regular":
-            if (not isinstance(self.official_close_utc, datetime)
-                    or self.official_close_utc.tzinfo is None
-                    or self.official_close_utc.utcoffset() is None):
+            if (
+                not isinstance(self.official_close_utc, datetime)
+                or self.official_close_utc.tzinfo is None
+                or self.official_close_utc.utcoffset() is None
+            ):
                 raise ValueError("official_close")
         elif self.official_close_utc is not None:
             raise ValueError("holiday_close")
@@ -38,13 +43,14 @@ class DueResolutionV1:
     evidence: OfficialCloseEvidenceV1 | None
 
 
-def resolve_due(observed_now_utc: datetime,
-                evidence: OfficialCloseEvidenceV1 | None) -> DueResolutionV1:
+def resolve_due(
+    observed_now_utc: datetime, evidence: OfficialCloseEvidenceV1 | None
+) -> DueResolutionV1:
     if observed_now_utc.tzinfo is None or observed_now_utc.utcoffset() is None:
         raise ValueError("observed_now_utc")
     if evidence is None or evidence.verdict != "regular":
         return DueResolutionV1("CALENDAR_AUTHORITY_UNAVAILABLE", None)
-    if observed_now_utc.astimezone(timezone.utc) < evidence.official_close_utc.astimezone(timezone.utc):
+    if observed_now_utc.astimezone(UTC) < evidence.official_close_utc.astimezone(UTC):
         return DueResolutionV1("BEFORE_CLOSE", evidence)
     return DueResolutionV1("DUE", evidence)
 
@@ -56,8 +62,15 @@ def completed_candles_ready(session_date: date, candle_dates) -> bool:
 
 
 def render_quant_market_close_alert(result: dict) -> tuple[str, ...]:
-    exact = {"market", "completed_session_date", "universe_revision",
-             "quant_policy_version", "ranked", "limitations", "official_close_source"}
+    exact = {
+        "market",
+        "completed_session_date",
+        "universe_revision",
+        "quant_policy_version",
+        "ranked",
+        "limitations",
+        "official_close_source",
+    }
     if type(result) is not dict or set(result) != exact:
         raise ValueError("result_shape")
     ranked = tuple(sorted(str(value) for value in result["ranked"]))
@@ -71,8 +84,10 @@ def render_quant_market_close_alert(result: dict) -> tuple[str, ...]:
     )
     encoded = "\n".join(lines).encode("utf-8")
     lowered = encoded.lower()
-    if len(encoded) > 4096 or any(marker in lowered for marker in
-            (b"credential", b"/users/", b"account", b"private_holding")):
+    if len(encoded) > 4096 or any(
+        marker in lowered
+        for marker in (b"credential", b"/users/", b"account", b"private_holding")
+    ):
         raise ValueError("render_privacy")
     return lines
 
@@ -84,6 +99,7 @@ def canonical_result_json(result: dict) -> str:
 @dataclass
 class QuantMarketCloseRunnerDepsV1:
     """Narrow fixture-injectable composition; construction has no effects."""
+
     activation_reader: Callable
     authority_reader: Callable
     receipt_store: object
@@ -122,8 +138,10 @@ def _bind_terminal(identity, row, deps, observed_now_utc):
     result = json.loads(row.result_json)
     lines = render_quant_market_close_alert(result)
     outbox = AlertOutboxV1.for_quant_market_close(
-        alert_id=row.outbox_id, tick_id=deps.tick_id,
-        subject_id=identity.identity_digest, body_evidence=lines,
+        alert_id=row.outbox_id,
+        tick_id=deps.tick_id,
+        subject_id=identity.identity_digest,
+        body_evidence=lines,
         created_at=observed_now_utc,
     )
     deps.kernel_store.record_quant_market_close_outbox(ProducerRole.ANALYSIS, outbox)
@@ -132,18 +150,21 @@ def _bind_terminal(identity, row, deps, observed_now_utc):
     _crash(deps, "BINDING")
 
 
-def run_quant_market_close(observed_now_utc: datetime,
-                           deps: QuantMarketCloseRunnerDepsV1):
+def run_quant_market_close(
+    observed_now_utc: datetime, deps: QuantMarketCloseRunnerDepsV1
+):
     """Run independent KR/US market-close lanes with no internal retry."""
     modes = deps.activation_reader(observed_now_utc)
     outcomes = []
     for market in ("KR", "US"):
         if modes.get(market, "OFF") == "OFF":
-            outcomes.append((market, "OFF")); continue
+            outcomes.append((market, "OFF"))
+            continue
         evidence = deps.authority_reader(market, observed_now_utc)
         due = resolve_due(observed_now_utc, evidence)
         if due.decision != "DUE":
-            outcomes.append((market, due.decision)); continue
+            outcomes.append((market, due.decision))
+            continue
         identity = QuantDueIdentityV1(
             market=QuantCloseMarketV1(market),
             completed_session_date=evidence.session_date,
@@ -151,22 +172,32 @@ def run_quant_market_close(observed_now_utc: datetime,
             quant_policy_version=deps.quant_policy_version,
         )
         row = deps.receipt_store.read(identity)
-        if row is not None and row.state in {"RUNNING", "SUCCEEDED", "NO_PACK", "FAILED", "UNKNOWN"}:
+        if row is not None and row.state in {
+            "RUNNING",
+            "SUCCEEDED",
+            "NO_PACK",
+            "FAILED",
+            "UNKNOWN",
+        }:
             if row.state != "RUNNING":
                 _bind_terminal(identity, row, deps, observed_now_utc)
-            outcomes.append((market, row.state)); continue
+            outcomes.append((market, row.state))
+            continue
         deps.receipt_store.ensure_pending(identity, state="PENDING_LEASE")
         lease = deps.operation_lease(("HOLDINGS", "STOCK_CANDLES_DAILY"))
         if lease is None:
-            outcomes.append((market, "PENDING_LEASE")); continue
+            outcomes.append((market, "PENDING_LEASE"))
+            continue
         try:
             candle_dates = deps.candle_reader(identity)
             if not completed_candles_ready(evidence.session_date, candle_dates):
                 deps.receipt_store.set_pending(identity, state="PENDING_CANDLES")
-                outcomes.append((market, "PENDING_CANDLES")); continue
+                outcomes.append((market, "PENDING_CANDLES"))
+                continue
             if not deps.receipt_store.claim(identity, invocation_id=deps.invocation_id):
                 row = deps.receipt_store.read(identity)
-                outcomes.append((market, row.state)); continue
+                outcomes.append((market, row.state))
+                continue
             _crash(deps, "RUNNING")
             try:
                 core = deps.core_callable(identity, candle_dates)
@@ -174,15 +205,26 @@ def run_quant_market_close(observed_now_utc: datetime,
                 core = core or {"ranked": [], "limitations": ["no_pack"]}
                 result = _result(identity, evidence, core)
             except Exception as error:
-                deps.receipt_store.finish(identity, state="FAILED",
-                    result_json=canonical_result_json({"failure": type(error).__name__}))
-                outcomes.append((market, "FAILED")); continue
+                deps.receipt_store.finish(
+                    identity,
+                    state="FAILED",
+                    result_json=canonical_result_json(
+                        {"failure": type(error).__name__}
+                    ),
+                )
+                outcomes.append((market, "FAILED"))
+                continue
             outbox_id = "qmc:" + identity.identity_digest
-            deps.receipt_store.finish(identity, state=terminal,
-                result_json=canonical_result_json(result), outbox_id=outbox_id)
+            deps.receipt_store.finish(
+                identity,
+                state=terminal,
+                result_json=canonical_result_json(result),
+                outbox_id=outbox_id,
+            )
             _crash(deps, "TERMINAL")
-            _bind_terminal(identity, deps.receipt_store.read(identity), deps,
-                           observed_now_utc)
+            _bind_terminal(
+                identity, deps.receipt_store.read(identity), deps, observed_now_utc
+            )
             outcomes.append((market, terminal))
         finally:
             lease.close()

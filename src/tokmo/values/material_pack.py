@@ -1,14 +1,14 @@
 """Closed canonical JSON codec and immutable operations material packs."""
 
-from dataclasses import dataclass
-from datetime import date, datetime, timezone
-from decimal import Decimal, InvalidOperation
-from enum import Enum
 import hashlib
 import json
 import re
+from collections.abc import Mapping
+from dataclasses import dataclass
+from datetime import UTC, date, datetime
+from decimal import Decimal, InvalidOperation
+from enum import Enum
 from types import MappingProxyType
-from typing import Mapping
 
 from tokmo.values import canonical_decimal
 
@@ -24,7 +24,7 @@ COMPOSITE_HOLDINGS_PARSER_VERSION = "composite-holdings-v2"
 HOLDINGS_PAYLOAD_VERSION = 2
 
 # N1: import scope patterns from leaf for v2 validator.
-from tokmo.values.account_scope_patterns import (  # noqa: E402
+from tokmo.values.account_scope_patterns import (
     ACCOUNT_SCOPE_RE,
     PENSION_SCOPE_RE,
 )
@@ -50,7 +50,7 @@ def _normalize(value, depth=0):
     if isinstance(value, datetime):
         if value.tzinfo is None or value.utcoffset() is None:
             raise ValueError("datetime must be timezone-aware")
-        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
     if type(value) in (list, tuple):
         if len(value) > CANONICAL_MAX_LIST_COUNT:
             raise ValueError("maximum list count exceeded")
@@ -68,7 +68,10 @@ def _normalize(value, depth=0):
 
 def canonical_encode(obj) -> bytes:
     return json.dumps(
-        _normalize(obj), sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        _normalize(obj),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
     ).encode("utf-8")
 
 
@@ -113,7 +116,9 @@ def canonical_decode(raw: bytes, max_bytes: int):
             raw.decode("utf-8"),
             object_pairs_hook=_reject_duplicates,
             parse_constant=_reject_constant,
-            parse_float=lambda _value: (_ for _ in ()).throw(ValueError("float not allowed")),
+            parse_float=lambda _value: (_ for _ in ()).throw(
+                ValueError("float not allowed")
+            ),
         )
     except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
         raise ValueError("invalid canonical JSON") from error
@@ -171,14 +176,28 @@ def _validate_holdings_payload(payload):
 def _validate_holdings_v1(payload):
     """Existing v1 validation: exact keys, per-account, per-holding."""
     _require_exact_dict(payload, {"accounts", "global_inventory"}, "holdings payload")
-    if type(payload["global_inventory"]) is not bool or type(payload["accounts"]) is not list:
+    if (
+        type(payload["global_inventory"]) is not bool
+        or type(payload["accounts"]) is not list
+    ):
         raise ValueError("invalid holdings payload")
     account_keys = {"account_scope", "account_type_label", "ordinal", "holdings"}
-    holding_keys = {"symbol", "quantity", "avg_price", "currency", "market_raw", "market_field"}
+    holding_keys = {
+        "symbol",
+        "quantity",
+        "avg_price",
+        "currency",
+        "market_raw",
+        "market_field",
+    }
     for account in payload["accounts"]:
         _require_exact_dict(account, account_keys, "holdings account")
-        if not (type(account["account_scope"]) is str and type(account["account_type_label"]) is str
-                and type(account["ordinal"]) is int and type(account["holdings"]) is list):
+        if not (
+            type(account["account_scope"]) is str
+            and type(account["account_type_label"]) is str
+            and type(account["ordinal"]) is int
+            and type(account["holdings"]) is list
+        ):
             raise ValueError("invalid holdings account")
         for holding in account["holdings"]:
             _require_exact_dict(holding, holding_keys, "holding")
@@ -196,21 +215,35 @@ def _validate_holdings_generation_r2(payload):
     cross-checks account-level pension fields against pension_provenance,
     and enforces exactly-one PENSION_EXCEL account.
     """
-    _require_exact_dict(payload, {
-        "accounts", "global_inventory", "payload_version",
-        "pension_provenance",
-    }, "holdings generation r2 payload")
+    _require_exact_dict(
+        payload,
+        {
+            "accounts",
+            "global_inventory",
+            "payload_version",
+            "pension_provenance",
+        },
+        "holdings generation r2 payload",
+    )
     if payload["payload_version"] != 2:
         raise ValueError("generation r2 payload_version must be 2")
     if type(payload["global_inventory"]) is not bool:
         raise ValueError("invalid global_inventory")
 
     pp = payload["pension_provenance"]
-    _require_exact_dict(pp, {
-        "revision_id", "source_content_sha256", "semantic_digest",
-        "source_as_of", "source_age_days", "freshness_class",
-        "parser_version",
-    }, "pension_provenance")
+    _require_exact_dict(
+        pp,
+        {
+            "revision_id",
+            "source_content_sha256",
+            "semantic_digest",
+            "source_as_of",
+            "source_age_days",
+            "freshness_class",
+            "parser_version",
+        },
+        "pension_provenance",
+    )
     # M9: type-guard provenance fields before len()/fullmatch.
     if not isinstance(pp["revision_id"], str):
         raise ValueError("invalid pension revision_id")
@@ -218,8 +251,9 @@ def _validate_holdings_generation_r2(payload):
         raise ValueError("invalid pension source_content_sha256")
     if not isinstance(pp["semantic_digest"], str):
         raise ValueError("invalid pension semantic_digest")
-    if (len(pp["revision_id"]) != 32
-            or not all(c in "0123456789abcdef" for c in pp["revision_id"])):
+    if len(pp["revision_id"]) != 32 or not all(
+        c in "0123456789abcdef" for c in pp["revision_id"]
+    ):
         raise ValueError("invalid pension revision_id")
     if len(pp["source_content_sha256"]) != 64:
         raise ValueError("invalid pension source_content_sha256")
@@ -228,24 +262,36 @@ def _validate_holdings_generation_r2(payload):
     _aware_string(pp["source_as_of"], "pension source_as_of")
     if type(pp["source_age_days"]) is not int or pp["source_age_days"] < 0:
         raise ValueError("invalid pension source_age_days")
-    if pp["freshness_class"] not in (
-            "CURRENT_MANUAL_SOURCE", "AGED_MANUAL_SOURCE"):
+    if pp["freshness_class"] not in ("CURRENT_MANUAL_SOURCE", "AGED_MANUAL_SOURCE"):
         raise ValueError("invalid pension freshness_class")
     if pp["parser_version"] != "pension-excel-v1":
         raise ValueError("invalid pension parser_version")
 
-    holding_keys = {"symbol", "quantity", "avg_price", "currency",
-                    "market_raw", "market_field"}
+    holding_keys = {
+        "symbol",
+        "quantity",
+        "avg_price",
+        "currency",
+        "market_raw",
+        "market_field",
+    }
     pension_excel_count = 0
     for account in payload["accounts"]:
-        base_keys = {"account_scope", "account_type_label", "ordinal",
-                     "holdings", "source_provenance"}
+        base_keys = {
+            "account_scope",
+            "account_type_label",
+            "ordinal",
+            "holdings",
+            "source_provenance",
+        }
         prov = account.get("source_provenance")
         if prov == "PENSION_EXCEL":
             pension_excel_count += 1
             keys = base_keys | {
-                "pension_revision_id", "pension_source_as_of",
-                "pension_source_age_days", "pension_freshness_class",
+                "pension_revision_id",
+                "pension_source_as_of",
+                "pension_source_age_days",
+                "pension_freshness_class",
                 "pension_semantic_digest",
             }
         elif prov == "TOSS_PERSONAL":
@@ -255,10 +301,12 @@ def _validate_holdings_generation_r2(payload):
         _require_exact_dict(account, keys, "holdings generation r2 account")
 
         # M9: v1-equivalent account-level type checks.
-        if not (type(account["account_scope"]) is str
-                and type(account["account_type_label"]) is str
-                and type(account["ordinal"]) is int
-                and type(account["holdings"]) is list):
+        if not (
+            type(account["account_scope"]) is str
+            and type(account["account_type_label"]) is str
+            and type(account["ordinal"]) is int
+            and type(account["holdings"]) is list
+        ):
             raise ValueError("invalid holdings account")
 
         if prov == "TOSS_PERSONAL":
@@ -271,8 +319,7 @@ def _validate_holdings_generation_r2(payload):
                 raise ValueError("pension revision_id mismatch")
             if account["pension_freshness_class"] != pp["freshness_class"]:
                 raise ValueError("pension freshness_class mismatch")
-            if (account["pension_semantic_digest"]
-                    != pp["semantic_digest"]):
+            if account["pension_semantic_digest"] != pp["semantic_digest"]:
                 raise ValueError("pension semantic_digest mismatch")
 
         for holding in account["holdings"]:
@@ -284,8 +331,7 @@ def _validate_holdings_generation_r2(payload):
                 _string(holding[key], key, nullable=True)
 
     if pension_excel_count != 1:
-        raise ValueError(
-            "generation r2 payload must have exactly one PENSION_EXCEL")
+        raise ValueError("generation r2 payload must have exactly one PENSION_EXCEL")
 
 
 def _validate_payload(job: JobKind, payload: Mapping[str, object]) -> None:
@@ -298,7 +344,14 @@ def _validate_payload(job: JobKind, payload: Mapping[str, object]) -> None:
         markets = payload["markets"]
         if type(markets) is not dict or not set(markets) <= {"KR", "US"}:
             raise ValueError("invalid quote markets")
-        quote_keys = {"symbol", "last_price", "currency_raw", "provider_timestamp", "fetched_at", "stored_at"}
+        quote_keys = {
+            "symbol",
+            "last_price",
+            "currency_raw",
+            "provider_timestamp",
+            "fetched_at",
+            "stored_at",
+        }
         for rows in markets.values():
             if type(rows) is not list:
                 raise ValueError("quote market must be a list")
@@ -324,14 +377,33 @@ def _validate_payload(job: JobKind, payload: Mapping[str, object]) -> None:
                 _aware_string(row["stored_at"], "stored_at")
             canonical_encode(payload)
             return
-        _require_exact_dict(payload, {"accounts", "pagination_pending"}, "trades payload")
-        if type(payload["accounts"]) is not list or type(payload["pagination_pending"]) is not bool:
+        _require_exact_dict(
+            payload, {"accounts", "pagination_pending"}, "trades payload"
+        )
+        if (
+            type(payload["accounts"]) is not list
+            or type(payload["pagination_pending"]) is not bool
+        ):
             raise ValueError("invalid trades payload")
-        account_keys = {"account_scope", "inserted", "duplicates", "quarantine", "incomplete"}
+        account_keys = {
+            "account_scope",
+            "inserted",
+            "duplicates",
+            "quarantine",
+            "incomplete",
+        }
         inserted_keys = {
-            "source_record_key", "trade_date", "transaction_type_raw", "instrument_raw",
-            "quantity", "unit_price", "amount", "medium_raw", "currency_raw",
-            "classified_market", "filled_at",
+            "source_record_key",
+            "trade_date",
+            "transaction_type_raw",
+            "instrument_raw",
+            "quantity",
+            "unit_price",
+            "amount",
+            "medium_raw",
+            "currency_raw",
+            "classified_market",
+            "filled_at",
         }
         for account in payload["accounts"]:
             _require_exact_dict(account, account_keys, "trades account")
@@ -345,12 +417,19 @@ def _validate_payload(job: JobKind, payload: Mapping[str, object]) -> None:
             for row in account["inserted"]:
                 _require_exact_dict(row, inserted_keys, "inserted trade")
                 for key in (
-                    "source_record_key", "trade_date", "transaction_type_raw",
-                    "instrument_raw", "medium_raw", "classified_market",
+                    "source_record_key",
+                    "trade_date",
+                    "transaction_type_raw",
+                    "instrument_raw",
+                    "medium_raw",
+                    "classified_market",
                 ):
                     _string(row[key], key)
                 try:
-                    if date.fromisoformat(row["trade_date"]).isoformat() != row["trade_date"]:
+                    if (
+                        date.fromisoformat(row["trade_date"]).isoformat()
+                        != row["trade_date"]
+                    ):
                         raise ValueError("trade_date must be ISO date")
                 except ValueError as error:
                     raise ValueError("trade_date must be ISO date") from error
@@ -380,17 +459,26 @@ class MaterialPackV1:
     mask_digest: str | None = None
 
     def __post_init__(self):
-        if type(self.schema_version) is not int or self.schema_version != MATERIAL_PACK_SCHEMA_VERSION:
+        if (
+            type(self.schema_version) is not int
+            or self.schema_version != MATERIAL_PACK_SCHEMA_VERSION
+        ):
             raise ValueError("unsupported material pack schema")
         if type(self.tick_id) is not int or self.tick_id < 0:
             raise ValueError("tick_id must be a non-negative int")
         if not isinstance(self.job, JobKind):
             raise ValueError("invalid job")
-        if type(self.market_partition) is not tuple or any(type(x) is not str for x in self.market_partition):
+        if type(self.market_partition) is not tuple or any(
+            type(x) is not str for x in self.market_partition
+        ):
             raise ValueError("invalid market_partition")
         if self.captured_at.tzinfo is None or self.captured_at.utcoffset() is None:
             raise ValueError("captured_at must be aware")
-        if type(self.source_timestamps) is not dict or set(self.source_timestamps) != {"provider", "fetched", "stored"}:
+        if type(self.source_timestamps) is not dict or set(self.source_timestamps) != {
+            "provider",
+            "fetched",
+            "stored",
+        }:
             raise ValueError("invalid source_timestamps")
         for value in self.source_timestamps.values():
             _aware_string(value, "source timestamp", nullable=True)
@@ -398,8 +486,9 @@ class MaterialPackV1:
             raise ValueError("invalid parser_version")
         _validate_payload(self.job, self.payload)
         if self.mask_digest is not None and (
-                type(self.mask_digest) is not str
-                or not _HASH_RE.fullmatch(self.mask_digest)):
+            type(self.mask_digest) is not str
+            or not _HASH_RE.fullmatch(self.mask_digest)
+        ):
             raise ValueError("invalid mask_digest")
         if not _HASH_RE.fullmatch(self.content_hash):
             raise ValueError("invalid content_hash")

@@ -29,13 +29,14 @@ wait or no-op; exactly one concise Korean line on a terminal transition
 bytes). A single non-blocking flock guarantees one instance; nothing
 here schedules anything.
 """
+
 import argparse
 import fcntl
 import json
 import os
 import sqlite3
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from tokmo.programs.news_alert_delivery import live_delivery_authorized
@@ -66,14 +67,34 @@ RESERVED_STALE_SECONDS = 1800
 # admission/renderer owns semantic quality; this only refuses the known
 # degenerate shapes at the final promotion judgment).
 MIN_BODY_CHARS = 20
-_ROUTING_MARKERS = ("NEWS_EVENT", "NEWS_OPS", "alert_id", "dedupe_key",
-                    "body_evidence", "provider_message_id", "PENDING",
-                    "ATTEMPTING", "UNRESOLVED")
+_ROUTING_MARKERS = (
+    "NEWS_EVENT",
+    "NEWS_OPS",
+    "alert_id",
+    "dedupe_key",
+    "body_evidence",
+    "provider_message_id",
+    "PENDING",
+    "ATTEMPTING",
+    "UNRESOLVED",
+)
 # Renderer/digest boilerplate vocabulary: stripped before asking whether
 # any substantive content token remains (counts drop out in tokenization).
-_BOILERPLATE_FRAGMENTS = ("뉴스 동향", "긴급 NEWS", "포트폴리오 직접 관련",
-                          "전체 뉴스 빈도에서 발견", "사건", "근거", "기사",
-                          "출처", "판정", "대상", "알림", "속보", "업데이트")
+_BOILERPLATE_FRAGMENTS = (
+    "뉴스 동향",
+    "긴급 NEWS",
+    "포트폴리오 직접 관련",
+    "전체 뉴스 빈도에서 발견",
+    "사건",
+    "근거",
+    "기사",
+    "출처",
+    "판정",
+    "대상",
+    "알림",
+    "속보",
+    "업데이트",
+)
 
 _WAIT = {"action": "wait", "line": None, "exit_code": 0}
 _PROOF_WAIT_MARKER = "fewer than two completed pulse slots"
@@ -84,8 +105,8 @@ def _read_only_rows(path, query, parameters=()):
         return None
     try:
         connection = sqlite3.connect(
-            f"{Path(path).resolve().as_uri()}?mode=ro", uri=True,
-            timeout=0.25)
+            f"{Path(path).resolve().as_uri()}?mode=ro", uri=True, timeout=0.25
+        )
     except sqlite3.Error:
         return None
     try:
@@ -110,22 +131,32 @@ class _ReadOnlyProofLedger:
         return self._one(
             "SELECT activation_id,ops_alert_id,reserved_at,outcome,"
             "settled_at FROM canary_attempts WHERE activation_id=?",
-            ("activation_id", "ops_alert_id", "reserved_at", "outcome",
-             "settled_at"), (activation_id,))
+            ("activation_id", "ops_alert_id", "reserved_at", "outcome", "settled_at"),
+            (activation_id,),
+        )
 
     def canary_slot_proof(self, activation_id):
         return self._one(
             "SELECT activation_id,settled_outcome,slots_json,"
             "transport_starts,recorded_at FROM canary_slot_proofs"
             " WHERE activation_id=?",
-            ("activation_id", "settled_outcome", "slots_json",
-             "transport_starts", "recorded_at"), (activation_id,))
+            (
+                "activation_id",
+                "settled_outcome",
+                "slots_json",
+                "transport_starts",
+                "recorded_at",
+            ),
+            (activation_id,),
+        )
 
     def live_trip(self, activation_id):
         return self._one(
             "SELECT activation_id,reason,tripped_at FROM live_delivery_trips"
             " WHERE activation_id=?",
-            ("activation_id", "reason", "tripped_at"), (activation_id,))
+            ("activation_id", "reason", "tripped_at"),
+            (activation_id,),
+        )
 
 
 # ------------------------------------------------------- body denylist
@@ -133,9 +164,9 @@ class _ReadOnlyProofLedger:
 
 def _heading_subject(heading):
     if heading.startswith("🚨 긴급 NEWS · "):
-        return heading[len("🚨 긴급 NEWS · "):].strip()
+        return heading[len("🚨 긴급 NEWS · ") :].strip()
     if heading.startswith("📰 ") and heading.endswith(" 뉴스 동향"):
-        return heading[len("📰 "):-len(" 뉴스 동향")].strip()
+        return heading[len("📰 ") : -len(" 뉴스 동향")].strip()
     return None
 
 
@@ -203,10 +234,11 @@ def _rewrite_gate(root, payload, now):
     Returns the prior bytes so a failed readback can restore them."""
     gate = Path(root) / GATE_NAME
     original = gate.read_bytes()
-    stamp = now.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = now.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
     _atomic_write_bytes(gate.parent / f"{GATE_NAME}.bak-{stamp}", original)
-    data = json.dumps(payload, ensure_ascii=False, sort_keys=True,
-                      indent=1).encode("utf-8")
+    data = json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=1).encode(
+        "utf-8"
+    )
     if len(data) > NEWS_GATE_MAX_BYTES:
         raise ValueError("gate payload exceeds the parser byte bound")
     _atomic_write_bytes(gate, data)
@@ -218,18 +250,20 @@ def _off_payload(root, reason, now):
     preserved, ``enabled`` drops to false and delivery to OFF, and the
     terminal reason/instant are recorded in place."""
     payload = json.loads((Path(root) / GATE_NAME).read_text("utf-8"))
-    payload.update({
-        "enabled": False,
-        "delivery_mode": "OFF",
-        "off_reason": reason,
-        "off_at": now.astimezone(timezone.utc).isoformat(),
-        "off_by": CONTROLLER_ID,
-    })
+    payload.update(
+        {
+            "enabled": False,
+            "delivery_mode": "OFF",
+            "off_reason": reason,
+            "off_at": now.astimezone(UTC).isoformat(),
+            "off_by": CONTROLLER_ID,
+        }
+    )
     return payload
 
 
 def _live_gate_payload(canary_id, now):
-    cutoff = now.astimezone(timezone.utc)
+    cutoff = now.astimezone(UTC)
     live_id = f"news-live-{cutoff:%Y%m%dT%H%M%SZ}-auto"
     window_end = cutoff + timedelta(seconds=NEWS_LIVE_WINDOW_MAX_SECONDS)
     return live_id, {
@@ -251,9 +285,12 @@ def _live_gate_payload(canary_id, now):
 
 def _fail_closed_off(root, canary_id, reason, now):
     _rewrite_gate(root, _off_payload(root, reason, now), now)
-    return {"action": "off", "reason": reason,
-            "line": f"⛔ NEWS 카나리 자동 OFF: {reason} · {canary_id}",
-            "exit_code": 0}
+    return {
+        "action": "off",
+        "reason": reason,
+        "line": f"⛔ NEWS 카나리 자동 OFF: {reason} · {canary_id}",
+        "exit_code": 0,
+    }
 
 
 def _inspect_sent_receipt(root, attempt, cutoff):
@@ -265,13 +302,23 @@ def _inspect_sent_receipt(root, attempt, cutoff):
         Path(root) / "ops" / "ops_kernel.sqlite3",
         "SELECT channel,origin,status,created_at,attempted_at,delivered_at,"
         "provider_message_id,body_evidence_json FROM alert_outbox"
-        " WHERE alert_id=?", (attempt["ops_alert_id"],))
+        " WHERE alert_id=?",
+        (attempt["ops_alert_id"],),
+    )
     if rows is None:
         return "WAIT"
     if not rows:
         return "canary_outbox_row_missing"
-    (channel, origin, status, created_at, attempted_at, delivered_at,
-     provider_message_id, body_json) = rows[0]
+    (
+        channel,
+        origin,
+        status,
+        created_at,
+        attempted_at,
+        delivered_at,
+        provider_message_id,
+        body_json,
+    ) = rows[0]
     if channel != "TELEGRAM":
         return "canary_outbox_channel_mismatch"
     if origin != "NEWS_EVENT":
@@ -301,26 +348,36 @@ def _promote(root, canary_id, now):
     original = _rewrite_gate(root, payload, now)
     try:
         delivery = read_news_gate(root).delivery
-        ledger = _ReadOnlyProofLedger(
-            Path(root) / "stores" / "news_episodes.sqlite3")
+        ledger = _ReadOnlyProofLedger(Path(root) / "stores" / "news_episodes.sqlite3")
         authorized, off_reason = live_delivery_authorized(ledger, delivery, now)
     except Exception:
         _atomic_write_bytes(Path(root) / GATE_NAME, original)
         raise
-    if not (delivery.mode == "TELEGRAM_LIVE"
-            and delivery.activation_id == live_id
-            and delivery.predecessor_activation_id == canary_id
-            and authorized):
+    if not (
+        delivery.mode == "TELEGRAM_LIVE"
+        and delivery.activation_id == live_id
+        and delivery.predecessor_activation_id == canary_id
+        and authorized
+    ):
         detail = off_reason or f"gate_mode_{delivery.mode}"
         _atomic_write_bytes(Path(root) / GATE_NAME, original)
-        return {"action": "broken", "reason": detail,
-                "line": ("❗ NEWS 카나리 승격 검증 실패"
-                         f"({detail}) · 이전 게이트 복원 완료"),
-                "exit_code": 1}
-    return {"action": "promoted", "reason": None,
-            "line": (f"✅ NEWS 카나리 승격: {canary_id} → TELEGRAM_LIVE"
-                     f" {live_id} · 라이브 종료 {payload['window_end']}"),
-            "exit_code": 0}
+        return {
+            "action": "broken",
+            "reason": detail,
+            "line": (
+                f"❗ NEWS 카나리 승격 검증 실패({detail}) · 이전 게이트 복원 완료"
+            ),
+            "exit_code": 1,
+        }
+    return {
+        "action": "promoted",
+        "reason": None,
+        "line": (
+            f"✅ NEWS 카나리 승격: {canary_id} → TELEGRAM_LIVE"
+            f" {live_id} · 라이브 종료 {payload['window_end']}"
+        ),
+        "exit_code": 0,
+    }
 
 
 def run_canary_promotion(root, *, now):
@@ -337,25 +394,26 @@ def run_canary_promotion(root, *, now):
     if attempt is None:
         if now < window_end:
             return _WAIT
-        return _fail_closed_off(root, canary_id,
-                                "canary_expired_no_eligible_event", now)
+        return _fail_closed_off(
+            root, canary_id, "canary_expired_no_eligible_event", now
+        )
     outcome = attempt["outcome"]
     if outcome in ("FAILED", "UNKNOWN"):
-        return _fail_closed_off(root, canary_id,
-                                f"canary_attempt_{outcome.lower()}", now)
+        return _fail_closed_off(
+            root, canary_id, f"canary_attempt_{outcome.lower()}", now
+        )
     if outcome == "RESERVED":
         try:
             reserved_at = datetime.fromisoformat(attempt["reserved_at"])
             if reserved_at.tzinfo is None:
                 raise ValueError("naive reserved_at")
         except (TypeError, ValueError):
-            return _fail_closed_off(root, canary_id,
-                                    "canary_attempt_reserved_unparseable",
-                                    now)
+            return _fail_closed_off(
+                root, canary_id, "canary_attempt_reserved_unparseable", now
+            )
         if now - reserved_at < timedelta(seconds=RESERVED_STALE_SECONDS):
             return _WAIT
-        return _fail_closed_off(root, canary_id,
-                                "canary_attempt_reserved_stale", now)
+        return _fail_closed_off(root, canary_id, "canary_attempt_reserved_stale", now)
     # outcome == SENT: last-mile receipt/body judgment before the proof
     rejection = _inspect_sent_receipt(root, attempt, cutoff)
     if rejection == "WAIT":
@@ -363,8 +421,7 @@ def run_canary_promotion(root, *, now):
     if rejection is not None:
         return _fail_closed_off(root, canary_id, rejection, now)
     try:
-        record_canary_duplicate_proof(root=root, activation_id=canary_id,
-                                      now=now)
+        record_canary_duplicate_proof(root=root, activation_id=canary_id, now=now)
     except NewsLiveControlError as error:
         if _PROOF_WAIT_MARKER in str(error):
             return _WAIT  # two post-settle slots not yet observed
@@ -388,15 +445,14 @@ def _acquire_lock(root):
 
 def main(argv=None, *, now_provider=None):
     parser = argparse.ArgumentParser(
-        description="Deterministic NEWS canary auto-promotion watchdog.")
+        description="Deterministic NEWS canary auto-promotion watchdog."
+    )
     parser.add_argument("--root", required=True)
-    parser.add_argument(
-        "--now", help="aware ISO-8601 judgment instant")
+    parser.add_argument("--now", help="aware ISO-8601 judgment instant")
     arguments = parser.parse_args(argv)
     if arguments.now is not None:
         try:
-            now = datetime.fromisoformat(
-                arguments.now.replace("Z", "+00:00"))
+            now = datetime.fromisoformat(arguments.now.replace("Z", "+00:00"))
         except ValueError:
             parser.error("--now must be ISO-8601")
     elif now_provider is not None:

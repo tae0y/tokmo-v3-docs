@@ -12,7 +12,7 @@ not filing fy.
 
 import hashlib
 import json
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -24,9 +24,8 @@ from tokmo.facts.sec_fundamentals import (
     COMPANYFACTS_PATH,
     COMPANYFACTS_REQUEST_TIMEOUT_SECONDS,
     MAX_COMPANYFACTS_BODY_BYTES,
-    SECCompanyFactsRequest,
-    SECCompanyFactsResult,
     TAXONOMY_VERSION,
+    SECCompanyFactsResult,
     build_companyfacts_request,
     parse_companyfacts_response,
 )
@@ -34,12 +33,9 @@ from tokmo.values.fundamental_materials import (
     DATE_ONLY_POLICY_VERSION,
     DATE_ONLY_SESSION_HISTORY_SOURCE,
     AvailableAtResolution,
-    MetricEvidence,
     MetricSelection,
-    OfficialFundamentalMaterialV1,
     StatementScope,
 )
-
 
 FIXTURES = Path(__file__).parent / "fixtures" / "sec_companyfacts"
 
@@ -48,14 +44,14 @@ def _load_fixture(name: str) -> bytes:
     return (FIXTURES / name).read_bytes()
 
 
-_AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
+_AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
 _MARKET = "US_NASDAQ"
 _SCOPE = StatementScope.CONSOLIDATED
 
 
 def _resolver(filed_raw: str) -> AvailableAtResolution:
     return AvailableAtResolution(
-        available_at=datetime(2025, 11, 3, 21, 0, tzinfo=timezone.utc),
+        available_at=datetime(2025, 11, 3, 21, 0, tzinfo=UTC),
         policy_version=DATE_ONLY_POLICY_VERSION,
         session_history_source=DATE_ONLY_SESSION_HISTORY_SOURCE,
     )
@@ -104,7 +100,7 @@ class TestParseCompanyFactsMinimal:
 
     def test_extracts_current_and_prior_annual_materials(self):
         body = _load_fixture("aapl_minimal.json")
-        observed_at = datetime(2025, 11, 1, 12, 0, tzinfo=timezone.utc)
+        observed_at = datetime(2025, 11, 1, 12, 0, tzinfo=UTC)
         result = parse_companyfacts_response(
             body,
             cik="0000320193",
@@ -130,25 +126,28 @@ class TestParseCompanyFactsMinimal:
 
         # Check revenue extraction
         assert current.revenue_ttm is not None
-        assert current.revenue_ttm.value == Decimal("416161000000")
-        assert current.revenue_ttm.source_concept_id == "RevenueFromContractWithCustomerExcludingAssessedTax"
+        assert current.revenue_ttm.value == Decimal(416161000000)
+        assert (
+            current.revenue_ttm.source_concept_id
+            == "RevenueFromContractWithCustomerExcludingAssessedTax"
+        )
         assert current.revenue_ttm.unit == "USD"
         assert current.revenue_ttm.selection == MetricSelection.EXACT
 
         # Check shares extraction uses shares unit
         assert current.diluted_shares_outstanding is not None
-        assert current.diluted_shares_outstanding.value == Decimal("15004697000")
+        assert current.diluted_shares_outstanding.value == Decimal(15004697000)
         assert current.diluted_shares_outstanding.unit == "shares"
 
         # Check balance sheet items have no start (instantaneous)
         assert current.total_assets is not None
         assert current.total_assets.source_concept_id == "Assets"
-        assert current.total_assets.value == Decimal("359241000000")
+        assert current.total_assets.value == Decimal(359241000000)
 
         # Prior period: FY2024 ending 2024-09-28
         assert prior.fiscal_year == 2024
         assert prior.revenue_ttm is not None
-        assert prior.revenue_ttm.value == Decimal("391035000000")
+        assert prior.revenue_ttm.value == Decimal(391035000000)
 
         # B2: ordinary 10-K comparison filings must NOT produce revision_of
         assert current.revision_of is None
@@ -156,7 +155,7 @@ class TestParseCompanyFactsMinimal:
 
     def test_raw_body_sha256_is_recorded(self):
         body = _load_fixture("aapl_minimal.json")
-        observed_at = datetime(2025, 11, 1, 12, 0, tzinfo=timezone.utc)
+        observed_at = datetime(2025, 11, 1, 12, 0, tzinfo=UTC)
         result = parse_companyfacts_response(
             body,
             cik="0000320193",
@@ -178,7 +177,7 @@ class TestParseCompanyFactsMinimal:
             body,
             cik="0000320193",
             canonical_symbol="AAPL",
-            observed_at=datetime(2025, 11, 1, 12, 0, tzinfo=timezone.utc),
+            observed_at=datetime(2025, 11, 1, 12, 0, tzinfo=UTC),
             available_at_resolver=_resolver,
             market="US_NYSE",
             statement_scope=StatementScope.NON_CONSOLIDATED,
@@ -199,7 +198,7 @@ class TestParseCompanyFactsAmbiguity:
 
     def test_ambiguous_revenue_carried_as_typed_evidence_other_metrics_preserved(self):
         body = _load_fixture("aapl_ambiguous_revenue.json")
-        observed_at = datetime(2025, 11, 1, 12, 0, tzinfo=timezone.utc)
+        observed_at = datetime(2025, 11, 1, 12, 0, tzinfo=UTC)
         result = parse_companyfacts_response(
             body,
             cik="0000320193",
@@ -229,16 +228,16 @@ class TestParseCompanyFactsAmbiguity:
         # different filing is a comparison restatement, not ambiguity.
         assert m.revenue_ttm is not None
         assert m.revenue_ttm.selection == MetricSelection.EXACT
-        assert m.revenue_ttm.value == Decimal("265595000000")
+        assert m.revenue_ttm.value == Decimal(265595000000)
 
         # Other metrics survive as EXACT, all from the one selected filing.
         assert m.filing_id == "0000320193-19-000119"
         assert m.net_income_ttm.selection == MetricSelection.EXACT
-        assert m.net_income_ttm.value == Decimal("59531000000")
+        assert m.net_income_ttm.value == Decimal(59531000000)
         assert m.gross_profit_ttm.selection == MetricSelection.EXACT
-        assert m.total_equity.value == Decimal("107147000000")
-        assert m.total_assets.value == Decimal("365725000000")
-        assert m.diluted_shares_outstanding.value == Decimal("5000109000")
+        assert m.total_equity.value == Decimal(107147000000)
+        assert m.total_assets.value == Decimal(365725000000)
+        assert m.diluted_shares_outstanding.value == Decimal(5000109000)
 
         # The FY2017 comparison period is coherent to the same single filing:
         # only the equity instant it restates is EXACT; Assets@2017-09-30 is
@@ -246,7 +245,7 @@ class TestParseCompanyFactsAmbiguity:
         prior = by_end[date(2017, 9, 30)]
         assert prior.filing_id == "0000320193-19-000119"
         assert prior.total_equity.selection == MetricSelection.EXACT
-        assert prior.total_equity.value == Decimal("134047000000")
+        assert prior.total_equity.value == Decimal(134047000000)
         assert prior.total_assets.selection == MetricSelection.UNAVAILABLE
         assert prior.total_assets.value is None
         assert prior.revenue_ttm.selection == MetricSelection.UNAVAILABLE
@@ -265,44 +264,66 @@ class TestM1AmbiguityIsScopedToMetricAndPeriod:
     def _body(self, extra_revenues: list[dict]) -> bytes:
         def row(start, end, val, concept_form="10-K"):
             return {
-                "start": start, "end": end, "val": val,
-                "accn": self._ACCN, "fy": 2025, "fp": "FY",
-                "form": concept_form, "filed": "2025-10-31",
+                "start": start,
+                "end": end,
+                "val": val,
+                "accn": self._ACCN,
+                "fy": 2025,
+                "fp": "FY",
+                "form": concept_form,
+                "filed": "2025-10-31",
             }
 
-        return json.dumps({
-            "cik": 320193,
-            "entityName": "Apple Inc.",
-            "facts": {"us-gaap": {
-                "RevenueFromContractWithCustomerExcludingAssessedTax": {
-                    "units": {"USD": [
-                        row("2024-09-29", "2025-09-27", 416161000000),
-                        row("2023-10-01", "2024-09-28", 391035000000),
-                    ]}
+        return json.dumps(
+            {
+                "cik": 320193,
+                "entityName": "Apple Inc.",
+                "facts": {
+                    "us-gaap": {
+                        "RevenueFromContractWithCustomerExcludingAssessedTax": {
+                            "units": {
+                                "USD": [
+                                    row("2024-09-29", "2025-09-27", 416161000000),
+                                    row("2023-10-01", "2024-09-28", 391035000000),
+                                ]
+                            }
+                        },
+                        "NetIncomeLoss": {
+                            "units": {
+                                "USD": [
+                                    row("2024-09-29", "2025-09-27", 112010000000),
+                                    row("2023-10-01", "2024-09-28", 93736000000),
+                                ]
+                            }
+                        },
+                        "Revenues": {"units": {"USD": extra_revenues}},
+                    }
                 },
-                "NetIncomeLoss": {
-                    "units": {"USD": [
-                        row("2024-09-29", "2025-09-27", 112010000000),
-                        row("2023-10-01", "2024-09-28", 93736000000),
-                    ]}
-                },
-                "Revenues": {"units": {"USD": extra_revenues}},
-            }}
-        }).encode()
+            }
+        ).encode()
 
     def test_prior_period_ambiguity_does_not_contaminate_current(self):
         """Revenues duplicates ONLY the FY2024 period. FY2025 revenue must
         stay EXACT; only FY2024 revenue becomes AMBIGUOUS."""
-        body = self._body([{
-            "start": "2023-10-01", "end": "2024-09-28", "val": 391035000000,
-            "accn": self._ACCN, "fy": 2025, "fp": "FY",
-            "form": "10-K", "filed": "2025-10-31",
-        }])
+        body = self._body(
+            [
+                {
+                    "start": "2023-10-01",
+                    "end": "2024-09-28",
+                    "val": 391035000000,
+                    "accn": self._ACCN,
+                    "fy": 2025,
+                    "fp": "FY",
+                    "form": "10-K",
+                    "filed": "2025-10-31",
+                }
+            ]
+        )
         result = parse_companyfacts_response(
             body,
             cik="0000320193",
             canonical_symbol="AAPL",
-            observed_at=datetime(2025, 11, 1, 12, 0, tzinfo=timezone.utc),
+            observed_at=datetime(2025, 11, 1, 12, 0, tzinfo=UTC),
             available_at_resolver=_resolver,
             market=_MARKET,
             statement_scope=_SCOPE,
@@ -315,7 +336,7 @@ class TestM1AmbiguityIsScopedToMetricAndPeriod:
         current = by_fy[2025]
         assert current.revenue_ttm is not None
         assert current.revenue_ttm.selection == MetricSelection.EXACT
-        assert current.revenue_ttm.value == Decimal("416161000000")
+        assert current.revenue_ttm.value == Decimal(416161000000)
         assert current.revenue_ttm.source_concept_id == (
             "RevenueFromContractWithCustomerExcludingAssessedTax"
         )
@@ -328,16 +349,25 @@ class TestM1AmbiguityIsScopedToMetricAndPeriod:
 
     def test_current_period_ambiguity_does_not_contaminate_prior(self):
         """The mirror case: only FY2025 is ambiguous; FY2024 stays EXACT."""
-        body = self._body([{
-            "start": "2024-09-29", "end": "2025-09-27", "val": 416161000000,
-            "accn": self._ACCN, "fy": 2025, "fp": "FY",
-            "form": "10-K", "filed": "2025-10-31",
-        }])
+        body = self._body(
+            [
+                {
+                    "start": "2024-09-29",
+                    "end": "2025-09-27",
+                    "val": 416161000000,
+                    "accn": self._ACCN,
+                    "fy": 2025,
+                    "fp": "FY",
+                    "form": "10-K",
+                    "filed": "2025-10-31",
+                }
+            ]
+        )
         result = parse_companyfacts_response(
             body,
             cik="0000320193",
             canonical_symbol="AAPL",
-            observed_at=datetime(2025, 11, 1, 12, 0, tzinfo=timezone.utc),
+            observed_at=datetime(2025, 11, 1, 12, 0, tzinfo=UTC),
             available_at_resolver=_resolver,
             market=_MARKET,
             statement_scope=_SCOPE,
@@ -347,20 +377,29 @@ class TestM1AmbiguityIsScopedToMetricAndPeriod:
         by_fy = {m.fiscal_year: m for m in result.materials}
         assert by_fy[2025].revenue_ttm.selection == MetricSelection.AMBIGUOUS
         assert by_fy[2024].revenue_ttm.selection == MetricSelection.EXACT
-        assert by_fy[2024].revenue_ttm.value == Decimal("391035000000")
+        assert by_fy[2024].revenue_ttm.value == Decimal(391035000000)
 
     def test_ambiguity_never_touches_other_metrics_in_same_period(self):
         """Revenue ambiguity in FY2025 leaves net income EXACT in FY2025."""
-        body = self._body([{
-            "start": "2024-09-29", "end": "2025-09-27", "val": 416161000000,
-            "accn": self._ACCN, "fy": 2025, "fp": "FY",
-            "form": "10-K", "filed": "2025-10-31",
-        }])
+        body = self._body(
+            [
+                {
+                    "start": "2024-09-29",
+                    "end": "2025-09-27",
+                    "val": 416161000000,
+                    "accn": self._ACCN,
+                    "fy": 2025,
+                    "fp": "FY",
+                    "form": "10-K",
+                    "filed": "2025-10-31",
+                }
+            ]
+        )
         result = parse_companyfacts_response(
             body,
             cik="0000320193",
             canonical_symbol="AAPL",
-            observed_at=datetime(2025, 11, 1, 12, 0, tzinfo=timezone.utc),
+            observed_at=datetime(2025, 11, 1, 12, 0, tzinfo=UTC),
             available_at_resolver=_resolver,
             market=_MARKET,
             statement_scope=_SCOPE,
@@ -368,39 +407,68 @@ class TestM1AmbiguityIsScopedToMetricAndPeriod:
         )
         current = {m.fiscal_year: m for m in result.materials}[2025]
         assert current.net_income_ttm.selection == MetricSelection.EXACT
-        assert current.net_income_ttm.value == Decimal("112010000000")
+        assert current.net_income_ttm.value == Decimal(112010000000)
 
     def test_past_only_ambiguity_leaves_current_exact_when_past_is_dropped(self):
         """A far-past ambiguous period is not even emitted, and must leave
         the current period's revenue EXACT."""
-        body = json.dumps({
-            "cik": 320193,
-            "entityName": "Apple Inc.",
-            "facts": {"us-gaap": {
-                "RevenueFromContractWithCustomerExcludingAssessedTax": {
-                    "units": {"USD": [
-                        {"start": "2024-09-29", "end": "2025-09-27",
-                         "val": 416161000000, "accn": self._ACCN, "fy": 2025,
-                         "fp": "FY", "form": "10-K", "filed": "2025-10-31"},
-                        {"start": "2016-10-02", "end": "2017-09-30",
-                         "val": 229234000000, "accn": self._ACCN, "fy": 2025,
-                         "fp": "FY", "form": "10-K", "filed": "2025-10-31"},
-                    ]}
+        body = json.dumps(
+            {
+                "cik": 320193,
+                "entityName": "Apple Inc.",
+                "facts": {
+                    "us-gaap": {
+                        "RevenueFromContractWithCustomerExcludingAssessedTax": {
+                            "units": {
+                                "USD": [
+                                    {
+                                        "start": "2024-09-29",
+                                        "end": "2025-09-27",
+                                        "val": 416161000000,
+                                        "accn": self._ACCN,
+                                        "fy": 2025,
+                                        "fp": "FY",
+                                        "form": "10-K",
+                                        "filed": "2025-10-31",
+                                    },
+                                    {
+                                        "start": "2016-10-02",
+                                        "end": "2017-09-30",
+                                        "val": 229234000000,
+                                        "accn": self._ACCN,
+                                        "fy": 2025,
+                                        "fp": "FY",
+                                        "form": "10-K",
+                                        "filed": "2025-10-31",
+                                    },
+                                ]
+                            }
+                        },
+                        "Revenues": {
+                            "units": {
+                                "USD": [
+                                    {
+                                        "start": "2016-10-02",
+                                        "end": "2017-09-30",
+                                        "val": 229234000000,
+                                        "accn": self._ACCN,
+                                        "fy": 2025,
+                                        "fp": "FY",
+                                        "form": "10-K",
+                                        "filed": "2025-10-31",
+                                    },
+                                ]
+                            }
+                        },
+                    }
                 },
-                "Revenues": {
-                    "units": {"USD": [
-                        {"start": "2016-10-02", "end": "2017-09-30",
-                         "val": 229234000000, "accn": self._ACCN, "fy": 2025,
-                         "fp": "FY", "form": "10-K", "filed": "2025-10-31"},
-                    ]}
-                },
-            }}
-        }).encode()
+            }
+        ).encode()
         result = parse_companyfacts_response(
             body,
             cik="0000320193",
             canonical_symbol="AAPL",
-            observed_at=datetime(2025, 11, 1, 12, 0, tzinfo=timezone.utc),
+            observed_at=datetime(2025, 11, 1, 12, 0, tzinfo=UTC),
             available_at_resolver=_resolver,
             market=_MARKET,
             statement_scope=_SCOPE,
@@ -413,7 +481,7 @@ class TestM1AmbiguityIsScopedToMetricAndPeriod:
         current = result.materials[0]
         assert current.fiscal_year == 2025
         assert current.revenue_ttm.selection == MetricSelection.EXACT
-        assert current.revenue_ttm.value == Decimal("416161000000")
+        assert current.revenue_ttm.value == Decimal(416161000000)
 
 
 class TestParseCompanyFactsQuarterlyFiltered:
@@ -421,7 +489,7 @@ class TestParseCompanyFactsQuarterlyFiltered:
 
     def test_quarterly_facts_are_ignored(self):
         body = _load_fixture("aapl_quarterly_and_missing_gross_profit.json")
-        observed_at = datetime(2025, 11, 1, 12, 0, tzinfo=timezone.utc)
+        observed_at = datetime(2025, 11, 1, 12, 0, tzinfo=UTC)
         result = parse_companyfacts_response(
             body,
             cik="0000320193",
@@ -442,7 +510,7 @@ class TestParseCompanyFactsQuarterlyFiltered:
         # Should use the FY 10-K value, not the Q2 10-Q value
         assert current.fiscal_year == 2025
         assert current.revenue_ttm is not None
-        assert current.revenue_ttm.value == Decimal("416161000000")  # FY, not quarterly
+        assert current.revenue_ttm.value == Decimal(416161000000)  # FY, not quarterly
 
         # GrossProfit concept absent -> M1: typed UNAVAILABLE, not None
         assert current.gross_profit_ttm is not None
@@ -460,20 +528,20 @@ class TestParseCompanyFactsAmendment:
 
     def test_amendment_supersedes_original(self):
         body = _load_fixture("aapl_amendment.json")
-        observed_at = datetime(2010, 2, 1, 12, 0, tzinfo=timezone.utc)
+        observed_at = datetime(2010, 2, 1, 12, 0, tzinfo=UTC)
         result = parse_companyfacts_response(
             body,
             cik="0000320193",
             canonical_symbol="AAPL",
             observed_at=observed_at,
             available_at_resolver=lambda filed_raw: AvailableAtResolution(
-                available_at=datetime(2010, 2, 26, 21, 0, tzinfo=timezone.utc),
+                available_at=datetime(2010, 2, 26, 21, 0, tzinfo=UTC),
                 policy_version=DATE_ONLY_POLICY_VERSION,
                 session_history_source=DATE_ONLY_SESSION_HISTORY_SOURCE,
             ),
             market=_MARKET,
             statement_scope=_SCOPE,
-            as_of=datetime(2010, 3, 1, 0, 0, tzinfo=timezone.utc),
+            as_of=datetime(2010, 3, 1, 0, 0, tzinfo=UTC),
         )
         assert result.materials is not None
         # FY2009 has amendment chain, FY2010 is the consecutive prior.
@@ -483,7 +551,7 @@ class TestParseCompanyFactsAmendment:
         m2009 = materials_by_fy[2009]
         assert m2009.net_income_ttm is not None
         # The 10-K/A value (8235000000) differs from the 10-K value (5704000000).
-        assert m2009.net_income_ttm.value == Decimal("8235000000")
+        assert m2009.net_income_ttm.value == Decimal(8235000000)
 
         # B2: revision_of should point to the original 10-K accession.
         assert m2009.revision_of is not None
@@ -496,7 +564,7 @@ class TestParseCompanyFactsInvalidPayload:
             b"not json",
             cik="0000320193",
             canonical_symbol="AAPL",
-            observed_at=datetime(2025, 11, 1, 12, 0, tzinfo=timezone.utc),
+            observed_at=datetime(2025, 11, 1, 12, 0, tzinfo=UTC),
             available_at_resolver=_resolver,
             market=_MARKET,
             statement_scope=_SCOPE,
@@ -511,7 +579,7 @@ class TestParseCompanyFactsInvalidPayload:
             payload.encode(),
             cik="0000320193",
             canonical_symbol="AAPL",
-            observed_at=datetime(2025, 11, 1, 12, 0, tzinfo=timezone.utc),
+            observed_at=datetime(2025, 11, 1, 12, 0, tzinfo=UTC),
             available_at_resolver=_resolver,
             market=_MARKET,
             statement_scope=_SCOPE,
@@ -531,7 +599,7 @@ class TestParseCompanyFactsPriorNonconsecutive:
     def test_nonconsecutive_prior_omitted(self):
         """Fixture has FY2025 and FY2018 (not consecutive) — only current produced."""
         body = _load_fixture("aapl_nonconsecutive.json")
-        observed_at = datetime(2025, 11, 1, 12, 0, tzinfo=timezone.utc)
+        observed_at = datetime(2025, 11, 1, 12, 0, tzinfo=UTC)
         result = parse_companyfacts_response(
             body,
             cik="0000320193",
@@ -553,24 +621,37 @@ class TestM3NoSyntheticDateFallback:
 
     def test_invalid_period_end_raises(self):
         # Construct a minimal body with a bad end date
-        body = json.dumps({
-            "cik": 320193,
-            "entityName": "Apple Inc.",
-            "facts": {"us-gaap": {
-                "RevenueFromContractWithCustomerExcludingAssessedTax": {
-                    "units": {"USD": [
-                        {"start": "2024-09-29", "end": "2024-09", "val": 1,
-                         "accn": "0000320193-25-000079", "fy": 2025, "fp": "FY",
-                         "form": "10-K", "filed": "2025-10-31"}
-                    ]}
-                }
-            }}
-        }).encode()
+        body = json.dumps(
+            {
+                "cik": 320193,
+                "entityName": "Apple Inc.",
+                "facts": {
+                    "us-gaap": {
+                        "RevenueFromContractWithCustomerExcludingAssessedTax": {
+                            "units": {
+                                "USD": [
+                                    {
+                                        "start": "2024-09-29",
+                                        "end": "2024-09",
+                                        "val": 1,
+                                        "accn": "0000320193-25-000079",
+                                        "fy": 2025,
+                                        "fp": "FY",
+                                        "form": "10-K",
+                                        "filed": "2025-10-31",
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                },
+            }
+        ).encode()
         result = parse_companyfacts_response(
             body,
             cik="0000320193",
             canonical_symbol="AAPL",
-            observed_at=datetime(2025, 11, 1, 12, 0, tzinfo=timezone.utc),
+            observed_at=datetime(2025, 11, 1, 12, 0, tzinfo=UTC),
             available_at_resolver=_resolver,
             market=_MARKET,
             statement_scope=_SCOPE,
@@ -597,15 +678,17 @@ class TestM3NoSyntheticDateFallback:
 RAW_CANARY_SHA256 = "73a86c6aedc31f77cac2ea4df5f80f0b3bd7e6eb58bb4e01444fbedf3afb9c43"
 
 # Real accessions present in the canary body (verified by extraction).
-CANARY_ACCESSIONS = frozenset({
-    "0000320193-25-000079",  # FY2025 10-K
-    "0000320193-24-000123",  # FY2024 10-K
-    "0000320193-19-000119",  # FY2019 10-K
-    "0000320193-18-000145",  # FY2018 10-K
-    "0001193125-09-214859",  # FY2009 10-K
-    "0001193125-10-012091",  # FY2009 10-K/A
-    "0001193125-10-238044",  # FY2010 10-K
-})
+CANARY_ACCESSIONS = frozenset(
+    {
+        "0000320193-25-000079",  # FY2025 10-K
+        "0000320193-24-000123",  # FY2024 10-K
+        "0000320193-19-000119",  # FY2019 10-K
+        "0000320193-18-000145",  # FY2018 10-K
+        "0001193125-09-214859",  # FY2009 10-K
+        "0001193125-10-012091",  # FY2009 10-K/A
+        "0001193125-10-238044",  # FY2010 10-K
+    }
+)
 
 
 class TestFixtureProvenanceSeal:
@@ -618,20 +701,29 @@ class TestFixtureProvenanceSeal:
 
     def test_raw_canary_sha256_matches_receipt(self):
         """Verify the canary SHA matches the receipt on disk."""
-        receipt_path = Path.home() / ".local" / "share" / "tokmo-v3" / \
-            "quant-g1a-sec-companyfacts-canary-v1" / "attempt.json"
+        receipt_path = (
+            Path.home()
+            / ".local"
+            / "share"
+            / "tokmo-v3"
+            / "quant-g1a-sec-companyfacts-canary-v1"
+            / "attempt.json"
+        )
         if not receipt_path.exists():
             pytest.skip("canary receipt not available")
         receipt = json.loads(receipt_path.read_text())
         assert receipt["body_sha256"] == RAW_CANARY_SHA256
 
-    @pytest.mark.parametrize("fixture_name", [
-        "aapl_minimal.json",
-        "aapl_ambiguous_revenue.json",
-        "aapl_amendment.json",
-        "aapl_quarterly_and_missing_gross_profit.json",
-        "aapl_nonconsecutive.json",
-    ])
+    @pytest.mark.parametrize(
+        "fixture_name",
+        [
+            "aapl_minimal.json",
+            "aapl_ambiguous_revenue.json",
+            "aapl_amendment.json",
+            "aapl_quarterly_and_missing_gross_profit.json",
+            "aapl_nonconsecutive.json",
+        ],
+    )
     def test_fixture_contains_real_canary_accession(self, fixture_name):
         """Each fixture must contain at least one real canary accession —
         no invented accessions."""
@@ -639,22 +731,30 @@ class TestFixtureProvenanceSeal:
         found = {accn for accn in CANARY_ACCESSIONS if accn in text}
         assert found, f"{fixture_name}: no real canary accession found"
 
-    @pytest.mark.parametrize("fixture_name", [
-        "aapl_minimal.json",
-        "aapl_ambiguous_revenue.json",
-        "aapl_amendment.json",
-        "aapl_quarterly_and_missing_gross_profit.json",
-        "aapl_nonconsecutive.json",
-    ])
+    @pytest.mark.parametrize(
+        "fixture_name",
+        [
+            "aapl_minimal.json",
+            "aapl_ambiguous_revenue.json",
+            "aapl_amendment.json",
+            "aapl_quarterly_and_missing_gross_profit.json",
+            "aapl_nonconsecutive.json",
+        ],
+    )
     def test_fixture_is_bounded_excerpt_not_raw_body(self, fixture_name):
         """Raw 3.8 MB body must not be committed."""
         size = (FIXTURES / fixture_name).stat().st_size
-        assert size < 10_000, f"{fixture_name}: {size} bytes — raw body must not be committed"
+        assert size < 10_000, (
+            f"{fixture_name}: {size} bytes — raw body must not be committed"
+        )
 
-    @pytest.mark.parametrize("fixture_name", [
-        "aapl_minimal.json",
-        "aapl_ambiguous_revenue.json",
-    ])
+    @pytest.mark.parametrize(
+        "fixture_name",
+        [
+            "aapl_minimal.json",
+            "aapl_ambiguous_revenue.json",
+        ],
+    )
     def test_fixture_preserves_envelope_comparison_rows(self, fixture_name):
         """B1: fixtures must preserve comparison rows (multiple periods per
         filing, tagged with same fy/fp/form but different start/end)."""
@@ -680,10 +780,13 @@ class TestFixtureProvenanceSeal:
             "real envelope structure with multiple periods per filing"
         )
 
-    @pytest.mark.parametrize("fixture_name", [
-        "aapl_minimal.json",
-        "aapl_ambiguous_revenue.json",
-    ])
+    @pytest.mark.parametrize(
+        "fixture_name",
+        [
+            "aapl_minimal.json",
+            "aapl_ambiguous_revenue.json",
+        ],
+    )
     def test_fixture_preserves_frame_values_from_raw(self, fixture_name):
         """B1: frame values from raw canary must be preserved, not fabricated.
         Only tested on fixtures with recent filings that carry frame values."""

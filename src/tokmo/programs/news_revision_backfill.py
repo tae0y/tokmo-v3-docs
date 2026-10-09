@@ -9,15 +9,17 @@ Only fields the sidecar stores as text are recoverable. A rotated GUID is kept
 as a hash, so identity changes are reported and skipped rather than guessed.
 """
 
-from dataclasses import dataclass, field
 import hashlib
 import json
-from pathlib import Path
 import sqlite3
+from dataclasses import dataclass, field
+from pathlib import Path
 
 from tokmo.records import news_revision_evidence
 from tokmo.records.private_sqlite import (
-    acquire_immediate_transaction, connect_private, prepare_private_path,
+    acquire_immediate_transaction,
+    connect_private,
+    prepare_private_path,
 )
 
 # Columns the sidecar preserves as text, mapped to the evidence column that
@@ -96,13 +98,10 @@ def backfill_news_revisions(path: Path, *, apply: bool = False) -> BackfillRepor
             "SELECT news_document_id,title,title_fingerprint,summary_text,"
             "published_at,last_seen_at,revision_no FROM news_documents"
         ).fetchall()
-        by_fingerprint = {
-            _document_fingerprint(row[0]): row for row in documents
-        }
+        by_fingerprint = {_document_fingerprint(row[0]): row for row in documents}
         report.documents_seen = len(documents)
         report.revisions_unmatched = sum(
-            len(rows) for key, rows in grouped.items()
-            if key not in by_fingerprint
+            len(rows) for key, rows in grouped.items() if key not in by_fingerprint
         )
 
         updates = []
@@ -118,8 +117,7 @@ def backfill_news_revisions(path: Path, *, apply: bool = False) -> BackfillRepor
             for revision in revisions:
                 changed = set(json.loads(revision[6]))
                 for name in sorted(changed - set(_RECOVERABLE)):
-                    report.skipped_fields[name] = (
-                        report.skipped_fields.get(name, 0) + 1)
+                    report.skipped_fields[name] = report.skipped_fields.get(name, 0) + 1
                 if "title" in changed:
                     latest_value["title"] = revision[2]
                     latest_value["title_fingerprint"] = revision[3]
@@ -128,23 +126,26 @@ def backfill_news_revisions(path: Path, *, apply: bool = False) -> BackfillRepor
                 if "published_at" in changed:
                     latest_value["published_at"] = revision[5]
             current = {
-                "title": document[1], "title_fingerprint": document[2],
-                "summary_text": document[3], "published_at": document[4],
+                "title": document[1],
+                "title_fingerprint": document[2],
+                "summary_text": document[3],
+                "published_at": document[4],
             }
             assignments = {
-                name: value for name, value in sorted(latest_value.items())
+                name: value
+                for name, value in sorted(latest_value.items())
                 if current[name] != value
             }
             # A title only counts as revised together with its fingerprint.
             if "title" in assignments:
-                assignments["title_fingerprint"] = (
-                    latest_value["title_fingerprint"])
+                assignments["title_fingerprint"] = latest_value["title_fingerprint"]
             if not assignments:
                 report.already_current += 1
                 continue
             last_seen = max(document[5], revisions[-1][1])
-            updates.append((document[0], assignments, last_seen,
-                            document[6] + len(revisions)))
+            updates.append(
+                (document[0], assignments, last_seen, document[6] + len(revisions))
+            )
 
         report.documents_updated = len(updates)
         if not apply or not updates:
@@ -157,8 +158,7 @@ def backfill_news_revisions(path: Path, *, apply: bool = False) -> BackfillRepor
                 connection.execute(
                     f"UPDATE news_documents SET {clause},last_seen_at=?,"
                     "revision_no=? WHERE news_document_id=?",
-                    (*assignments.values(), last_seen, revision_no,
-                     document_id),
+                    (*assignments.values(), last_seen, revision_no, document_id),
                 )
             connection.execute("COMMIT")
         except BaseException:

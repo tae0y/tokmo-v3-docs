@@ -1,13 +1,12 @@
 import ast
-from dataclasses import replace
-from datetime import date, datetime, timedelta, timezone
-from hashlib import sha256
 import json
-from pathlib import Path
 import sqlite3
+from dataclasses import replace
+from datetime import UTC, date, datetime, timedelta
+from hashlib import sha256
+from pathlib import Path
 
 import pytest
-
 
 ROOT = Path(__file__).parents[1]
 WORKTREE_ROOT = ROOT.parents[1]
@@ -18,7 +17,7 @@ def _calendar_inputs(*, us_state, us_open):
     from tokmo.values.session_gate import Market, SessionVerdict
     from tokmo.values.toss_market_calendar import CalendarSession
 
-    slot = datetime(2026, 8, 14, 20, 0, tzinfo=timezone.utc)
+    slot = datetime(2026, 8, 14, 20, 0, tzinfo=UTC)
     session = CalendarSession(slot - timedelta(hours=1), slot + timedelta(hours=1))
     results = {
         Market.KR: MarketRefreshResult(
@@ -28,7 +27,10 @@ def _calendar_inputs(*, us_state, us_open):
             False,
         ),
         Market.US: MarketRefreshResult(
-            Market.US, date(2026, 8, 14), us_state, False,
+            Market.US,
+            date(2026, 8, 14),
+            us_state,
+            False,
         ),
     }
     verdicts = (
@@ -73,16 +75,20 @@ def _quant_seam_fixture_deps(slot):
                     "regular_end": "2026-08-03T20:00:00Z",
                 },
             },
-            "accounts": [{
-                "seed": "1",
-                "holdings": [{
-                    "symbol": "AAPL",
-                    "quantity": "1",
-                    "avg_price": "100",
-                    "currency": "USD",
-                    "market_raw": "US",
-                }],
-            }],
+            "accounts": [
+                {
+                    "seed": "1",
+                    "holdings": [
+                        {
+                            "symbol": "AAPL",
+                            "quantity": "1",
+                            "avg_price": "100",
+                            "currency": "USD",
+                            "market_raw": "US",
+                        }
+                    ],
+                }
+            ],
             "quotes": {"AAPL": {"price": "101", "currency": "USD"}},
             "orders": {},
         },
@@ -100,9 +106,13 @@ def _inject_quant_limits(monkeypatch, module):
         CADENCE_MARKET_PORTFOLIO_POLICY_V1,
         request_limits=CADENCE_QUANT_SHADOW_POLICY_V1.request_limits,
     )
-    monkeypatch.setattr(module, "CADENCE_POLICY_REGISTRY", {
-        policy.policy_version: policy,
-    })
+    monkeypatch.setattr(
+        module,
+        "CADENCE_POLICY_REGISTRY",
+        {
+            policy.policy_version: policy,
+        },
+    )
     monkeypatch.setattr(
         module,
         "run_market_regime_shadow",
@@ -138,9 +148,13 @@ def test_calendar_carrier_construction_reads_current_tick_inputs_and_cache_once(
 
         def read(self):
             self.reads += 1
-            return type("CacheValue", (), {
-                "us": type("UsEntry", (), {"trade_date": "2026-08-14"})(),
-            })()
+            return type(
+                "CacheValue",
+                (),
+                {
+                    "us": type("UsEntry", (), {"trade_date": "2026-08-14"})(),
+                },
+            )()
 
     cache = Cache()
     calendar = module._quant_tick_calendar_input(
@@ -181,9 +195,13 @@ def test_carrier_construction_then_failed_refresh_due_gate_never_rereads_cache(
 
         def read(self):
             self.reads += 1
-            return type("CacheValue", (), {
-                "us": type("UsEntry", (), {"trade_date": "2026-08-14"})(),
-            })()
+            return type(
+                "CacheValue",
+                (),
+                {
+                    "us": type("UsEntry", (), {"trade_date": "2026-08-14"})(),
+                },
+            )()
 
     class BombCache:
         def __init__(self):
@@ -208,11 +226,15 @@ def test_carrier_construction_then_failed_refresh_due_gate_never_rereads_cache(
         tick=type("Tick", (), {"scheduled_for_utc": slot})(),
         calendar=calendar,
         cache_store=due_cache,
-        receipts=type("Receipts", (), {
-            "read_due": lambda self, identity: (_ for _ in ()).throw(
-                AssertionError(identity)
-            ),
-        })(),
+        receipts=type(
+            "Receipts",
+            (),
+            {
+                "read_due": lambda self, identity: (_ for _ in ()).throw(
+                    AssertionError(identity)
+                ),
+            },
+        )(),
     )
 
     assert construction_cache.reads == 1
@@ -222,11 +244,12 @@ def test_carrier_construction_then_failed_refresh_due_gate_never_rereads_cache(
 
 
 def test_calendar_binding_conflict_is_typed_zero_quant_effect_at_callsite(
-    monkeypatch, tmp_path,
+    monkeypatch,
+    tmp_path,
 ):
     import tokmo.programs.production_cadence as module
 
-    slot = datetime(2026, 8, 3, 14, 0, tzinfo=timezone.utc)
+    slot = datetime(2026, 8, 3, 14, 0, tzinfo=UTC)
     policy = _inject_quant_limits(monkeypatch, module)
     deps, probe = _quant_seam_fixture_deps(slot)
     quant_calls = []
@@ -270,7 +293,8 @@ def test_calendar_binding_conflict_is_typed_zero_quant_effect_at_callsite(
 
 
 def test_quant_seam_reads_the_same_mask_object_before_open_stages(
-    monkeypatch, tmp_path,
+    monkeypatch,
+    tmp_path,
 ):
     import tokmo.programs.production_cadence as module
     from tokmo.values.quant_recurring import (
@@ -278,7 +302,7 @@ def test_quant_seam_reads_the_same_mask_object_before_open_stages(
         QuantDueDecisionV1,
     )
 
-    slot = datetime(2026, 8, 3, 14, 0, tzinfo=timezone.utc)
+    slot = datetime(2026, 8, 3, 14, 0, tzinfo=UTC)
     policy = _inject_quant_limits(monkeypatch, module)
     deps, probe = _quant_seam_fixture_deps(slot)
     actual_carrier = module._quant_tick_calendar_input
@@ -322,12 +346,13 @@ def test_quant_seam_reads_the_same_mask_object_before_open_stages(
 
 
 def test_d2_refusal_does_not_open_existing_quant_receipt_store(
-    monkeypatch, tmp_path,
+    monkeypatch,
+    tmp_path,
 ):
     import tokmo.programs.production_cadence as module
     from tokmo.values.quant_recurring import QuantTickCalendarInputV1
 
-    slot = datetime(2026, 8, 3, 10, 0, tzinfo=timezone.utc)
+    slot = datetime(2026, 8, 3, 10, 0, tzinfo=UTC)
     policy = _inject_quant_limits(monkeypatch, module)
     deps, probe = _quant_seam_fixture_deps(slot)
 
@@ -389,7 +414,8 @@ def test_d2_refusal_does_not_open_existing_quant_receipt_store(
 
 
 def test_membership_kernel_rows_settle_before_first_holdings_start(
-    monkeypatch, tmp_path,
+    monkeypatch,
+    tmp_path,
 ):
     import tokmo.programs.production_cadence as module
     from tokmo.facts.quant_recurring_membership import membership_operation_plan
@@ -403,7 +429,7 @@ def test_membership_kernel_rows_settle_before_first_holdings_start(
         QuantDueIdentityV1,
     )
 
-    slot = datetime(2026, 8, 3, 14, 0, tzinfo=timezone.utc)
+    slot = datetime(2026, 8, 3, 14, 0, tzinfo=UTC)
     policy = _inject_quant_limits(monkeypatch, module)
     counter = {"value": 0}
 
@@ -477,9 +503,7 @@ def test_membership_kernel_rows_settle_before_first_holdings_start(
     assert len(membership_rows) == 7
     assert holdings_rows
     assert all(row[2] == "SUCCEEDED" for row in membership_rows)
-    assert max(row[1] for row in membership_rows) < min(
-        row[1] for row in holdings_rows
-    )
+    assert max(row[1] for row in membership_rows) < min(row[1] for row in holdings_rows)
 
 
 def test_quant_receipt_store_is_not_created_by_absent_read_probe(monkeypatch, tmp_path):
@@ -496,19 +520,28 @@ def test_quant_receipt_store_is_not_created_by_absent_read_probe(monkeypatch, tm
 
 
 def test_budget_refusal_does_not_create_or_reconcile_quant_receipts(
-    monkeypatch, tmp_path,
+    monkeypatch,
+    tmp_path,
 ):
     import tokmo.programs.production_cadence as module
     from tokmo.values.cadence_policy import CADENCE_QUANT_SHADOW_POLICY_V1
     from tokmo.values.quant_recurring import QuantDueDecisionV1
 
     calls = []
-    existing = type("Existing", (), {
-        "reconcile_stale": lambda self, **kwargs: calls.append(kwargs),
-    })()
-    context = type("Context", (), {
-        "decision": QuantDueDecisionV1.MEMBERSHIP_BUDGET_UNSATISFIABLE,
-    })()
+    existing = type(
+        "Existing",
+        (),
+        {
+            "reconcile_stale": lambda self, **kwargs: calls.append(kwargs),
+        },
+    )()
+    context = type(
+        "Context",
+        (),
+        {
+            "decision": QuantDueDecisionV1.MEMBERSHIP_BUDGET_UNSATISFIABLE,
+        },
+    )()
 
     class Bomb:
         def __init__(self, path):
@@ -520,7 +553,7 @@ def test_budget_refusal_does_not_create_or_reconcile_quant_receipts(
         path=path,
         existing=existing,
         context=context,
-        now=datetime(2026, 8, 14, 20, 0, tzinfo=timezone.utc),
+        now=datetime(2026, 8, 14, 20, 0, tzinfo=UTC),
         policy=CADENCE_QUANT_SHADOW_POLICY_V1,
     )
     assert result is existing
@@ -553,7 +586,9 @@ def test_implementation_is_bound_to_exact_pass_four_design_hashes():
         / "plans"
         / "2026-08-14_quant-recurring-composition-plan-sds-v0.1.md",
     }
-    assert {name: sha256(path.read_bytes()).hexdigest() for name, path in paths.items()} == {
+    assert {
+        name: sha256(path.read_bytes()).hexdigest() for name, path in paths.items()
+    } == {
         "analysis": "44e1c5bd0260c4f296461a5f8aa38c5dee4a44b82c3ca7ea14c5cb9cc484950c",
         "sds": "5efb1a285e850de7733b98174d990fa6b8059a2bd76468cb09ae1d24056fa584",
     }
@@ -565,7 +600,7 @@ def test_optional_quant_dependencies_are_callable_or_none():
 
     deps, _ = build_fixture_cadence_deps(
         fixture={"accounts": [{"seed": "1", "holdings": []}]},
-        clock=lambda: datetime(2026, 8, 3, tzinfo=timezone.utc),
+        clock=lambda: datetime(2026, 8, 3, tzinfo=UTC),
     )
     for name in ("membership_fetch", "sec_user_agent", "sic_snapshot_loader"):
         with pytest.raises(ProductionCadenceRefusal):
@@ -581,7 +616,7 @@ def test_legacy_policy_records_two_inactive_rows_with_zero_quant_effect(tmp_path
         def __call__(self, *args, **kwargs):
             raise AssertionError("inactive quant dependency called")
 
-    slot = datetime(2026, 8, 3, 10, 0, tzinfo=timezone.utc)
+    slot = datetime(2026, 8, 3, 10, 0, tzinfo=UTC)
     observed = slot + timedelta(seconds=1)
     deps, probe = build_fixture_cadence_deps(
         fixture={
@@ -629,9 +664,10 @@ def test_legacy_policy_records_two_inactive_rows_with_zero_quant_effect(tmp_path
 
 
 def test_real_composition_wires_quant_dependencies_and_loads_sec_config_lazily(
-    monkeypatch, tmp_path,
+    monkeypatch,
+    tmp_path,
 ):
-    import tokmo.composition as composition
+    from tokmo import composition
 
     (tmp_path / composition.TOSS_ENV_NAME).write_text(
         "TOSS_CLIENT_ID=fixture-id\nTOSS_CLIENT_SECRET=fixture-secret\n"
@@ -639,11 +675,15 @@ def test_real_composition_wires_quant_dependencies_and_loads_sec_config_lazily(
     watchlists = tmp_path / "watchlists"
     watchlists.mkdir()
     for market in ("KR", "US"):
-        (watchlists / f"{market}.json").write_text(json.dumps({
-            "schema_version": 1,
-            "market": market,
-            "entries": [],
-        }))
+        (watchlists / f"{market}.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "market": market,
+                    "entries": [],
+                }
+            )
+        )
     calls = []
 
     def forbidden_at_build(path):
@@ -654,7 +694,7 @@ def test_real_composition_wires_quant_dependencies_and_loads_sec_config_lazily(
     deps = composition.build_production_cadence_deps(
         project_root=tmp_path,
         shadow_root=tmp_path / "shadow",
-        clock=lambda: datetime(2026, 8, 3, tzinfo=timezone.utc),
+        clock=lambda: datetime(2026, 8, 3, tzinfo=UTC),
     )
     assert calls == []
     assert callable(deps.membership_fetch)
@@ -674,8 +714,10 @@ def test_w3_registration_does_not_change_active_market_policy():
     )
 
     assert runner.ACTIVE_POLICY is CADENCE_MARKET_PORTFOLIO_POLICY_V1
-    assert (CADENCE_POLICY_REGISTRY[CADENCE_QUANT_SHADOW_POLICY_V1.policy_version]
-            is CADENCE_QUANT_SHADOW_POLICY_V1)
+    assert (
+        CADENCE_POLICY_REGISTRY[CADENCE_QUANT_SHADOW_POLICY_V1.policy_version]
+        is CADENCE_QUANT_SHADOW_POLICY_V1
+    )
     assert runner.ACTIVE_POLICY.policy_version == "cadence-300s-market-portfolio-v1"
     assert runner.ACTIVE_POLICY.request_limits.membership_starts == 0
     assert runner.ACTIVE_POLICY.request_limits.quant_daily_candle_starts == 0

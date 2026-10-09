@@ -9,14 +9,14 @@ increment semantics byte-for-byte, KR is exactly one STOCKS batch start
 ``PROFILE_COHORT_EXCEEDS_POLICY`` refusal with zero planned starts.
 """
 
+import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import Enum
 from hashlib import sha256
-import json
 from re import fullmatch
 from types import MappingProxyType
-from typing import Mapping
 
 from tokmo.values.material_pack import canonical_encode
 from tokmo.values.quant_recurring import (
@@ -26,7 +26,6 @@ from tokmo.values.quant_recurring import (
     QuantTerminalStateV1,
 )
 from tokmo.values.session_gate import Market
-
 
 QUANT_PROFILES_ACQUISITION_NAMESPACE = "quant-profiles-v1"
 
@@ -83,9 +82,7 @@ class QuantMarketProfileV1:
         ):
             if type(value) is not int or value < 0:
                 raise ValueError("membership starts formula")
-        if not isinstance(
-            self.fundamental_binding, QuantProfileFundamentalBindingV1
-        ):
+        if not isinstance(self.fundamental_binding, QuantProfileFundamentalBindingV1):
             raise ValueError("fundamental_binding")
 
     def membership_plan_starts(self, cohort_size: int) -> int:
@@ -132,10 +129,12 @@ KR_QUANT_PROFILE_V1 = QuantMarketProfileV1(
     fundamental_binding=QuantProfileFundamentalBindingV1.PAUSED,
 )
 
-QUANT_PROFILE_REGISTRY = MappingProxyType({
-    US_PROFILE_ID: US_QUANT_PROFILE_V1,
-    KR_PROFILE_ID: KR_QUANT_PROFILE_V1,
-})
+QUANT_PROFILE_REGISTRY = MappingProxyType(
+    {
+        US_PROFILE_ID: US_QUANT_PROFILE_V1,
+        KR_PROFILE_ID: KR_QUANT_PROFILE_V1,
+    }
+)
 
 # Fixed per-tick evaluation/execution order (§6.1): KR first, then US.
 QUANT_PROFILE_EXECUTION_ORDER = (KR_PROFILE_ID, US_PROFILE_ID)
@@ -164,13 +163,15 @@ class QuantProfileDueIdentityV1:
 
     @property
     def identity_digest(self) -> str:
-        payload = "|".join((
-            self.profile_id,
-            self.policy_version,
-            self.market.value,
-            self.completed_session_date.isoformat(),
-            self.universe_policy_version,
-        ))
+        payload = "|".join(
+            (
+                self.profile_id,
+                self.policy_version,
+                self.market.value,
+                self.completed_session_date.isoformat(),
+                self.universe_policy_version,
+            )
+        )
         return sha256(payload.encode("ascii")).hexdigest()
 
     @property
@@ -193,36 +194,49 @@ _ISO_DATE_RE = r"\d{4}-\d{2}-\d{2}"
 # Exactly the admission-relevant typed fields per profile (§9); the codec
 # validates token shape only — the closed admission vocabulary is enforced by
 # the profile admission gates, never here.
-_MATERIAL_MEMBER_FIELDS = MappingProxyType({
-    KR_PROFILE_ID: MappingProxyType({
-        "symbol": _SYMBOL_RE,
-        "isin_code": r"[A-Z0-9]{12}",
-        "market": _TOKEN_RE,
-        "security_type": _TOKEN_RE,
-        "is_common_share": bool,
-        "status": _TOKEN_RE,
-        "currency": _TOKEN_RE,
-        "list_date": _ISO_DATE_RE,
-        "delist_date": _ISO_DATE_RE,
-        "krx_trading_suspended": bool,
-    }),
-    US_PROFILE_ID: MappingProxyType({
-        "symbol": _SYMBOL_RE,
-        "venue": _TOKEN_RE,
-        "security_type": _TOKEN_RE,
-        "status": _TOKEN_RE,
-        "sec_ticker_form": r"[A-Z0-9_-]{1,32}",
-    }),
-})
+_MATERIAL_MEMBER_FIELDS = MappingProxyType(
+    {
+        KR_PROFILE_ID: MappingProxyType(
+            {
+                "symbol": _SYMBOL_RE,
+                "isin_code": r"[A-Z0-9]{12}",
+                "market": _TOKEN_RE,
+                "security_type": _TOKEN_RE,
+                "is_common_share": bool,
+                "status": _TOKEN_RE,
+                "currency": _TOKEN_RE,
+                "list_date": _ISO_DATE_RE,
+                "delist_date": _ISO_DATE_RE,
+                "krx_trading_suspended": bool,
+            }
+        ),
+        US_PROFILE_ID: MappingProxyType(
+            {
+                "symbol": _SYMBOL_RE,
+                "venue": _TOKEN_RE,
+                "security_type": _TOKEN_RE,
+                "status": _TOKEN_RE,
+                "sec_ticker_form": r"[A-Z0-9_-]{1,32}",
+            }
+        ),
+    }
+)
 
 # Header fields whose values may be None (nullable member dates).
 _NULLABLE_MEMBER_FIELDS = frozenset({"list_date", "delist_date"})
 
-_MATERIAL_HEADER_KEYS = frozenset({
-    "schema_version", "profile_id", "universe_policy_version",
-    "policy_version", "completed_session_date", "request_identity",
-    "observed_at", "members",
-})
+_MATERIAL_HEADER_KEYS = frozenset(
+    {
+        "schema_version",
+        "profile_id",
+        "universe_policy_version",
+        "policy_version",
+        "completed_session_date",
+        "request_identity",
+        "observed_at",
+        "members",
+    }
+)
 _REQUEST_IDENTITY_RE = r"[A-Za-z0-9:._|-]{1,128}"
 _OBSERVED_AT_RE = r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z"
 
@@ -287,18 +301,20 @@ def encode_membership_material(
         or observed_at.utcoffset() is None
     ):
         raise ValueError("observed_at")
-    raw = canonical_encode({
-        "schema_version": QUANT_PROFILE_MATERIAL_SCHEMA_VERSION,
-        "profile_id": profile_id,
-        "universe_policy_version": profile.universe_policy_version,
-        "policy_version": policy_version,
-        "completed_session_date": completed_session_date.isoformat(),
-        "request_identity": request_identity,
-        "observed_at": observed_at,
-        "members": _validated_members(profile_id, tuple(
-            dict(member) for member in members
-        )),
-    })
+    raw = canonical_encode(
+        {
+            "schema_version": QUANT_PROFILE_MATERIAL_SCHEMA_VERSION,
+            "profile_id": profile_id,
+            "universe_policy_version": profile.universe_policy_version,
+            "policy_version": policy_version,
+            "completed_session_date": completed_session_date.isoformat(),
+            "request_identity": request_identity,
+            "observed_at": observed_at,
+            "members": _validated_members(
+                profile_id, tuple(dict(member) for member in members)
+            ),
+        }
+    )
     if len(raw) > QUANT_PROFILE_MATERIAL_MAX_BYTES:
         raise ValueError("material_oversize")
     return raw
@@ -351,9 +367,7 @@ def decode_membership_material(raw: bytes) -> dict:
     members = parsed["members"]
     if type(members) is not list:
         raise ValueError("material_members")
-    parsed["members"] = list(
-        _validated_members(parsed["profile_id"], tuple(members))
-    )
+    parsed["members"] = list(_validated_members(parsed["profile_id"], tuple(members)))
     if canonical_encode(parsed) != raw:
         raise ValueError("material_not_canonical")
     return parsed
@@ -444,15 +458,13 @@ def validate_material_binding(*, due, result) -> dict:
         raise ValueError("material_acquisition_binding")
     expected_request = (
         f"membership:toss-stocks:{due.completed_session_date}"
-        if profile_id == KR_PROFILE_ID else expected_acquisition
+        if profile_id == KR_PROFILE_ID
+        else expected_acquisition
     )
     if decoded["request_identity"] != expected_request:
         raise ValueError("material_request_identity")
     symbols = tuple(result.symbols)
-    if (
-        symbols != tuple(sorted(set(symbols)))
-        or len(symbols) != result.cohort_size
-    ):
+    if symbols != tuple(sorted(set(symbols))) or len(symbols) != result.cohort_size:
         raise ValueError("material_symbols_binding")
     members = tuple(row["symbol"] for row in decoded["members"])
     if profile_id == KR_PROFILE_ID:
@@ -497,8 +509,11 @@ class QuantProfileEffectEvidenceV1:
 
     def __post_init__(self) -> None:
         for value in (
-            self.membership_wires_settled, self.candle_wires_settled,
-            self.alert_transports, self.order_transports, self.model_calls,
+            self.membership_wires_settled,
+            self.candle_wires_settled,
+            self.alert_transports,
+            self.order_transports,
+            self.model_calls,
             self.writes_outside_profile_store,
         ):
             if type(value) is not int or value < 0:
@@ -534,7 +549,10 @@ def _material_binding_ok(due, result) -> bool:
 
 
 def kr_profile_acceptance_v1(
-    *, due, result, evidence=None,
+    *,
+    due,
+    result,
+    evidence=None,
 ) -> QuantProfileAcceptanceV1:
     """PASS iff the KR evidence profile terminal is exactly compliant (§5.3).
 
@@ -558,10 +576,17 @@ def kr_profile_acceptance_v1(
     ):
         failed.append("prohibited_effects")
     if result is None:
-        failed.extend((
-            "degraded", "limitation", "admissible_count",
-            "membership_starts", "candle_pages", "digests", "pack_digest",
-        ))
+        failed.extend(
+            (
+                "degraded",
+                "limitation",
+                "admissible_count",
+                "membership_starts",
+                "candle_pages",
+                "digests",
+                "pack_digest",
+            )
+        )
         return QuantProfileAcceptanceV1(False, tuple(failed))
     if isinstance(evidence, QuantProfileEffectEvidenceV1) and (
         evidence.membership_wires_settled != result.membership_starts
@@ -600,10 +625,15 @@ def us_profile_acceptance_v1(*, due, result) -> QuantProfileAcceptanceV1:
     if due is None or due.state is not QuantTerminalStateV1.SUCCEEDED:
         failed.append("terminal_state")
     if result is None:
-        failed.extend((
-            "membership_starts", "admissible_count", "candle_pages",
-            "digests", "pack_digest",
-        ))
+        failed.extend(
+            (
+                "membership_starts",
+                "admissible_count",
+                "candle_pages",
+                "digests",
+                "pack_digest",
+            )
+        )
         return QuantProfileAcceptanceV1(False, tuple(failed))
     us_profile = QUANT_PROFILE_REGISTRY[US_PROFILE_ID]
     if not (

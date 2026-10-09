@@ -12,28 +12,29 @@ imports never activate migration; the CLI success/refusal/receipt/replay
 contract holds.
 """
 
-from datetime import datetime, timezone
 import fcntl
 import importlib.util
 import json
 import os
-from pathlib import Path
 import sqlite3
 import stat
 import subprocess
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
 from tokmo.records import ops_kernel as module
-from tokmo.records.ops_kernel import OpsKernelStore, SCHEMA_VERSION
+from tokmo.records.ops_kernel import SCHEMA_VERSION, OpsKernelStore
 from tokmo.values.ops_kernel import (
-    OpsKernelCorruptError, OpsKernelError, OpsKernelMigrationRequiredError,
+    OpsKernelCorruptError,
+    OpsKernelError,
+    OpsKernelMigrationRequiredError,
 )
 
-TOOL_PATH = Path(__file__).resolve().parents[1] / "tools" / (
-    "migrate_ops_kernel_v14_to_v15.py"
+TOOL_PATH = (
+    Path(__file__).resolve().parents[1] / "tools" / ("migrate_ops_kernel_v14_to_v15.py")
 )
 TS = "2026-08-21T00:00:00.000000Z"
 
@@ -72,13 +73,16 @@ def _objects(connection):
 
 def _rows(connection):
     tables = sorted(
-        row[0] for row in connection.execute(
+        row[0]
+        for row in connection.execute(
             "SELECT name FROM sqlite_schema WHERE type='table' "
             "AND name NOT LIKE 'sqlite_%'"
         )
     )
-    return {table: connection.execute(f'SELECT * FROM "{table}"').fetchall()
-            for table in tables}
+    return {
+        table: connection.execute(f'SELECT * FROM "{table}"').fetchall()
+        for table in tables
+    }
 
 
 def _representative_v14(path, *, mode=0o600):
@@ -107,15 +111,36 @@ def _representative_v14(path, *, mode=0o600):
     for suffix, digest in (("a", "1"), ("b", "2")):
         connection.execute(
             "INSERT INTO hypotheses VALUES(?,?,?,?,?,?,?,?,?,NULL,?,?,?,NULL,?,?)",
-            (f"hypothesis:{suffix * 24}", digest * 64, "CANDIDATE", "s",
-             "EVENT_OCCUR", "t", "[]", "[]", "[]", "NONE", "youtube:12man",
-             "YlVhQO-Fkc8", TS, TS),
+            (
+                f"hypothesis:{suffix * 24}",
+                digest * 64,
+                "CANDIDATE",
+                "s",
+                "EVENT_OCCUR",
+                "t",
+                "[]",
+                "[]",
+                "[]",
+                "NONE",
+                "youtube:12man",
+                "YlVhQO-Fkc8",
+                TS,
+                TS,
+            ),
         )
     connection.execute(
         "INSERT INTO hypothesis_relations VALUES(?,?,?,?,?,?,?,?,?)",
-        ("f" * 32, "hypothesis:" + "a" * 24, "hypothesis:" + "b" * 24,
-         "RELATED_BUT_DISTINCT", "material_conflict", '["touch"]',
-         0.25, "WEEKLY_REVIEW", TS),
+        (
+            "f" * 32,
+            "hypothesis:" + "a" * 24,
+            "hypothesis:" + "b" * 24,
+            "RELATED_BUT_DISTINCT",
+            "material_conflict",
+            '["touch"]',
+            0.25,
+            "WEEKLY_REVIEW",
+            TS,
+        ),
     )
     connection.commit()
     connection.close()
@@ -151,11 +176,16 @@ def test_fresh_bootstrap_is_v15_and_admits_membership_toss_stocks(tmp_path):
 
 
 LEGACY_VERSIONS = (
-    (4, "_LEGACY_SCHEMA_SQL_V4"), (6, "_LEGACY_SCHEMA_SQL_V6"),
-    (7, "_LEGACY_SCHEMA_SQL_V7"), (8, "_LEGACY_SCHEMA_SQL_V8"),
-    (9, "_LEGACY_SCHEMA_SQL_V9"), (10, "_LEGACY_SCHEMA_SQL_V10"),
-    (11, "_LEGACY_SCHEMA_SQL_V11"), (12, "_LEGACY_SCHEMA_SQL_V12"),
-    (13, "_LEGACY_SCHEMA_SQL_V13"), (14, "_LEGACY_SCHEMA_SQL_V14"),
+    (4, "_LEGACY_SCHEMA_SQL_V4"),
+    (6, "_LEGACY_SCHEMA_SQL_V6"),
+    (7, "_LEGACY_SCHEMA_SQL_V7"),
+    (8, "_LEGACY_SCHEMA_SQL_V8"),
+    (9, "_LEGACY_SCHEMA_SQL_V9"),
+    (10, "_LEGACY_SCHEMA_SQL_V10"),
+    (11, "_LEGACY_SCHEMA_SQL_V11"),
+    (12, "_LEGACY_SCHEMA_SQL_V12"),
+    (13, "_LEGACY_SCHEMA_SQL_V13"),
+    (14, "_LEGACY_SCHEMA_SQL_V14"),
 )
 
 
@@ -171,7 +201,8 @@ def test_every_exact_legacy_version_refuses_typed_without_mutation(tmp_path):
         assert path.read_bytes() == before
         after = path.stat()
         assert (after.st_mtime_ns, after.st_size) == (
-            before_stat.st_mtime_ns, before_stat.st_size,
+            before_stat.st_mtime_ns,
+            before_stat.st_size,
         )
         sidecars = _sidecars(path)
         assert sidecars["-journal"] is False
@@ -215,7 +246,9 @@ def test_migrate_v14_to_v15_preserves_rows_and_identical_deployed_ddl(tmp_path):
     before_rows = _rows(sqlite3.connect(path))
 
     receipt = OpsKernelStore.migrate_v14_to_v15(
-        path, snapshot_path=snapshot, writers_paused=True,
+        path,
+        snapshot_path=snapshot,
+        writers_paused=True,
     )
     assert receipt.status == "MIGRATED"
     assert (receipt.from_version, receipt.to_version) == (14, 15)
@@ -242,7 +275,9 @@ def test_migrate_v14_to_v15_preserves_rows_and_identical_deployed_ddl(tmp_path):
         assert connection.execute(
             "SELECT operation FROM cadence_wire_starts ORDER BY operation"
         ).fetchall() == [
-            ("CONDITIONAL_ORDERS",), ("MEMBERSHIP_TOSS_STOCKS",), ("TOKEN",),
+            ("CONDITIONAL_ORDERS",),
+            ("MEMBERSHIP_TOSS_STOCKS",),
+            ("TOKEN",),
         ]
     finally:
         connection.close()
@@ -256,7 +291,9 @@ def test_migration_requires_explicit_attestation(tmp_path):
     snapshot = tmp_path / "ops" / "snap.sqlite3"
     with pytest.raises(OpsKernelCorruptError):
         OpsKernelStore.migrate_v14_to_v15(
-            path, snapshot_path=snapshot, writers_paused=False,
+            path,
+            snapshot_path=snapshot,
+            writers_paused=False,
         )
     with sqlite3.connect(path) as connection:
         assert connection.execute("PRAGMA user_version").fetchone() == (14,)
@@ -267,7 +304,8 @@ def test_migration_refuses_non_v14_source(tmp_path):
     _build(path, module._LEGACY_SCHEMA_SQL_V13)
     with pytest.raises(OpsKernelCorruptError, match="schema mismatch"):
         OpsKernelStore.migrate_v14_to_v15(
-            path, snapshot_path=tmp_path / "ops" / "snap.sqlite3",
+            path,
+            snapshot_path=tmp_path / "ops" / "snap.sqlite3",
             writers_paused=True,
         )
     with sqlite3.connect(path) as connection:
@@ -279,7 +317,8 @@ def test_v15_source_without_receipt_refuses_already_v15(tmp_path):
     OpsKernelStore(path).close()
     with pytest.raises(OpsKernelCorruptError, match="already-v15-no-receipt"):
         OpsKernelStore.migrate_v14_to_v15(
-            path, snapshot_path=tmp_path / "ops" / "snap.sqlite3",
+            path,
+            snapshot_path=tmp_path / "ops" / "snap.sqlite3",
             writers_paused=True,
         )
 
@@ -304,11 +343,16 @@ def test_copy_drift_fault_leaves_complete_v14(tmp_path, monkeypatch):
         )
 
     monkeypatch.setattr(
-        OpsKernelStore, "_migration_copy_validation_hook", drift, raising=False,
+        OpsKernelStore,
+        "_migration_copy_validation_hook",
+        drift,
+        raising=False,
     )
     with pytest.raises(OpsKernelCorruptError, match="copy verification"):
         OpsKernelStore.migrate_v14_to_v15(
-            path, snapshot_path=snapshot, writers_paused=True,
+            path,
+            snapshot_path=snapshot,
+            writers_paused=True,
         )
     assert path.read_bytes() == before
     with sqlite3.connect(path) as connection:
@@ -330,7 +374,9 @@ def test_validation_fault_leaves_complete_v14(tmp_path, monkeypatch):
     monkeypatch.setattr(OpsKernelStore, "_validate_schema", failing_validate)
     with pytest.raises(OpsKernelCorruptError):
         OpsKernelStore.migrate_v14_to_v15(
-            path, snapshot_path=snapshot, writers_paused=True,
+            path,
+            snapshot_path=snapshot,
+            writers_paused=True,
         )
     assert path.read_bytes() == before
 
@@ -339,19 +385,21 @@ def test_replace_fault_leaves_complete_v14(tmp_path, monkeypatch):
     path, snapshot = _fault_setup(tmp_path)
     before = path.read_bytes()
     monkeypatch.setattr(
-        os, "replace",
+        os,
+        "replace",
         lambda src, dst: (_ for _ in ()).throw(OSError("injected replace")),
     )
     with pytest.raises(OpsKernelCorruptError):
         OpsKernelStore.migrate_v14_to_v15(
-            path, snapshot_path=snapshot, writers_paused=True,
+            path,
+            snapshot_path=snapshot,
+            writers_paused=True,
         )
     assert path.read_bytes() == before
     assert not list(path.parent.glob(f".{path.name}.migrate-v14-*"))
 
 
-def test_postverify_fault_reports_uncertain_and_keeps_backup(tmp_path,
-                                                             monkeypatch):
+def test_postverify_fault_reports_uncertain_and_keeps_backup(tmp_path, monkeypatch):
     path, snapshot = _fault_setup(tmp_path)
     original = OpsKernelStore._validate_schema
     calls = {"candidate_or_readback": 0}
@@ -367,7 +415,9 @@ def test_postverify_fault_reports_uncertain_and_keeps_backup(tmp_path,
     monkeypatch.setattr(OpsKernelStore, "_validate_schema", failing_readback)
     with pytest.raises(OpsKernelCorruptError, match="uncertain"):
         OpsKernelStore.migrate_v14_to_v15(
-            path, snapshot_path=snapshot, writers_paused=True,
+            path,
+            snapshot_path=snapshot,
+            writers_paused=True,
         )
     # v15 is installed (post-replace); snapshot retained for rollback.
     with sqlite3.connect(path) as connection:
@@ -398,13 +448,15 @@ def test_wal_pending_committed_row_survives_migration(tmp_path):
     wal_before = wal_path.read_bytes()
     reader = sqlite3.connect(path)
     reader.execute("BEGIN")
-    assert reader.execute(
-        "SELECT count(*) FROM request_day_counters"
-    ).fetchone() == (1,)
+    assert reader.execute("SELECT count(*) FROM request_day_counters").fetchone() == (
+        1,
+    )
     snapshot = tmp_path / "ops" / "snap.sqlite3"
 
     OpsKernelStore.migrate_v14_to_v15(
-        path, snapshot_path=snapshot, writers_paused=True,
+        path,
+        snapshot_path=snapshot,
+        writers_paused=True,
     )
 
     # The pre-replacement bytes were not mutated pre-promotion (they were
@@ -418,9 +470,9 @@ def test_wal_pending_committed_row_survives_migration(tmp_path):
     finally:
         connection.close()
     # The active reader keeps a consistent view on the old inode.
-    assert reader.execute(
-        "SELECT count(*) FROM request_day_counters"
-    ).fetchone() == (1,)
+    assert reader.execute("SELECT count(*) FROM request_day_counters").fetchone() == (
+        1,
+    )
     reader.close()
     writer.close()
     assert main_before != path.read_bytes()  # replaced, not edited
@@ -433,12 +485,14 @@ def test_replace_fault_leaves_wal_bytes_untouched(tmp_path, monkeypatch):
     main_before = path.read_bytes()
     wal_before = wal_path.read_bytes()
     monkeypatch.setattr(
-        os, "replace",
+        os,
+        "replace",
         lambda src, dst: (_ for _ in ()).throw(OSError("injected replace")),
     )
     with pytest.raises(OpsKernelCorruptError):
         OpsKernelStore.migrate_v14_to_v15(
-            path, snapshot_path=tmp_path / "ops" / "snap.sqlite3",
+            path,
+            snapshot_path=tmp_path / "ops" / "snap.sqlite3",
             writers_paused=True,
         )
     assert path.read_bytes() == main_before
@@ -459,7 +513,8 @@ def test_lock_contention_refuses_without_writes(tmp_path):
         fcntl.flock(descriptor, fcntl.LOCK_EX)
         with pytest.raises(OpsKernelCorruptError, match="busy"):
             OpsKernelStore.migrate_v14_to_v15(
-                path, snapshot_path=tmp_path / "ops" / "snap.sqlite3",
+                path,
+                snapshot_path=tmp_path / "ops" / "snap.sqlite3",
                 writers_paused=True,
             )
         assert path.read_bytes() == before
@@ -471,8 +526,9 @@ def test_lock_contention_refuses_without_writes(tmp_path):
 # --- Matrix 9: unsafe source/snapshot paths refuse ------------------------
 
 
-@pytest.mark.parametrize("kind", ["missing", "symlink", "directory",
-                                  "wrong-mode", "multi-link"])
+@pytest.mark.parametrize(
+    "kind", ["missing", "symlink", "directory", "wrong-mode", "multi-link"]
+)
 def test_unsafe_source_paths_refuse(tmp_path, kind):
     path = tmp_path / "ops" / "ops_kernel.sqlite3"
     if kind == "missing":
@@ -494,7 +550,8 @@ def test_unsafe_source_paths_refuse(tmp_path, kind):
         os.link(path, tmp_path / "ops" / "hardlink.sqlite3")
     with pytest.raises(OpsKernelCorruptError):
         OpsKernelStore.migrate_v14_to_v15(
-            source, snapshot_path=tmp_path / "ops" / "snap.sqlite3",
+            source,
+            snapshot_path=tmp_path / "ops" / "snap.sqlite3",
             writers_paused=True,
         )
 
@@ -506,7 +563,9 @@ def test_existing_snapshot_target_refuses_without_overwrite(tmp_path):
     snapshot.write_bytes(b"pre-existing")
     with pytest.raises(OpsKernelCorruptError, match="exists"):
         OpsKernelStore.migrate_v14_to_v15(
-            path, snapshot_path=snapshot, writers_paused=True,
+            path,
+            snapshot_path=snapshot,
+            writers_paused=True,
         )
     assert snapshot.read_bytes() == b"pre-existing"
 
@@ -522,18 +581,22 @@ def test_old_v14_code_fails_closed_against_v15(tmp_path):
     root = "projects/tokmo-v3/src/tokmo/"
     source = subprocess.run(
         ["git", "show", f"{commit}:{root}records/ops_kernel.py"],
-        check=True, text=True, capture_output=True, cwd=_repo_root(),
+        check=True,
+        text=True,
+        capture_output=True,
+        cwd=_repo_root(),
     ).stdout
     historical = types.ModuleType("_v14_ops_kernel")
     historical.__file__ = root + "records/ops_kernel.py"
     historical.__package__ = "tokmo.records"
     sys.modules.setdefault(
-        "tokmo.values.request_parity", __import__(
-            "tokmo.values.request_parity", fromlist=["x"],
+        "tokmo.values.request_parity",
+        __import__(
+            "tokmo.values.request_parity",
+            fromlist=["x"],
         ),
     )
-    exec(compile(source, root + "records/ops_kernel.py", "exec"),
-         historical.__dict__)
+    exec(compile(source, root + "records/ops_kernel.py", "exec"), historical.__dict__)
     with pytest.raises(OpsKernelCorruptError):
         historical.OpsKernelStore(store.path)
     assert store.path.read_bytes() == before
@@ -551,7 +614,8 @@ def test_importing_tool_and_store_never_migrates(tmp_path):
     _representative_v14(path)
     before = path.read_bytes()
     spec = importlib.util.spec_from_file_location(
-        "migrate_ops_kernel_v14_to_v15", TOOL_PATH,
+        "migrate_ops_kernel_v14_to_v15",
+        TOOL_PATH,
     )
     tool = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(tool)
@@ -566,15 +630,22 @@ def test_importing_tool_and_store_never_migrates(tmp_path):
 
 def _run_cli(database, snapshot, receipt, *, attest=True, cwd=None):
     command = [
-        sys.executable, str(TOOL_PATH),
-        "--database", str(database),
-        "--snapshot", str(snapshot),
-        "--receipt", str(receipt),
+        sys.executable,
+        str(TOOL_PATH),
+        "--database",
+        str(database),
+        "--snapshot",
+        str(snapshot),
+        "--receipt",
+        str(receipt),
     ]
     if attest:
         command.append("--attest-writers-paused")
     return subprocess.run(
-        command, text=True, capture_output=True, cwd=cwd or _repo_root(),
+        command,
+        text=True,
+        capture_output=True,
+        cwd=cwd or _repo_root(),
     )
 
 
@@ -602,7 +673,9 @@ def test_cli_refuses_without_attestation(tmp_path):
     path = tmp_path / "ops" / "ops_kernel.sqlite3"
     _representative_v14(path)
     result = _run_cli(
-        path, tmp_path / "ops" / "snap.sqlite3", tmp_path / "ops" / "r.json",
+        path,
+        tmp_path / "ops" / "snap.sqlite3",
+        tmp_path / "ops" / "r.json",
         attest=False,
     )
     assert result.returncode != 0
@@ -641,8 +714,7 @@ def test_cli_existing_receipt_target_refuses(tmp_path):
 # --- Review repair RED tests: masking gaps (B1/B2/M1/M2/M3/M6) ------------
 
 
-def test_cli_fails_closed_when_receipt_path_already_exists_pre_migration(
-        tmp_path):
+def test_cli_fails_closed_when_receipt_path_already_exists_pre_migration(tmp_path):
     # B1: a pre-existing receipt target must refuse BEFORE the migration
     # runs, leaving the source at exact v14.
     path = tmp_path / "ops" / "ops_kernel.sqlite3"
@@ -665,11 +737,15 @@ def test_migration_refuses_wrong_owner(monkeypatch, tmp_path):
     _representative_v14(path)
     real_getuid = os.getuid
     monkeypatch.setattr(
-        os, "getuid", lambda: real_getuid() + 1, raising=True,
+        os,
+        "getuid",
+        lambda: real_getuid() + 1,
+        raising=True,
     )
     with pytest.raises(OpsKernelCorruptError):
         OpsKernelStore.migrate_v14_to_v15(
-            path, snapshot_path=tmp_path / "ops" / "snap.sqlite3",
+            path,
+            snapshot_path=tmp_path / "ops" / "snap.sqlite3",
             writers_paused=True,
         )
     monkeypatch.undo()
@@ -691,8 +767,7 @@ def test_candidate_fsync_fault_leaves_source_unchanged(monkeypatch, tmp_path):
 
     def faulting_fsync(descriptor):
         info = os.fstat(descriptor)
-        for candidate in path.parent.glob(
-                f".{path.name}.migrate-v14-*"):
+        for candidate in path.parent.glob(f".{path.name}.migrate-v14-*"):
             try:
                 if os.lstat(candidate).st_ino == info.st_ino:
                     raise OSError("fault injection: candidate fsync")
@@ -703,7 +778,8 @@ def test_candidate_fsync_fault_leaves_source_unchanged(monkeypatch, tmp_path):
     monkeypatch.setattr(module.os, "fsync", faulting_fsync)
     with pytest.raises(OpsKernelError):
         OpsKernelStore.migrate_v14_to_v15(
-            path, snapshot_path=tmp_path / "ops" / "snap.sqlite3",
+            path,
+            snapshot_path=tmp_path / "ops" / "snap.sqlite3",
             writers_paused=True,
         )
     monkeypatch.undo()
@@ -713,8 +789,7 @@ def test_candidate_fsync_fault_leaves_source_unchanged(monkeypatch, tmp_path):
         assert connection.execute("PRAGMA user_version").fetchone() == (14,)
 
 
-def test_replace_fault_leaves_wal_bytes_untouched_offline(tmp_path,
-                                                           monkeypatch):
+def test_replace_fault_leaves_wal_bytes_untouched_offline(tmp_path, monkeypatch):
     # B2 gap: pre-replace fault while the source still has a -wal. The
     # durable main and -wal bytes must be untouched and journal-absent.
     path = tmp_path / "ops" / "ops_kernel.sqlite3"
@@ -723,12 +798,14 @@ def test_replace_fault_leaves_wal_bytes_untouched_offline(tmp_path,
     wal_path = path.with_name(path.name + "-wal")
     wal_before = wal_path.read_bytes()
     monkeypatch.setattr(
-        os, "replace",
+        os,
+        "replace",
         lambda src, dst: (_ for _ in ()).throw(OSError("injected replace")),
     )
     with pytest.raises(OpsKernelCorruptError):
         OpsKernelStore.migrate_v14_to_v15(
-            path, snapshot_path=tmp_path / "ops" / "snap.sqlite3",
+            path,
+            snapshot_path=tmp_path / "ops" / "snap.sqlite3",
             writers_paused=True,
         )
     assert path.read_bytes() == main_before
@@ -744,7 +821,9 @@ def test_snapshot_is_exact_v14_and_carries_wal_committed_rows(tmp_path):
     writer = _wal_backed_v14(path)
     snapshot = tmp_path / "ops" / "snap.sqlite3"
     receipt = OpsKernelStore.migrate_v14_to_v15(
-        path, snapshot_path=snapshot, writers_paused=True,
+        path,
+        snapshot_path=snapshot,
+        writers_paused=True,
     )
     writer.close()
     assert receipt.pre_wal_sha256 is not None
@@ -755,9 +834,7 @@ def test_snapshot_is_exact_v14_and_carries_wal_committed_rows(tmp_path):
         assert connection.execute(
             "SELECT count(*) FROM request_day_counters"
         ).fetchone() == (1,)
-        assert connection.execute(
-            "PRAGMA integrity_check"
-        ).fetchone() == ("ok",)
+        assert connection.execute("PRAGMA integrity_check").fetchone() == ("ok",)
     finally:
         connection.close()
 
@@ -771,7 +848,8 @@ def test_journal_sidecar_present_refuses_prelock(tmp_path):
     before = path.read_bytes()
     with pytest.raises(OpsKernelCorruptError, match="journal"):
         OpsKernelStore.migrate_v14_to_v15(
-            path, snapshot_path=tmp_path / "ops" / "snap.sqlite3",
+            path,
+            snapshot_path=tmp_path / "ops" / "snap.sqlite3",
             writers_paused=True,
         )
     assert path.read_bytes() == before
@@ -785,7 +863,9 @@ def test_receipt_records_source_prehashes_and_row_count(tmp_path):
     snapshot = tmp_path / "ops" / "snap.sqlite3"
     main_sha = _sha256_file(path)
     receipt = OpsKernelStore.migrate_v14_to_v15(
-        path, snapshot_path=snapshot, writers_paused=True,
+        path,
+        snapshot_path=snapshot,
+        writers_paused=True,
     )
     assert receipt.pre_main_sha256 == main_sha
     assert receipt.pre_wal_sha256 is None
@@ -811,7 +891,9 @@ def test_snapshot_is_not_a_raw_byte_copy(tmp_path):
     writer = _wal_backed_v14(path)
     snapshot = tmp_path / "ops" / "snap.sqlite3"
     OpsKernelStore.migrate_v14_to_v15(
-        path, snapshot_path=snapshot, writers_paused=True,
+        path,
+        snapshot_path=snapshot,
+        writers_paused=True,
     )
     writer.close()
     assert not snapshot.with_name(snapshot.name + "-wal").exists()
@@ -842,7 +924,8 @@ def test_migration_survives_source_with_foreign_key_violation_unused(tmp_path):
     before = path.read_bytes()
     with pytest.raises(OpsKernelCorruptError):
         OpsKernelStore.migrate_v14_to_v15(
-            path, snapshot_path=tmp_path / "ops" / "snap.sqlite3",
+            path,
+            snapshot_path=tmp_path / "ops" / "snap.sqlite3",
             writers_paused=True,
         )
     assert path.read_bytes() == before
@@ -854,8 +937,10 @@ def test_cli_refuses_relative_paths(tmp_path):
     path = tmp_path / "ops" / "ops_kernel.sqlite3"
     _representative_v14(path)
     result = _run_cli(
-        Path("ops/ops_kernel.sqlite3"), Path("ops/snap.sqlite3"),
-        Path("ops/r.json"), cwd=tmp_path,
+        Path("ops/ops_kernel.sqlite3"),
+        Path("ops/snap.sqlite3"),
+        Path("ops/r.json"),
+        cwd=tmp_path,
     )
     assert result.returncode != 0
     payload = json.loads(result.stdout)

@@ -9,17 +9,30 @@ that branch validates pre-existing private directories and never creates them.
 import argparse
 import json
 import os
-from pathlib import Path
 import re
 import stat
 import sys
+from datetime import UTC
+from pathlib import Path
 from typing import NamedTuple
 
 from tokmo.composition import execute_official_membership_sic_capture
-from tokmo.facts.official_membership_live import EndpointKindV1, OfficialMembershipLiveTransport, OfficialMembershipRequestV1
-from tokmo.records.canonical_observation_registry import OFFICIAL_MEMBERSHIP_DOCUMENTATION_CAPTURE_FAMILY, registered_family
-from tokmo.records.official_membership_campaign_store import CAMPAIGN_CEILING, OfficialMembershipCampaignStore
-from tokmo.records.official_membership_capture_store import OfficialMembershipCaptureStore
+from tokmo.facts.official_membership_live import (
+    EndpointKindV1,
+    OfficialMembershipLiveTransport,
+    OfficialMembershipRequestV1,
+)
+from tokmo.records.canonical_observation_registry import (
+    OFFICIAL_MEMBERSHIP_DOCUMENTATION_CAPTURE_FAMILY,
+    registered_family,
+)
+from tokmo.records.official_membership_campaign_store import (
+    CAMPAIGN_CEILING,
+    OfficialMembershipCampaignStore,
+)
+from tokmo.records.official_membership_capture_store import (
+    OfficialMembershipCaptureStore,
+)
 from tokmo.runtime.config import load_sec_config
 
 
@@ -67,8 +80,12 @@ def _private_dir(path):
         raise SicGateError("REQUIRED_DIRECTORY_MISSING") from None
     except OSError:
         raise SicGateError("PRIVATE_PATH_INVALID") from None
-    if (stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode)
-            or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700):
+    if (
+        stat.S_ISLNK(info.st_mode)
+        or not stat.S_ISDIR(info.st_mode)
+        or info.st_uid != os.getuid()
+        or stat.S_IMODE(info.st_mode) != 0o700
+    ):
         raise SicGateError("PRIVATE_PATH_INVALID")
 
 
@@ -80,24 +97,34 @@ def _private_file(path):
         raise SicGateError("REQUIRED_FILE_MISSING") from None
     except OSError:
         raise SicGateError("PRIVATE_PATH_INVALID") from None
-    if (stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode)
-            or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600
-            or info.st_nlink != 1):
+    if (
+        stat.S_ISLNK(info.st_mode)
+        or not stat.S_ISREG(info.st_mode)
+        or info.st_uid != os.getuid()
+        or stat.S_IMODE(info.st_mode) != 0o600
+        or info.st_nlink != 1
+    ):
         raise SicGateError("PRIVATE_PATH_INVALID")
 
 
 def _fixed_campaign_store(paths, *, candidate=None):
     selected = paths.campaign if candidate is None else Path(candidate)
-    if selected != paths.campaign or selected.name != "live-transition-campaign.sqlite3":
+    if (
+        selected != paths.campaign
+        or selected.name != "live-transition-campaign.sqlite3"
+    ):
         raise ValueError("campaign_path")
     _private_dir(selected.parent)
     if os.path.lexists(selected):
-        try:_private_file(selected)
-        except (OSError, ValueError):raise ValueError("campaign_path") from None
+        try:
+            _private_file(selected)
+        except (OSError, ValueError):
+            raise ValueError("campaign_path") from None
     if any(item != selected for item in selected.parent.glob("*campaign*.sqlite3")):
         raise ValueError("campaign_path")
-    from datetime import datetime, timezone
-    return OfficialMembershipCampaignStore(selected, clock=lambda: datetime.now(timezone.utc))
+    from datetime import datetime
+
+    return OfficialMembershipCampaignStore(selected, clock=lambda: datetime.now(UTC))
 
 
 def _campaign_store_for_test(paths, *, candidate=None):
@@ -126,12 +153,15 @@ def _offline_preflight_for_test(**dependencies):
 
 def _execute_armed(*, paths, campaign_store, capture_store, transport):
     preflight = _evaluate_preflight(
-        paths=paths, campaign_store=campaign_store,
+        paths=paths,
+        campaign_store=campaign_store,
         capture_store=capture_store,
     )
     return execute_official_membership_sic_capture(
-        campaign_store=campaign_store, capture_store=capture_store,
-        transport=transport, sec_user_agent=preflight.sec_user_agent,
+        campaign_store=campaign_store,
+        capture_store=capture_store,
+        transport=transport,
+        sec_user_agent=preflight.sec_user_agent,
     )
 
 
@@ -142,19 +172,33 @@ def _execute_armed_for_test(**dependencies):
 
 def _production_preflight():
     paths = FixedSicPaths.production()
-    for directory in (paths.sec_config.parent, paths.campaign.parent, paths.capture.parent):
+    for directory in (
+        paths.sec_config.parent,
+        paths.campaign.parent,
+        paths.capture.parent,
+    ):
         _private_dir(directory)
     campaign = _fixed_campaign_store(paths)
     capture = OfficialMembershipCaptureStore(paths.capture)
     preflight = _evaluate_preflight(
-        paths=paths, campaign_store=campaign, capture_store=capture)
+        paths=paths, campaign_store=campaign, capture_store=capture
+    )
     return paths, campaign, capture, preflight
 
 
 def _refused(code="OFFLINE_PREFLIGHT_REFUSED", *, campaign_starts=0, source_starts=0):
-    sys.stderr.write(json.dumps(
-        {"campaign_starts": campaign_starts, "code": code, "source_starts": source_starts},
-        separators=(",", ":"), sort_keys=True) + "\n")
+    sys.stderr.write(
+        json.dumps(
+            {
+                "campaign_starts": campaign_starts,
+                "code": code,
+                "source_starts": source_starts,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        + "\n"
+    )
     return 2
 
 
@@ -163,19 +207,35 @@ def _safe_capture_failure_code(error):
     prefix = "sic_capture_failed:"
     if not text.startswith(prefix):
         return "UNKNOWN"
-    detail = text[len(prefix):]
-    if detail == "TRANSPORT_FAILURE" or detail in {
-        "CONTENT_ENCODING", "CONTENT_LENGTH", "BODY_TOO_LARGE",
-    } or re.fullmatch(r"HTTP_[0-9]{3}", detail):
+    detail = text[len(prefix) :]
+    if (
+        detail == "TRANSPORT_FAILURE"
+        or detail
+        in {
+            "CONTENT_ENCODING",
+            "CONTENT_LENGTH",
+            "BODY_TOO_LARGE",
+        }
+        or re.fullmatch(r"HTTP_[0-9]{3}", detail)
+    ):
         return detail
     return "UNKNOWN"
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        epilog="bounded execution requires pre-created owner-only directories and separate --armed authorization")
-    parser.add_argument("--mode", choices=("offline-preflight", "bounded-live-canary"), default="offline-preflight")
-    parser.add_argument("--armed", action="store_true", help="arm the separately authorized fixed one-GET gate")
+        epilog="bounded execution requires pre-created owner-only directories and separate --armed authorization"
+    )
+    parser.add_argument(
+        "--mode",
+        choices=("offline-preflight", "bounded-live-canary"),
+        default="offline-preflight",
+    )
+    parser.add_argument(
+        "--armed",
+        action="store_true",
+        help="arm the separately authorized fixed one-GET gate",
+    )
     args = parser.parse_args(argv)
     if args.mode == "offline-preflight":
         if args.armed:
@@ -191,10 +251,14 @@ def main(argv=None):
         return _refused("PREFLIGHT_REFUSED")
     try:
         _execute_armed(
-            paths=paths, campaign_store=campaign, capture_store=capture,
+            paths=paths,
+            campaign_store=campaign,
+            capture_store=capture,
             transport=OfficialMembershipLiveTransport(
                 clock=lambda: __import__("datetime").datetime.now(
-                    __import__("datetime").timezone.utc)),
+                    __import__("datetime").timezone.utc
+                )
+            ),
         )
     except (OSError, ValueError) as error:
         safe = _safe_capture_failure_code(error)

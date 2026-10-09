@@ -9,12 +9,12 @@ market/status tokens are SDS_GAP-1/2 and stay fail-closed (refuse, never
 guess) until pinned at G3 from the private canary artifact manifest.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from hashlib import sha256
 from re import fullmatch
 from types import MappingProxyType
-from typing import Mapping
 from zoneinfo import ZoneInfo
 
 from tokmo.values.account_scope_patterns import ACCOUNT_SCOPE_RE, PENSION_SCOPE_RE
@@ -29,7 +29,6 @@ from tokmo.values.quant_multifactor_core import MarketV1
 from tokmo.values.quant_profiles import KR_QUANT_PROFILE_V1
 from tokmo.values.session_gate import MARKET_TIMEZONE, Market
 from tokmo.values.toss_reference import KrMarketDetail, StockInfo
-
 
 MAX_OBSERVATION_AGE = timedelta(minutes=30)
 _KR_MARKET_TIMEZONE = ZoneInfo(MARKET_TIMEZONE[Market.KR])
@@ -58,7 +57,9 @@ class KrMembershipVocabularyV1:
         ):
             raise ValueError("market_tokens")
         object.__setattr__(
-            self, "market_tokens", MappingProxyType(dict(self.market_tokens)),
+            self,
+            "market_tokens",
+            MappingProxyType(dict(self.market_tokens)),
         )
 
 
@@ -141,8 +142,7 @@ def describe_kr_personal_membership_cohort(
             symbol_markets[item.symbol] = market
     expected_symbols = tuple(
         sorted(
-            symbol for symbol, market in symbol_markets.items()
-            if market is Market.KR
+            symbol for symbol, market in symbol_markets.items() if market is Market.KR
         )
     )
     holdings_bytes = canonical_holdings_bytes(holdings)
@@ -174,7 +174,8 @@ def kr_membership_native_identity(session_date: date) -> str:
 
 
 def kr_membership_operation_plan(
-    symbols: tuple[str, ...], session_date: date,
+    symbols: tuple[str, ...],
+    session_date: date,
 ) -> tuple[tuple[str, str], ...]:
     """Exactly one STOCKS batch start; a cohort beyond the KR profile maximum
     is refused here, before any wire could be planned."""
@@ -192,18 +193,17 @@ def kr_membership_operation_plan(
 
 
 def verify_kr_cohort_echo(
-    infos: tuple[StockInfo, ...], expected_symbols: tuple[str, ...],
+    infos: tuple[StockInfo, ...],
+    expected_symbols: tuple[str, ...],
 ) -> None:
     returned = tuple(info.symbol for info in infos)
-    if (
-        len(set(returned)) != len(returned)
-        or set(returned) != set(expected_symbols)
-    ):
+    if len(set(returned)) != len(returned) or set(returned) != set(expected_symbols):
         raise ValueError("cohort_echo")
 
 
 def _admit_member(
-    info: StockInfo, vocabulary: KrMembershipVocabularyV1,
+    info: StockInfo,
+    vocabulary: KrMembershipVocabularyV1,
 ) -> KrAdmittedMemberV1 | str:
     if info.status not in vocabulary.active_status_tokens:
         return "status_not_active"

@@ -43,12 +43,12 @@ def write_native_refs_from_accounts(
         if ACCOUNT_SCOPE_RE.fullmatch(scope) is None:
             continue  # pension/manual scope: skip silently
         if type(native_ref) is not str or not native_ref:
-            raise NativeRefWriterError(
-                "toss scope with empty or missing native ref")
+            raise NativeRefWriterError("toss scope with empty or missing native ref")
         refs[scope] = native_ref
 
     if not refs:
         raise NativeRefWriterError(
-            "no live-order-capable Toss scopes in account inventory")
+            "no live-order-capable Toss scopes in account inventory"
+        )
 
     store.replace_refs(refs, receipt_binding=receipt_binding)

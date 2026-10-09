@@ -6,7 +6,7 @@ store file is 0600, every read hands back a redacted wrapper, and no repr,
 str, exception, or receipt path ever contains the raw value.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -20,7 +20,7 @@ TOSS_SCOPE = "toss-acct-" + "a" * 24
 TOSS_SCOPE_2 = "toss-acct-" + "b" * 24
 PENSION_SCOPE = "pension-excel-" + "c" * 24
 RAW_REF = "raw-native-ref-000111222333"
-CLOCK_NOW = datetime(2026, 8, 10, 0, 0, tzinfo=timezone.utc)
+CLOCK_NOW = datetime(2026, 8, 10, 0, 0, tzinfo=UTC)
 BINDING = "cadence-300s-market-portfolio-v1:5952870"
 
 
@@ -47,6 +47,7 @@ def test_roundtrip_persists_refs_bound_to_the_holdings_receipt(tmp_path):
 
 def test_store_file_mode_is_0600_and_parent_0700(tmp_path):
     import stat
+
     store = _store(tmp_path)
     store.replace_refs({TOSS_SCOPE: RAW_REF}, receipt_binding=BINDING)
     path = tmp_path / "private" / "account_native_refs.sqlite3"

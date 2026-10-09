@@ -19,30 +19,31 @@ Key contracts
 from __future__ import annotations
 
 from datetime import date, datetime
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 from zoneinfo import ZoneInfo
 
 from tokmo.presentation.options import (
-    FormatOptions,
-    NumberStyle,
     CurrencyStyle,
     DateStyle,
     DateTimeStyle,
+    FormatOptions,
     Locale,
+    NumberStyle,
 )
 
 __all__ = [
-    "format_number",
-    "format_money",
-    "format_percent",
     "format_date",
     "format_datetime",
+    "format_money",
+    "format_number",
+    "format_percent",
 ]
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _validate_numeric(value: Decimal | int) -> None:
     """Reject float, bool, str, and other non-exact-numeric types."""
@@ -72,6 +73,7 @@ def _null_text(options: FormatOptions) -> str:
 # ---------------------------------------------------------------------------
 # Number rendering
 # ---------------------------------------------------------------------------
+
 
 def _format_raw_number(value: Decimal, options: FormatOptions) -> str:
     """RAW mode: str(value) as-is. If max_decimal_places is set, round first."""
@@ -189,6 +191,7 @@ def format_number(value: Decimal | int, *, options: FormatOptions) -> str:
 # Money rendering
 # ---------------------------------------------------------------------------
 
+
 def format_money(value: Decimal | int, *, options: FormatOptions) -> str:
     """Render a number with an optional currency symbol."""
     num_str = format_number(value, options=options)
@@ -203,6 +206,7 @@ def format_money(value: Decimal | int, *, options: FormatOptions) -> str:
 # ---------------------------------------------------------------------------
 # Percent rendering
 # ---------------------------------------------------------------------------
+
 
 def format_percent(
     value: Decimal | int | None,
@@ -221,6 +225,7 @@ def format_percent(
 # Date rendering
 # ---------------------------------------------------------------------------
 
+
 def format_date(value: date, *, options: FormatOptions) -> str:
     """Render a date in ISO, compact, or Korean style."""
     if options.date_style is DateStyle.ISO:
@@ -234,6 +239,7 @@ def format_date(value: date, *, options: FormatOptions) -> str:
 # ---------------------------------------------------------------------------
 # Datetime rendering
 # ---------------------------------------------------------------------------
+
 
 def format_datetime(value: datetime, *, options: FormatOptions) -> str:
     """Render a datetime in ISO, compact, or Korean style."""

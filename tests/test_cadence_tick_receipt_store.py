@@ -6,38 +6,49 @@ reason), an events log for MISSED/DUPLICATE/OVERLAP occurrences, private file
 modes, and stale-STARTED reconciliation for crashed invocations.
 """
 
-from datetime import datetime, timedelta, timezone
 import os
 import stat
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from tokmo.records.cadence_tick_receipts import CadenceTickReceiptStore
 
 POLICY = "cadence-300s-v1"
-SLOT = datetime(2026, 8, 3, 10, 0, tzinfo=timezone.utc)
+SLOT = datetime(2026, 8, 3, 10, 0, tzinfo=UTC)
 NOW = SLOT + timedelta(seconds=1)
 
 
 def make_store(tmp_path):
     return CadenceTickReceiptStore(
-        tmp_path / "ops" / "cadence_ticks.sqlite3", clock=lambda: NOW,
+        tmp_path / "ops" / "cadence_ticks.sqlite3",
+        clock=lambda: NOW,
     )
 
 
 def begin(store, slot=SLOT):
     return store.begin_tick(
-        POLICY, slot, 5952914, observed_start=NOW, lag_seconds=1.0,
+        POLICY,
+        slot,
+        5952914,
+        observed_start=NOW,
+        lag_seconds=1.0,
         max_lag_seconds=60,
     )
 
 
 def finish(store, slot=SLOT, status="COMPLETE"):
     store.finish_tick(
-        POLICY, slot, status=status, reason=None, mask_digest="a" * 64,
-        open_markets=("US",), local_dates={"KR": "2026-08-03", "US": "2026-08-03"},
-        stages=({"stage": "calendar", "status": "ok", "reason": None,
-                 "latency_ms": 3},),
+        POLICY,
+        slot,
+        status=status,
+        reason=None,
+        mask_digest="a" * 64,
+        open_markets=("US",),
+        local_dates={"KR": "2026-08-03", "US": "2026-08-03"},
+        stages=(
+            {"stage": "calendar", "status": "ok", "reason": None, "latency_ms": 3},
+        ),
         wire_counts={"total_started": 3, "operation_started": {"TOKEN": 1}},
         calendar_attempts=("calendar:US:2026-08-03:0",),
         finished_at=NOW,
@@ -65,7 +76,11 @@ def test_begin_finish_roundtrip_and_duplicate_detection(tmp_path):
 def test_record_missed_is_a_terminal_row_without_start(tmp_path):
     store = make_store(tmp_path)
     store.record_missed(
-        POLICY, SLOT, 5952914, observed_start=NOW, lag_seconds=120.0,
+        POLICY,
+        SLOT,
+        5952914,
+        observed_start=NOW,
+        lag_seconds=120.0,
         max_lag_seconds=60,
     )
     row = store.read_tick(POLICY, SLOT)
@@ -86,13 +101,14 @@ def test_events_log_missed_duplicate_overlap(tmp_path):
 def test_reconcile_marks_stale_started_rows_unknown_except_current(tmp_path):
     store = make_store(tmp_path)
     other = SLOT - timedelta(seconds=300)
-    store.begin_tick(POLICY, other, 5952913, observed_start=NOW,
-                     lag_seconds=1.0, max_lag_seconds=60)
+    store.begin_tick(
+        POLICY, other, 5952913, observed_start=NOW, lag_seconds=1.0, max_lag_seconds=60
+    )
     begin(store)
     reconciled = store.reconcile_stale(now=NOW, exclude=(POLICY, SLOT))
-    assert [(item["policy_version"], item["scheduled_for_utc"]) for item in reconciled] == [
-        (POLICY, other)
-    ]
+    assert [
+        (item["policy_version"], item["scheduled_for_utc"]) for item in reconciled
+    ] == [(POLICY, other)]
     assert store.read_tick(POLICY, other)["status"] == "UNKNOWN"
     assert store.read_tick(POLICY, SLOT)["status"] == "STARTED"
 

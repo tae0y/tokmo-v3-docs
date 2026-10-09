@@ -3,11 +3,12 @@
 No arbitrary URLs, attachment crawl, disk extraction, retries or holdings filter.
 Source contract: https://opendart.fss.or.kr/guide/detail.do?apiGrpCd=DS001&apiId=2019003
 """
+
 import hashlib
-from io import BytesIO
 import re
-from urllib.parse import urlencode
 import urllib.request
+from io import BytesIO
+from urllib.parse import urlencode
 from zipfile import ZipFile
 
 from defusedxml.ElementTree import fromstring
@@ -26,12 +27,20 @@ def parse_document(raw, receipt):
     if not raw.startswith(b"PK"):
         root = fromstring(raw)
         status = root.findtext("status")
-        raise ValueError("document_unavailable_" + status if status and re.fullmatch(r"[0-9]{3}", status) else "document_invalid_response")
+        raise ValueError(
+            "document_unavailable_" + status
+            if status and re.fullmatch(r"[0-9]{3}", status)
+            else "document_invalid_response"
+        )
     with ZipFile(BytesIO(raw)) as archive:
         entries = archive.infolist()
         if len(entries) > 32 or sum(item.file_size for item in entries) > MAX_BYTES:
             raise ValueError("document_size_limit")
-        xmls = [item for item in entries if not item.is_dir() and item.filename.lower().endswith(".xml")]
+        xmls = [
+            item
+            for item in entries
+            if not item.is_dir() and item.filename.lower().endswith(".xml")
+        ]
         main = [item for item in xmls if item.filename == receipt + ".xml"]
         if len(main) != 1:
             if len(xmls) != 1:
@@ -62,9 +71,14 @@ class OpenDartDocumentReader:
             raise ValueError("document_auth_unavailable") from None
         try:
             query = urlencode({"rcept_no": receipt, "crtfc_key": key})
-            wire = urllib.request.Request("https://opendart.fss.or.kr/api/document.xml?" + query,
-                           method="GET", headers={"Accept-Encoding": "identity"})
-            with self.opener_factory().open(wire, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+            wire = urllib.request.Request(
+                "https://opendart.fss.or.kr/api/document.xml?" + query,
+                method="GET",
+                headers={"Accept-Encoding": "identity"},
+            )
+            with self.opener_factory().open(
+                wire, timeout=REQUEST_TIMEOUT_SECONDS
+            ) as response:
                 raw = response.read(MAX_BYTES + 1)
         except Exception:
             # Provider exceptions can carry the query credential; never propagate them.

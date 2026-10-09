@@ -8,9 +8,12 @@ from hashlib import sha256
 from zoneinfo import ZoneInfo
 
 from tokmo.values.account_scope_patterns import ACCOUNT_SCOPE_RE, PENSION_SCOPE_RE
+from tokmo.values.current_holdings import (
+    CurrentHoldingsV1,
+    canonical_holdings_bytes,
+    classify_market,
+)
 from tokmo.values.material_pack import canonical_encode
-from tokmo.values.current_holdings import CurrentHoldingsV1, canonical_holdings_bytes, classify_market
-from tokmo.values.session_gate import MARKET_TIMEZONE, Market
 from tokmo.values.official_membership_observation import (
     ListingVenueV1,
     MembershipMaterialV1,
@@ -18,16 +21,17 @@ from tokmo.values.official_membership_observation import (
     MembershipSectorV1,
     MembershipUnavailableReasonV1,
     ObservationInstantV1,
-    OfficialMembershipAcquisitionV1,
     ObservationSourceKindV1,
+    OfficialMembershipAcquisitionV1,
     SecurityClassV1,
 )
 from tokmo.values.quant_multifactor_core import MarketV1, SectorV1
 from tokmo.values.quant_multifactor_provenance import (
-    MembershipProofV1,
     QMEM_SOURCE_REF_PREFIX,
+    MembershipProofV1,
     membership_observation_instants_are_complete,
 )
+from tokmo.values.session_gate import MARKET_TIMEZONE, Market
 
 MAX_OBSERVATION_AGE = timedelta(minutes=30)
 MAX_OBSERVATION_SKEW = timedelta(minutes=10)
@@ -88,7 +92,8 @@ def describe_us_personal_membership_cohort(
             symbol_markets[item.symbol] = market
     expected_symbols = tuple(
         sorted(
-            symbol for symbol, market in symbol_markets.items()
+            symbol
+            for symbol, market in symbol_markets.items()
             if getattr(market, "value", None) == "US"
         )
     )
@@ -199,7 +204,9 @@ def assemble_us_personal_membership_material(
             if str(error).startswith("market_conflict:")
             else MembershipUnavailableReasonV1.COHORT_MISMATCH
         )
-        return MembershipAssemblyResultV1((), (), ((symbol, reason),), canonical_holdings_bytes(holdings))
+        return MembershipAssemblyResultV1(
+            (), (), ((symbol, reason),), canonical_holdings_bytes(holdings)
+        )
     expected_symbols = set(binding.expected_symbols)
     for rows in (
         acquisition.listings,
@@ -241,7 +248,9 @@ def assemble_us_personal_membership_material(
             continue
         registry = registry_rows.get(symbol)
         if registry is None:
-            reasons.append((symbol, MembershipUnavailableReasonV1.SUPPORTING_REGISTRY_ABSENT))
+            reasons.append(
+                (symbol, MembershipUnavailableReasonV1.SUPPORTING_REGISTRY_ABSENT)
+            )
             continue
         issuer = issuer_rows.get(symbol)
         if issuer is None:
@@ -249,8 +258,12 @@ def assemble_us_personal_membership_material(
             continue
         instants = (
             ObservationInstantV1(listing.source_kind, listing.observed_at),
-            ObservationInstantV1(ObservationSourceKindV1.SEC_REGISTRY, registry.observed_at),
-            ObservationInstantV1(ObservationSourceKindV1.SEC_ISSUER, issuer.observed_at),
+            ObservationInstantV1(
+                ObservationSourceKindV1.SEC_REGISTRY, registry.observed_at
+            ),
+            ObservationInstantV1(
+                ObservationSourceKindV1.SEC_ISSUER, issuer.observed_at
+            ),
         )
         observed = tuple(item.observed_at for item in instants)
         if any(item > evaluation_as_of for item in observed):
@@ -282,13 +295,17 @@ def assemble_us_personal_membership_material(
             "NYSE": ListingVenueV1.NYSE,
         }.get(registry.exchange_token)
         if registry_venue is None or registry_venue is not listing.venue:
-            reasons.append((symbol, MembershipUnavailableReasonV1.REGISTRY_CONTRADICTION))
+            reasons.append(
+                (symbol, MembershipUnavailableReasonV1.REGISTRY_CONTRADICTION)
+            )
             continue
         if registry.cik != issuer.cik:
             reasons.append((symbol, MembershipUnavailableReasonV1.IDENTITY_CONFLICT))
             continue
         if issuer.exchange_token != listing.venue.value:
-            reasons.append((symbol, MembershipUnavailableReasonV1.REGISTRY_CONTRADICTION))
+            reasons.append(
+                (symbol, MembershipUnavailableReasonV1.REGISTRY_CONTRADICTION)
+            )
             continue
         if issuer.sic_code not in acquisition.sic_snapshot.codes:
             reasons.append((symbol, MembershipUnavailableReasonV1.MISSING_SIC))

@@ -12,7 +12,7 @@ copied verbatim — the trade-date identity is the provider's, never derived
 from the market's current local date.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -23,10 +23,8 @@ from tokmo.records.calendar_cache import (
 from tokmo.records.calendar_lookahead import (
     CalendarLookaheadConflictError,
     CalendarLookaheadStoreV1,
-    LookaheadDayV1,
     judge_lookahead_session,
 )
-from tokmo.values._primitives import MISSING
 from tokmo.values.session_gate import Market
 from tokmo.values.toss_market_calendar import (
     CalendarSession,
@@ -35,7 +33,7 @@ from tokmo.values.toss_market_calendar import (
     UsMarketDay,
 )
 
-CLOCK_NOW = datetime(2026, 8, 10, 0, 0, tzinfo=timezone.utc)
+CLOCK_NOW = datetime(2026, 8, 10, 0, 0, tzinfo=UTC)
 KR_PROVENANCE = "calendar:KR:2026-08-10:0"
 US_PROVENANCE = "calendar:US:2026-08-10:1"
 
@@ -49,19 +47,24 @@ def _store(tmp_path):
 
 def _us_day(date_iso, dm=None, pre=None, reg=None, after=None):
     from datetime import date as date_cls
+
     return UsMarketDay(
         date=date_cls.fromisoformat(date_iso),
-        day_market=dm, pre_market=pre, regular_market=reg,
+        day_market=dm,
+        pre_market=pre,
+        regular_market=reg,
         after_market=after,
     )
 
 
 def _kr_day(date_iso, pre=None, reg=None, after=None):
     from datetime import date as date_cls
+
     return KrMarketDay(
         date=date_cls.fromisoformat(date_iso),
         integrated=IntegratedHour(
-            pre_market=pre, regular_market=reg, after_market=after),
+            pre_market=pre, regular_market=reg, after_market=after
+        ),
     )
 
 
@@ -74,12 +77,14 @@ def _sess(start, end):
 
 # --- US Day Market continuity -------------------------------------------
 
+
 def test_us_today_and_next_day_both_committed(tmp_path):
     """US today (2026-08-10 with Day Market 09:00-17:00 KST) and next
     business day are both committed as a 2-day window."""
     from tokmo.programs.calendar_lookahead_writer import (
         write_lookahead_from_calendar,
     )
+
     store = _store(tmp_path)
     today = _us_day(
         "2026-08-10",
@@ -96,17 +101,21 @@ def test_us_today_and_next_day_both_committed(tmp_path):
         after=_sess("2026-08-11T20:00:00Z", "2026-08-11T23:50:00Z"),
     )
     write_lookahead_from_calendar(
-        market=Market.US, response_today=today,
-        response_next=next_day, receipt_identity=US_PROVENANCE,
-        store=store, current_cache_entry=None, fetched_at=CLOCK_NOW,
+        market=Market.US,
+        response_today=today,
+        response_next=next_day,
+        receipt_identity=US_PROVENANCE,
+        store=store,
+        current_cache_entry=None,
+        fetched_at=CLOCK_NOW,
     )
     days = store.read_days(Market.US)
     assert len(days) == 2
     assert days[0].trade_date == "2026-08-10"
     assert days[1].trade_date == "2026-08-11"
     assert days[0].sessions[0].kind == "dayMarket"
-    assert days[0].sessions[0].start_utc == datetime(2026, 8, 10, 0, 0, tzinfo=timezone.utc)
-    assert days[0].sessions[0].end_utc == datetime(2026, 8, 10, 8, 0, tzinfo=timezone.utc)
+    assert days[0].sessions[0].start_utc == datetime(2026, 8, 10, 0, 0, tzinfo=UTC)
+    assert days[0].sessions[0].end_utc == datetime(2026, 8, 10, 8, 0, tzinfo=UTC)
     assert days[0].provenance == US_PROVENANCE
 
 
@@ -117,6 +126,7 @@ def test_us_day_market_09kst_13kst_continuity(tmp_path):
     from tokmo.programs.calendar_lookahead_writer import (
         write_lookahead_from_calendar,
     )
+
     store = _store(tmp_path)
     today = _us_day(
         "2026-08-10",
@@ -126,12 +136,16 @@ def test_us_day_market_09kst_13kst_continuity(tmp_path):
         after=_sess("2026-08-10T20:00:00Z", "2026-08-10T23:50:00Z"),
     )
     write_lookahead_from_calendar(
-        market=Market.US, response_today=today,
-        response_next=None, receipt_identity=US_PROVENANCE,
-        store=store, current_cache_entry=None, fetched_at=CLOCK_NOW,
+        market=Market.US,
+        response_today=today,
+        response_next=None,
+        receipt_identity=US_PROVENANCE,
+        store=store,
+        current_cache_entry=None,
+        fetched_at=CLOCK_NOW,
     )
-    at_09kst = datetime(2026, 8, 10, 0, 30, tzinfo=timezone.utc)  # 09:30 KST
-    at_13kst = datetime(2026, 8, 10, 4, 0, tzinfo=timezone.utc)   # 13:00 KST
+    at_09kst = datetime(2026, 8, 10, 0, 30, tzinfo=UTC)  # 09:30 KST
+    at_13kst = datetime(2026, 8, 10, 4, 0, tzinfo=UTC)  # 13:00 KST
     v1 = judge_lookahead_session(Market.US, store.read_days(Market.US), at_09kst)
     v2 = judge_lookahead_session(Market.US, store.read_days(Market.US), at_13kst)
     assert v1.open and v2.open
@@ -147,15 +161,20 @@ def test_next_business_day_none_commits_only_today(tmp_path):
     from tokmo.programs.calendar_lookahead_writer import (
         write_lookahead_from_calendar,
     )
+
     store = _store(tmp_path)
     today = _us_day(
         "2026-08-10",
         dm=_sess("2026-08-10T00:00:00Z", "2026-08-10T08:00:00Z"),
     )
     write_lookahead_from_calendar(
-        market=Market.US, response_today=today,
-        response_next=None, receipt_identity=US_PROVENANCE,
-        store=store, current_cache_entry=None, fetched_at=CLOCK_NOW,
+        market=Market.US,
+        response_today=today,
+        response_next=None,
+        receipt_identity=US_PROVENANCE,
+        store=store,
+        current_cache_entry=None,
+        fetched_at=CLOCK_NOW,
     )
     days = store.read_days(Market.US)
     assert len(days) == 1
@@ -165,8 +184,10 @@ def test_next_business_day_none_commits_only_today(tmp_path):
 def test_next_business_day_date_mismatch_fails_closed(tmp_path):
     """If response_next's date doesn't advance past today, fail-closed."""
     from tokmo.programs.calendar_lookahead_writer import (
-        write_lookahead_from_calendar, LookaheadWriterError,
+        LookaheadWriterError,
+        write_lookahead_from_calendar,
     )
+
     store = _store(tmp_path)
     today = _us_day(
         "2026-08-10",
@@ -178,9 +199,13 @@ def test_next_business_day_date_mismatch_fails_closed(tmp_path):
     )
     with pytest.raises(LookaheadWriterError):
         write_lookahead_from_calendar(
-            market=Market.US, response_today=today,
-            response_next=bad_next, receipt_identity=US_PROVENANCE,
-            store=store, current_cache_entry=None, fetched_at=CLOCK_NOW,
+            market=Market.US,
+            response_today=today,
+            response_next=bad_next,
+            receipt_identity=US_PROVENANCE,
+            store=store,
+            current_cache_entry=None,
+            fetched_at=CLOCK_NOW,
         )
 
 
@@ -189,6 +214,7 @@ def test_current_cache_conflict_fails_closed(tmp_path):
     from tokmo.programs.calendar_lookahead_writer import (
         write_lookahead_from_calendar,
     )
+
     store = _store(tmp_path)
     today = _us_day(
         "2026-08-10",
@@ -209,9 +235,12 @@ def test_current_cache_conflict_fails_closed(tmp_path):
     )
     with pytest.raises(CalendarLookaheadConflictError):
         write_lookahead_from_calendar(
-            market=Market.US, response_today=today,
-            response_next=None, receipt_identity=US_PROVENANCE,
-            store=store, current_cache_entry=conflicting_cache,
+            market=Market.US,
+            response_today=today,
+            response_next=None,
+            receipt_identity=US_PROVENANCE,
+            store=store,
+            current_cache_entry=conflicting_cache,
             fetched_at=CLOCK_NOW,
         )
 
@@ -220,6 +249,7 @@ def test_kr_today_and_next_day_committed(tmp_path):
     from tokmo.programs.calendar_lookahead_writer import (
         write_lookahead_from_calendar,
     )
+
     store = _store(tmp_path)
     today = _kr_day(
         "2026-08-10",
@@ -234,16 +264,23 @@ def test_kr_today_and_next_day_committed(tmp_path):
         after=_sess("2026-08-11T06:30:00Z", "2026-08-11T10:00:00Z"),
     )
     write_lookahead_from_calendar(
-        market=Market.KR, response_today=today,
-        response_next=next_day, receipt_identity=KR_PROVENANCE,
-        store=store, current_cache_entry=None, fetched_at=CLOCK_NOW,
+        market=Market.KR,
+        response_today=today,
+        response_next=next_day,
+        receipt_identity=KR_PROVENANCE,
+        store=store,
+        current_cache_entry=None,
+        fetched_at=CLOCK_NOW,
     )
     days = store.read_days(Market.KR)
     assert len(days) == 2
     assert days[0].trade_date == "2026-08-10"
     assert days[1].trade_date == "2026-08-11"
     assert {s.kind for s in days[0].sessions} == {
-        "preMarket", "regularMarket", "afterMarket"}
+        "preMarket",
+        "regularMarket",
+        "afterMarket",
+    }
     assert days[0].provenance == KR_PROVENANCE
 
 
@@ -252,6 +289,7 @@ def test_invalid_provenance_rejected(tmp_path):
     from tokmo.programs.calendar_lookahead_writer import (
         write_lookahead_from_calendar,
     )
+
     store = _store(tmp_path)
     today = _us_day(
         "2026-08-10",
@@ -259,17 +297,23 @@ def test_invalid_provenance_rejected(tmp_path):
     )
     with pytest.raises(ValueError):
         write_lookahead_from_calendar(
-            market=Market.US, response_today=today,
-            response_next=None, receipt_identity="not-a-receipt",
-            store=store, current_cache_entry=None, fetched_at=CLOCK_NOW,
+            market=Market.US,
+            response_today=today,
+            response_next=None,
+            receipt_identity="not-a-receipt",
+            store=store,
+            current_cache_entry=None,
+            fetched_at=CLOCK_NOW,
         )
 
 
 def test_kr_day_without_sessions_fails_closed(tmp_path):
     """A KR day with no sessions at all is a provider error."""
     from tokmo.programs.calendar_lookahead_writer import (
-        write_lookahead_from_calendar, LookaheadWriterError,
+        LookaheadWriterError,
+        write_lookahead_from_calendar,
     )
+
     store = _store(tmp_path)
     empty_today = KrMarketDay(
         date=__import__("datetime").date(2026, 8, 10),
@@ -277,9 +321,13 @@ def test_kr_day_without_sessions_fails_closed(tmp_path):
     )
     with pytest.raises((LookaheadWriterError, ValueError)):
         write_lookahead_from_calendar(
-            market=Market.KR, response_today=empty_today,
-            response_next=None, receipt_identity=KR_PROVENANCE,
-            store=store, current_cache_entry=None, fetched_at=CLOCK_NOW,
+            market=Market.KR,
+            response_today=empty_today,
+            response_next=None,
+            receipt_identity=KR_PROVENANCE,
+            store=store,
+            current_cache_entry=None,
+            fetched_at=CLOCK_NOW,
         )
 
 
@@ -287,7 +335,8 @@ def test_malformed_today_date_raises_typed_error(tmp_path):
     """A malformed day object with an invalid date attribute must raise
     LookaheadWriterError, not AttributeError."""
     from tokmo.programs.calendar_lookahead_writer import (
-        write_lookahead_from_calendar, LookaheadWriterError,
+        LookaheadWriterError,
+        write_lookahead_from_calendar,
     )
 
     class BadDay:
@@ -297,9 +346,13 @@ def test_malformed_today_date_raises_typed_error(tmp_path):
     store = _store(tmp_path)
     with pytest.raises(LookaheadWriterError):
         write_lookahead_from_calendar(
-            market=Market.US, response_today=BadDay(),
-            response_next=None, receipt_identity=US_PROVENANCE,
-            store=store, current_cache_entry=None, fetched_at=CLOCK_NOW,
+            market=Market.US,
+            response_today=BadDay(),
+            response_next=None,
+            receipt_identity=US_PROVENANCE,
+            store=store,
+            current_cache_entry=None,
+            fetched_at=CLOCK_NOW,
         )
 
 
@@ -307,7 +360,8 @@ def test_malformed_next_date_raises_typed_error(tmp_path):
     """A malformed next day with invalid date must raise
     LookaheadWriterError, not AttributeError."""
     from tokmo.programs.calendar_lookahead_writer import (
-        write_lookahead_from_calendar, LookaheadWriterError,
+        LookaheadWriterError,
+        write_lookahead_from_calendar,
     )
 
     class BadNext:
@@ -320,7 +374,11 @@ def test_malformed_next_date_raises_typed_error(tmp_path):
     )
     with pytest.raises(LookaheadWriterError):
         write_lookahead_from_calendar(
-            market=Market.US, response_today=today,
-            response_next=BadNext(), receipt_identity=US_PROVENANCE,
-            store=store, current_cache_entry=None, fetched_at=CLOCK_NOW,
+            market=Market.US,
+            response_today=today,
+            response_next=BadNext(),
+            receipt_identity=US_PROVENANCE,
+            store=store,
+            current_cache_entry=None,
+            fetched_at=CLOCK_NOW,
         )

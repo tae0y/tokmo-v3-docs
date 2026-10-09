@@ -7,7 +7,7 @@ No I/O, no wall-clock, no random — caller supplies as_of and every timestamp.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from tokmo.values import canonical_decimal
@@ -16,16 +16,13 @@ from tokmo.values.macro_divergence import (
     EXHAUSTION_FX_RETURN_THRESHOLD,
     EXHAUSTION_IMPROVEMENT_RATIO,
     EXHAUSTION_MIN_INVESTOR,
-    EXHAUSTION_PRIOR_WINDOW,
     FOREIGN_OUTFLOW_STRESS_THRESHOLD,
     FORMULA_VERSION,
     FX_RETURN_WINDOW,
     HIGH_PERCENTILE_THRESHOLD,
     LOOKBACK_MAX,
-    LOOKBACK_MIN,
     OUTFLOW_WINDOW,
     STALENESS_CEILING_CALENDAR_DAYS,
-    ConfidenceCeiling,
     MacroDivergenceComponent,
     MacroDivergenceComponentV1,
     MacroDivergencePackV1,
@@ -45,7 +42,6 @@ from tokmo.values.macro_observations import (
 )
 from tokmo.values.signal_program_lifecycle import (
     LifecycleReasonCode,
-    ProgramKindV1,
     ProgramLifecycleStateV1,
     ProgramLifecycleStatusV1,
 )
@@ -57,6 +53,7 @@ __all__ = ["evaluate_macro_divergence"]
 # Helpers
 # ==========================================================================
 
+
 def _require_aware(dt: datetime, name: str) -> None:
     if dt.tzinfo is None or dt.utcoffset() is None:
         raise ValueError(f"{name} must be timezone-aware")
@@ -64,13 +61,14 @@ def _require_aware(dt: datetime, name: str) -> None:
 
 def _utc_iso(dt: datetime) -> str:
     """UTC RFC3339 with Z, real microseconds (§4.3.1 rule 4)."""
-    utc = dt.astimezone(timezone.utc)
+    utc = dt.astimezone(UTC)
     return f"{utc:%Y-%m-%dT%H:%M:%S}.{utc.microsecond:06d}Z"
 
 
 # ==========================================================================
 # §4.6  Structural validation
 # ==========================================================================
+
 
 def _validate_series_structure(
     observations: tuple,
@@ -133,24 +131,30 @@ def _compute_coverage(
     if kospi_count == 0 or proxy_count == 0 or investor_count == 0:
         return MacroDataCoverageV1(
             state=MacroCoverageState.EMPTY,
-            kospi_count=kospi_count, proxy_count=proxy_count,
+            kospi_count=kospi_count,
+            proxy_count=proxy_count,
             investor_count=investor_count,
             common_window_count=0,
-            common_window_start=None, common_window_end=None,
+            common_window_start=None,
+            common_window_end=None,
             latest_common_session=None,
             reason="one or more series empty",
         )
 
     # Per-series minimums (necessary, not sufficient)
-    if (kospi_count < _PER_SERIES_MIN["kospi"]
-            or proxy_count < _PER_SERIES_MIN["proxy"]
-            or investor_count < _PER_SERIES_MIN["investor"]):
+    if (
+        kospi_count < _PER_SERIES_MIN["kospi"]
+        or proxy_count < _PER_SERIES_MIN["proxy"]
+        or investor_count < _PER_SERIES_MIN["investor"]
+    ):
         return MacroDataCoverageV1(
             state=MacroCoverageState.PARTIAL,
-            kospi_count=kospi_count, proxy_count=proxy_count,
+            kospi_count=kospi_count,
+            proxy_count=proxy_count,
             investor_count=investor_count,
             common_window_count=0,
-            common_window_start=None, common_window_end=None,
+            common_window_start=None,
+            common_window_end=None,
             latest_common_session=None,
             reason="one or more series below per-series minimum",
         )
@@ -165,7 +169,8 @@ def _compute_coverage(
     if common_count < COMMON_WINDOW_MIN:
         return MacroDataCoverageV1(
             state=MacroCoverageState.PARTIAL,
-            kospi_count=kospi_count, proxy_count=proxy_count,
+            kospi_count=kospi_count,
+            proxy_count=proxy_count,
             investor_count=investor_count,
             common_window_count=common_count,
             common_window_start=common[0] if common else None,
@@ -182,7 +187,8 @@ def _compute_coverage(
     if calendar_gap > STALENESS_CEILING_CALENDAR_DAYS:
         return MacroDataCoverageV1(
             state=MacroCoverageState.STALE,
-            kospi_count=kospi_count, proxy_count=proxy_count,
+            kospi_count=kospi_count,
+            proxy_count=proxy_count,
             investor_count=investor_count,
             common_window_count=common_count,
             common_window_start=common[0],
@@ -193,7 +199,8 @@ def _compute_coverage(
 
     return MacroDataCoverageV1(
         state=MacroCoverageState.COVERED,
-        kospi_count=kospi_count, proxy_count=proxy_count,
+        kospi_count=kospi_count,
+        proxy_count=proxy_count,
         investor_count=investor_count,
         common_window_count=common_count,
         common_window_start=common[0],
@@ -207,10 +214,14 @@ def _compute_coverage(
 # §5.2–5.4  Component computations
 # ==========================================================================
 
+
 def _build_date_maps(
     bundle: MacroObservationSeriesV1, common_dates: list[date]
-) -> tuple[dict[date, MacroCandleObservation], dict[date, MacroCandleObservation],
-            dict[date, MacroInvestorObservation]]:
+) -> tuple[
+    dict[date, MacroCandleObservation],
+    dict[date, MacroCandleObservation],
+    dict[date, MacroInvestorObservation],
+]:
     kospi_map = {c.session_date: c for c in bundle.kospi_candles}
     proxy_map = {c.session_date: c for c in bundle.proxy_candles}
     investor_map = {r.session_date: r for r in bundle.investor_records}
@@ -234,14 +245,16 @@ def _compute_index_high(
     kospi_pct = percentile_rank(kospi_closes, kospi_latest)
     proxy_pct = percentile_rank(proxy_closes, proxy_latest)
 
-    fired = (kospi_pct >= HIGH_PERCENTILE_THRESHOLD
-             and proxy_pct >= HIGH_PERCENTILE_THRESHOLD)
+    fired = (
+        kospi_pct >= HIGH_PERCENTILE_THRESHOLD
+        and proxy_pct >= HIGH_PERCENTILE_THRESHOLD
+    )
 
     reason = (
         f"KOSPI percentile {canonical_decimal(kospi_pct)} >= {canonical_decimal(HIGH_PERCENTILE_THRESHOLD)}"
         f" and proxy percentile {canonical_decimal(proxy_pct)} >= {canonical_decimal(HIGH_PERCENTILE_THRESHOLD)}"
-        if fired else
-        f"KOSPI percentile {canonical_decimal(kospi_pct)} or proxy percentile {canonical_decimal(proxy_pct)}"
+        if fired
+        else f"KOSPI percentile {canonical_decimal(kospi_pct)} or proxy percentile {canonical_decimal(proxy_pct)}"
         f" below {canonical_decimal(HIGH_PERCENTILE_THRESHOLD)}"
     )
 
@@ -265,7 +278,7 @@ def _compute_foreign_outflow(
 ) -> tuple[MacroDivergenceComponentV1, Decimal]:
     # §4.6 rule 7f: latest OUTFLOW_WINDOW common dates
     window_dates = common_dates[-OUTFLOW_WINDOW:]
-    rolling_flow = Decimal("0")
+    rolling_flow = Decimal(0)
     for d in window_dates:
         rec = investor_map[d]
         net = Decimal(rec.foreign_buy) - Decimal(rec.foreign_sell)
@@ -276,8 +289,8 @@ def _compute_foreign_outflow(
     reason = (
         f"rolling 20-session flow {canonical_decimal(rolling_flow)} <= "
         f"{canonical_decimal(FOREIGN_OUTFLOW_STRESS_THRESHOLD)}"
-        if fired else
-        f"rolling 20-session flow {canonical_decimal(rolling_flow)} > "
+        if fired
+        else f"rolling 20-session flow {canonical_decimal(rolling_flow)} > "
         f"{canonical_decimal(FOREIGN_OUTFLOW_STRESS_THRESHOLD)}"
     )
 
@@ -302,12 +315,12 @@ def _compute_exhaustion(
     prior_dates = common_dates[-(EXHAUSTION_MIN_INVESTOR):-OUTFLOW_WINDOW]
     current_dates = common_dates[-OUTFLOW_WINDOW:]
 
-    prior_flow = Decimal("0")
+    prior_flow = Decimal(0)
     for d in prior_dates:
         rec = investor_map[d]
         prior_flow += Decimal(rec.foreign_buy) - Decimal(rec.foreign_sell)
 
-    current_flow = Decimal("0")
+    current_flow = Decimal(0)
     for d in current_dates:
         rec = investor_map[d]
         current_flow += Decimal(rec.foreign_buy) - Decimal(rec.foreign_sell)
@@ -330,13 +343,16 @@ def _compute_exhaustion(
     improvement_passed = current_flow >= improvement_threshold
 
     # Condition 3: FX return <= -0.03
-    fx_return_passed = (fx_return is not None
-                        and fx_return <= EXHAUSTION_FX_RETURN_THRESHOLD)
+    fx_return_passed = (
+        fx_return is not None and fx_return <= EXHAUSTION_FX_RETURN_THRESHOLD
+    )
 
-    fired = (prior_stressed
-             and current_no_longer_stressed
-             and improvement_passed
-             and fx_return_passed)
+    fired = (
+        prior_stressed
+        and current_no_longer_stressed
+        and improvement_passed
+        and fx_return_passed
+    )
 
     if fired:
         fx_str = canonical_decimal(fx_return) if fx_return is not None else "N/A"
@@ -370,17 +386,22 @@ def _compute_exhaustion(
         "fx_return_threshold": canonical_decimal(EXHAUSTION_FX_RETURN_THRESHOLD),
     }
 
-    return MacroDivergenceComponentV1(
-        component=MacroDivergenceComponent.OUTFLOW_EXHAUSTION_FX_PROXY_REVERSAL,
-        fired=fired,
-        reason=reason,
-        details=details,
-    ), prior_flow, current_flow
+    return (
+        MacroDivergenceComponentV1(
+            component=MacroDivergenceComponent.OUTFLOW_EXHAUSTION_FX_PROXY_REVERSAL,
+            fired=fired,
+            reason=reason,
+            details=details,
+        ),
+        prior_flow,
+        current_flow,
+    )
 
 
 # ==========================================================================
 # §5.7  Primary state precedence
 # ==========================================================================
+
 
 def _determine_primary_state(components: tuple[MacroDivergenceComponentV1, ...]) -> str:
     idx_high, outflow, exhaustion = components
@@ -422,11 +443,13 @@ def _build_blocked_pack(
     latest = common_dates[-1] if common_dates else None
     kospi_close = (
         canonical_decimal(Decimal(kospi_map[latest].close_price))
-        if latest and latest in kospi_map else ""
+        if latest and latest in kospi_map
+        else ""
     )
     proxy_close = (
         canonical_decimal(Decimal(proxy_map[latest].close_price))
-        if latest and latest in proxy_map else ""
+        if latest and latest in proxy_map
+        else ""
     )
 
     window_summary = MacroWindowSummaryV1(
@@ -435,8 +458,10 @@ def _build_blocked_pack(
         common_window_count=len(common_dates),
         kospi_latest_close=kospi_close,
         proxy_latest_close=proxy_close,
-        kospi_percentile=None, proxy_percentile=None,
-        foreign_rolling_flow_20=None, foreign_prior_flow_20=None,
+        kospi_percentile=None,
+        proxy_percentile=None,
+        foreign_rolling_flow_20=None,
+        foreign_prior_flow_20=None,
         fx_return_8=None,
     )
 
@@ -457,9 +482,7 @@ def _build_blocked_pack(
     )
 
     evidence = (f"lifecycle blocked: {reason_code.value}",)
-    counter_evidence = (
-        f"program status {lifecycle.status.value} prevents evaluation",
-    )
+    counter_evidence = (f"program status {lifecycle.status.value} prevents evaluation",)
 
     pack = MacroDivergencePackV1(
         program_id=spec.program_id,
@@ -488,7 +511,11 @@ def _build_blocked_pack(
 
 
 def _safe_common_dates(bundle: MacroObservationSeriesV1) -> list[date]:
-    if not bundle.kospi_candles or not bundle.proxy_candles or not bundle.investor_records:
+    if (
+        not bundle.kospi_candles
+        or not bundle.proxy_candles
+        or not bundle.investor_records
+    ):
         return []
     kospi_dates = {c.session_date for c in bundle.kospi_candles}
     proxy_dates = {c.session_date for c in bundle.proxy_candles}
@@ -507,32 +534,42 @@ def _build_symbol_contacts(
 
     contacts = []
     if latest and latest in kospi_map:
-        contacts.append(MacroSymbolContactV1(
-            symbol="KOSPI", role="INDEX",
-            latest_session=latest.isoformat(),
-            latest_close=canonical_decimal(Decimal(kospi_map[latest].close_price)),
-        ))
+        contacts.append(
+            MacroSymbolContactV1(
+                symbol="KOSPI",
+                role="INDEX",
+                latest_session=latest.isoformat(),
+                latest_close=canonical_decimal(Decimal(kospi_map[latest].close_price)),
+            )
+        )
     if latest and latest in proxy_map:
-        contacts.append(MacroSymbolContactV1(
-            symbol="261240", role="FX_PROXY",
-            latest_session=latest.isoformat(),
-            latest_close=canonical_decimal(Decimal(proxy_map[latest].close_price)),
-        ))
+        contacts.append(
+            MacroSymbolContactV1(
+                symbol="261240",
+                role="FX_PROXY",
+                latest_session=latest.isoformat(),
+                latest_close=canonical_decimal(Decimal(proxy_map[latest].close_price)),
+            )
+        )
     if latest and latest in investor_map:
-        contacts.append(MacroSymbolContactV1(
-            symbol="KOSPI", role="INVESTOR_FLOW",
-            latest_session=latest.isoformat(),
-            latest_close=None,
-        ))
+        contacts.append(
+            MacroSymbolContactV1(
+                symbol="KOSPI",
+                role="INVESTOR_FLOW",
+                latest_session=latest.isoformat(),
+                latest_close=None,
+            )
+        )
     return tuple(contacts)
 
 
 def _compute_pack_digest_excluding_self(pack: MacroDivergencePackV1) -> str:
     """Compute digest over all pack fields except pack_digest itself."""
     from dataclasses import fields, is_dataclass
-    from enum import Enum
-    from datetime import datetime, date as date_cls
+    from datetime import date as date_cls
+    from datetime import datetime
     from decimal import Decimal
+    from enum import Enum
 
     def serialize(obj):
         if obj is None:
@@ -542,7 +579,7 @@ def _compute_pack_digest_excluding_self(pack: MacroDivergencePackV1) -> str:
         if isinstance(obj, Decimal):
             return canonical_decimal(obj)
         if isinstance(obj, datetime):
-            utc = obj.astimezone(timezone.utc)
+            utc = obj.astimezone(UTC)
             return f"{utc:%Y-%m-%dT%H:%M:%S}.{utc.microsecond:06d}Z"
         if isinstance(obj, date_cls):
             return obj.isoformat()
@@ -589,8 +626,7 @@ def evaluate_macro_divergence(
     # Step 2: as_of equality
     if lifecycle.as_of != bundle.as_of:
         raise ValueError(
-            f"lifecycle.as_of != bundle.as_of: "
-            f"{lifecycle.as_of} != {bundle.as_of}"
+            f"lifecycle.as_of != bundle.as_of: {lifecycle.as_of} != {bundle.as_of}"
         )
 
     # Step 3: lifecycle blocking
@@ -609,7 +645,9 @@ def evaluate_macro_divergence(
     # Structural validation (§4.6 rules 1–5)
     _validate_series_structure(bundle.kospi_candles, "kospi_candles", bundle.as_of)
     _validate_series_structure(bundle.proxy_candles, "proxy_candles", bundle.as_of)
-    _validate_series_structure(bundle.investor_records, "investor_records", bundle.as_of)
+    _validate_series_structure(
+        bundle.investor_records, "investor_records", bundle.as_of
+    )
 
     # Coverage determination (§4.6 rules 6–12)
     coverage = _compute_coverage(bundle)
@@ -641,7 +679,9 @@ def evaluate_macro_divergence(
         # §5.2: INDEX_HIGH_FX_PROXY_HIGH
         comp_index = _compute_index_high(common_dates, kospi_map, proxy_map)
         # §5.3: FOREIGN_OUTFLOW_CONFIRMATION
-        comp_outflow, rolling_flow = _compute_foreign_outflow(common_dates, investor_map)
+        comp_outflow, rolling_flow = _compute_foreign_outflow(
+            common_dates, investor_map
+        )
         # §5.4: OUTFLOW_EXHAUSTION_FX_PROXY_REVERSAL
         comp_exhaustion, prior_flow, current_flow = _compute_exhaustion(
             common_dates, investor_map, proxy_map
@@ -672,22 +712,30 @@ def evaluate_macro_divergence(
             proxy_close = canonical_decimal(Decimal(proxy_map[latest].close_price))
 
     if coverage.state is MacroCoverageState.COVERED:
-        window_dates = common_dates[-min(len(common_dates), LOOKBACK_MAX):]
+        window_dates = common_dates[-min(len(common_dates), LOOKBACK_MAX) :]
         kospi_closes = [Decimal(kospi_map[d].close_price) for d in window_dates]
         proxy_closes = [Decimal(proxy_map[d].close_price) for d in window_dates]
-        kospi_pct_str = canonical_decimal(percentile_rank(kospi_closes, kospi_closes[-1]))
-        proxy_pct_str = canonical_decimal(percentile_rank(proxy_closes, proxy_closes[-1]))
+        kospi_pct_str = canonical_decimal(
+            percentile_rank(kospi_closes, kospi_closes[-1])
+        )
+        proxy_pct_str = canonical_decimal(
+            percentile_rank(proxy_closes, proxy_closes[-1])
+        )
 
         flow_dates = common_dates[-OUTFLOW_WINDOW:]
-        rf: Decimal = Decimal("0")
+        rf: Decimal = Decimal(0)
         for d in flow_dates:
-            rf += Decimal(investor_map[d].foreign_buy) - Decimal(investor_map[d].foreign_sell)
+            rf += Decimal(investor_map[d].foreign_buy) - Decimal(
+                investor_map[d].foreign_sell
+            )
         rolling_flow_str = canonical_decimal(rf)
 
         prior_dates = common_dates[-EXHAUSTION_MIN_INVESTOR:-OUTFLOW_WINDOW]
-        pf: Decimal = Decimal("0")
+        pf: Decimal = Decimal(0)
         for d in prior_dates:
-            pf += Decimal(investor_map[d].foreign_buy) - Decimal(investor_map[d].foreign_sell)
+            pf += Decimal(investor_map[d].foreign_buy) - Decimal(
+                investor_map[d].foreign_sell
+            )
         prior_flow_str = canonical_decimal(pf)
 
         fx_dates = common_dates[-FX_RETURN_WINDOW:]
@@ -755,7 +803,9 @@ def _build_evidence(
             lines.append(f"{comp.component.value}: {comp.reason}")
     if not lines:
         if coverage.state is not MacroCoverageState.COVERED:
-            lines.append(f"coverage {coverage.state.value}: insufficient for evaluation")
+            lines.append(
+                f"coverage {coverage.state.value}: insufficient for evaluation"
+            )
         else:
             lines.append("no component fired: no material divergence detected")
     return tuple(lines[:20])

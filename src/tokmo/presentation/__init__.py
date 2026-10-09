@@ -15,28 +15,28 @@ presentation → facts/records/programs/runtime/observability/composition (forbi
 
 from __future__ import annotations
 
+from tokmo.presentation.formatters.market import register_market_formatters
+from tokmo.presentation.formatters.results import register_result_formatters
 from tokmo.presentation.options import (
-    FormatOptions,
-    NumberStyle,
+    KOREAN,
+    KRW,
+    NUMBER,
+    RAW,
+    USD,
     CurrencyStyle,
     DateStyle,
     DateTimeStyle,
+    FormatOptions,
     Locale,
-    RAW,
-    NUMBER,
-    KRW,
-    USD,
-    KOREAN,
+    NumberStyle,
 )
 from tokmo.presentation.registry import (
+    CurrencyConflictError,
+    DuplicateRegistrationError,
     PresentationRegistry,
     UnsupportedPresentationType,
-    DuplicateRegistrationError,
-    CurrencyConflictError,
 )
-from tokmo.presentation.formatters.market import register_market_formatters
-from tokmo.presentation.formatters.results import register_result_formatters
-from tokmo.values import WtiFact, YieldCurveFact, UnavailableFact
+from tokmo.values import UnavailableFact, WtiFact, YieldCurveFact
 
 __all__ = [
     # Options

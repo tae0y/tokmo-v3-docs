@@ -1,4 +1,5 @@
 """Public Order Info GET response values (official OpenAPI 1.2.14)."""
+
 from dataclasses import dataclass, field
 from datetime import date
 

@@ -34,10 +34,6 @@ Fixture composition (test/dev only) lives in tools/run_tokmo_pulse_canary_fixtur
 The production src module does not contain fixture-to-TossCurrentPriceFact mapping.
 """
 
-from dataclasses import dataclass
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
-from typing import Callable
 import argparse
 import hashlib
 import json
@@ -45,18 +41,11 @@ import os
 import sqlite3
 import sys
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
-from tokmo.records.pulse_canary_evidence import CanaryEvidenceStore
-from tokmo.values.session_gate import Market
-from tokmo.programs.canary_safety_gate import (
-    CanarySafetyGate,
-    DEFAULT_PROTECTED_PATHS,
-    DEFAULT_EXPECTED_MUTABLE_PATHS,
-)
-from tokmo.programs.canary_sandbox_attestation import (
-    CanonicalWriteDenyAttestation,
-    attest_canonical_write_denied,
-)
 from tokmo.programs.canary_cadence_attribution import (
     DEFAULT_ATTRIBUTION_GRACE,
     fresh_receipts,
@@ -64,7 +53,17 @@ from tokmo.programs.canary_cadence_attribution import (
     read_cadence_receipts,
     read_cadence_receipts_from_manifests,
 )
-
+from tokmo.programs.canary_safety_gate import (
+    DEFAULT_EXPECTED_MUTABLE_PATHS,
+    DEFAULT_PROTECTED_PATHS,
+    CanarySafetyGate,
+)
+from tokmo.programs.canary_sandbox_attestation import (
+    CanonicalWriteDenyAttestation,
+    attest_canonical_write_denied,
+)
+from tokmo.records.pulse_canary_evidence import CanaryEvidenceStore
+from tokmo.values.session_gate import Market
 
 # ── Config ────────────────────────────────────────────────────────────
 
@@ -92,9 +91,15 @@ CANARY_CAMPAIGN_SYMBOL = "005930"
 # B-1: Immutable relative path for the campaign evidence root anchor.
 # Derived from Path.home() at runtime — never hardcoded as a user home string.
 # This path is outside canonical root and not caller-selectable.
-_CAMPAIGN_EVIDENCE_REL = Path(".local") / "share" / "tokmo-v3-canary" \
-    / "campaigns" / CANARY_CAMPAIGN_ID \
-    / CANARY_CAMPAIGN_MARKET.value / CANARY_CAMPAIGN_SYMBOL
+_CAMPAIGN_EVIDENCE_REL = (
+    Path(".local")
+    / "share"
+    / "tokmo-v3-canary"
+    / "campaigns"
+    / CANARY_CAMPAIGN_ID
+    / CANARY_CAMPAIGN_MARKET.value
+    / CANARY_CAMPAIGN_SYMBOL
+)
 
 # v3: the canonical (production) root the canary must never write. Also
 # derived from Path.home() + an immutable relative constant, so the live
@@ -124,8 +129,7 @@ class CanaryConfigV1:
         if type(self.max_ticks) is not int:
             raise ValueError("max_ticks must be int")
         if self.max_ticks != CANARY_MAX_TICKS:
-            raise ValueError(
-                f"max_ticks must be exactly {CANARY_MAX_TICKS}")
+            raise ValueError(f"max_ticks must be exactly {CANARY_MAX_TICKS}")
         if type(self.max_provider_starts) is not int:
             raise ValueError("max_provider_starts must be int")
         if self.max_provider_starts <= 0:
@@ -133,10 +137,12 @@ class CanaryConfigV1:
         if self.max_provider_starts > CANARY_MAX_PROVIDER_STARTS_LIMIT:
             raise ValueError(
                 f"max_provider_starts {self.max_provider_starts} exceeds "
-                f"hard limit {CANARY_MAX_PROVIDER_STARTS_LIMIT}")
+                f"hard limit {CANARY_MAX_PROVIDER_STARTS_LIMIT}"
+            )
 
 
 # ── Deps ──────────────────────────────────────────────────────────────
+
 
 @dataclass(frozen=True)
 class CanaryDepsV1:
@@ -164,6 +170,7 @@ class CanaryDepsV1:
 
 # ── Result ────────────────────────────────────────────────────────────
 
+
 @dataclass(frozen=True)
 class CanarySessionResult:
     session_id: str
@@ -186,6 +193,7 @@ class CanarySessionResult:
 
 # ── Fingerprint ───────────────────────────────────────────────────────
 
+
 def fingerprint_directory(root: Path) -> str:
     """Compute a deterministic SHA-256 fingerprint of a directory tree.
 
@@ -206,6 +214,7 @@ def fingerprint_directory(root: Path) -> str:
 
 
 # ── Root validation (M5) ─────────────────────────────────────────────
+
 
 def _validate_evidence_root(root: Path) -> Path:
     """Ensure the evidence root is a real private directory.
@@ -229,8 +238,7 @@ def _validate_evidence_root(root: Path) -> Path:
     return real
 
 
-def _validate_root_disjoint(evidence_root: Path,
-                            canonical_root: "Path | None") -> None:
+def _validate_root_disjoint(evidence_root: Path, canonical_root: "Path | None") -> None:
     """M5: evidence root and canonical root must not contain each other."""
     if canonical_root is None:
         return
@@ -246,6 +254,7 @@ def _validate_root_disjoint(evidence_root: Path,
 
 
 # ── Campaign evidence root anchor (B-1) ───────────────────────────────
+
 
 def campaign_evidence_anchor_root() -> Path:
     """B-1: Derive the absolute, deterministic campaign evidence root.
@@ -279,6 +288,7 @@ def canonical_root_anchor() -> Path:
 
 # ── Purpose identity (B4/B-1) ────────────────────────────────────────
 
+
 def compute_purpose_identity(market: Market, symbol: str) -> str:
     """Exact purpose identity bound to approved campaign contract.
 
@@ -297,12 +307,15 @@ def compute_campaign_session_id(market: Market, symbol: str) -> str:
 
     Same campaign => same session => cap persists across t0/root changes.
     """
-    identity = f"{CANARY_CAMPAIGN_ID}|v{CANARY_CAMPAIGN_VERSION}|{market.value}|{symbol}"
+    identity = (
+        f"{CANARY_CAMPAIGN_ID}|v{CANARY_CAMPAIGN_VERSION}|{market.value}|{symbol}"
+    )
     session_hash = hashlib.sha256(identity.encode()).hexdigest()[:16]
     return f"canary-{CANARY_CAMPAIGN_ID}-v{CANARY_CAMPAIGN_VERSION}-{session_hash}"
 
 
 # ── Campaign family and inherited accounting (v2) ─────────────────────
+
 
 @dataclass(frozen=True)
 class PriorCampaignSpec:
@@ -310,6 +323,7 @@ class PriorCampaignSpec:
     inherited provider-start usage from. The allowlist is immutable —
     callers cannot add entries. This prevents resetting same-purpose
     usage by switching roots or versions."""
+
     campaign_id: str
     version: int
 
@@ -334,12 +348,20 @@ def compute_family_identity(market: Market, symbol: str) -> str:
     return f"canary-family|{CANARY_FAMILY_ID}|{market.value}|{symbol}"
 
 
-def _prior_ledger_path(spec: PriorCampaignSpec, market: Market,
-                       symbol: str) -> Path:
+def _prior_ledger_path(spec: PriorCampaignSpec, market: Market, symbol: str) -> Path:
     """Derive the evidence DB path for a prior campaign ledger."""
-    return (Path.home() / ".local" / "share" / "tokmo-v3-canary"
-            / "campaigns" / spec.campaign_id
-            / market.value / symbol / "ops" / "canary_evidence.sqlite3")
+    return (
+        Path.home()
+        / ".local"
+        / "share"
+        / "tokmo-v3-canary"
+        / "campaigns"
+        / spec.campaign_id
+        / market.value
+        / symbol
+        / "ops"
+        / "canary_evidence.sqlite3"
+    )
 
 
 def read_inherited_provider_starts(market: Market, symbol: str) -> int:
@@ -358,8 +380,7 @@ def read_inherited_provider_starts(market: Market, symbol: str) -> int:
         if not db_path.exists():
             continue
         try:
-            conn = sqlite3.connect(
-                f"file:{db_path}?mode=ro", uri=True, timeout=1.0)
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=1.0)
             try:
                 row = conn.execute(
                     "SELECT COUNT(*) FROM provider_start_intent"
@@ -374,11 +395,15 @@ def read_inherited_provider_starts(market: Market, symbol: str) -> int:
 
 # ── Safety adjudication (v3) ──────────────────────────────────────────
 
-def adjudicate_safety_gate(gate_result, *, write_denied: bool,
-                           cadence_receipt_reader: "Callable | None",
-                           window_start: datetime,
-                           window_end: datetime,
-                           ) -> "tuple[str, tuple]":
+
+def adjudicate_safety_gate(
+    gate_result,
+    *,
+    write_denied: bool,
+    cadence_receipt_reader: "Callable | None",
+    window_start: datetime,
+    window_end: datetime,
+) -> "tuple[str, tuple]":
     """Decide whether a failing safety gate is a real canary violation.
 
     Returns ``(stop_reason, cadence_attribution)``. An empty stop_reason
@@ -421,11 +446,13 @@ def adjudicate_safety_gate(gate_result, *, write_denied: bool,
 
     # OS proved this process can't write canonical root.
     # Each changed path still needs individual mtime attribution.
-    receipts = (cadence_receipt_reader()
-                if cadence_receipt_reader is not None else ())
+    receipts = cadence_receipt_reader() if cadence_receipt_reader is not None else ()
     covering = fresh_receipts(
-        receipts, window_start=window_start, window_end=window_end,
-        grace=DEFAULT_ATTRIBUTION_GRACE)
+        receipts,
+        window_start=window_start,
+        window_end=window_end,
+        grace=DEFAULT_ATTRIBUTION_GRACE,
+    )
     if not covering:
         if gate_result.protected_mutations:
             return "safety_gate_protected_mutation_no_fresh_receipt", ()
@@ -434,11 +461,13 @@ def adjudicate_safety_gate(gate_result, *, write_denied: bool,
     # Check EACH protected mutation mtime against receipt intervals
     if gate_result.protected_mutation_mtimes:
         unexplained = [
-            rel for rel, mtime_ns in gate_result.protected_mutation_mtimes
+            rel
+            for rel, mtime_ns in gate_result.protected_mutation_mtimes
             if not mtime_attributed(
                 covering,
-                datetime.fromtimestamp(mtime_ns / 1_000_000_000, tz=timezone.utc),
-                grace=DEFAULT_ATTRIBUTION_GRACE)
+                datetime.fromtimestamp(mtime_ns / 1_000_000_000, tz=UTC),
+                grace=DEFAULT_ATTRIBUTION_GRACE,
+            )
         ]
         if unexplained:
             return "safety_gate_protected_mutation_outside_cadence_window", ()
@@ -447,16 +476,17 @@ def adjudicate_safety_gate(gate_result, *, write_denied: bool,
     # If mtimes are missing (older gate), fail closed — can't attribute
     # without a timestamp.
     if gate_result.unattributed_changes:
-        unattributed_mtimes = getattr(
-            gate_result, "unattributed_mutation_mtimes", ())
+        unattributed_mtimes = getattr(gate_result, "unattributed_mutation_mtimes", ())
         if not unattributed_mtimes:
             return "safety_gate_unattributed_change", ()
         unexplained = [
-            rel for rel, mtime_ns in unattributed_mtimes
+            rel
+            for rel, mtime_ns in unattributed_mtimes
             if not mtime_attributed(
                 covering,
-                datetime.fromtimestamp(mtime_ns / 1_000_000_000, tz=timezone.utc),
-                grace=DEFAULT_ATTRIBUTION_GRACE)
+                datetime.fromtimestamp(mtime_ns / 1_000_000_000, tz=UTC),
+                grace=DEFAULT_ATTRIBUTION_GRACE,
+            )
         ]
         if unexplained:
             return "safety_gate_unattributed_change_outside_cadence_window", ()
@@ -466,18 +496,21 @@ def adjudicate_safety_gate(gate_result, *, write_denied: bool,
 
 # ── Runner ────────────────────────────────────────────────────────────
 
-def run_canary_session(*, root: Path, config: CanaryConfigV1,
-                       deps: CanaryDepsV1,
-                       t0: datetime,
-                       session_id: "str | None" = None,
-                       canonical_root: "Path | None" = None,
-                       protected_paths: "tuple[str, ...] | None" = None,
-                       expected_mutable_paths: "tuple[str, ...] | None" = None,
-                       inherited_provider_starts: int = 0,
-                       write_deny_attestation:
-                           "CanonicalWriteDenyAttestation | None" = None,
-                       cadence_receipt_reader: "Callable | None" = None,
-                       ) -> CanarySessionResult:
+
+def run_canary_session(
+    *,
+    root: Path,
+    config: CanaryConfigV1,
+    deps: CanaryDepsV1,
+    t0: datetime,
+    session_id: "str | None" = None,
+    canonical_root: "Path | None" = None,
+    protected_paths: "tuple[str, ...] | None" = None,
+    expected_mutable_paths: "tuple[str, ...] | None" = None,
+    inherited_provider_starts: int = 0,
+    write_deny_attestation: "CanonicalWriteDenyAttestation | None" = None,
+    cadence_receipt_reader: "Callable | None" = None,
+) -> CanarySessionResult:
     """Run a bounded 5-tick canary session.
 
     - First tick is t0; subsequent ticks at t0+60, t0+120, ...
@@ -517,8 +550,11 @@ def run_canary_session(*, root: Path, config: CanaryConfigV1,
     evidence_root = _validate_evidence_root(root)
     _validate_root_disjoint(evidence_root, canonical_root)
 
-    if (not isinstance(t0, datetime) or t0.tzinfo is None
-            or t0.utcoffset() != timedelta(0)):
+    if (
+        not isinstance(t0, datetime)
+        or t0.tzinfo is None
+        or t0.utcoffset() != timedelta(0)
+    ):
         raise ValueError("t0 must be aware UTC")
     if t0.microsecond != 0:
         raise ValueError("t0 must be a whole second")
@@ -542,13 +578,15 @@ def run_canary_session(*, root: Path, config: CanaryConfigV1,
     # v3: only a real OS-bound attestation counts. A missing attestation is
     # indistinguishable from an unsandboxed run, so it is treated as "the
     # canary could have written" and the v2 fail-closed gate applies.
-    write_denied = (write_deny_attestation is not None
-                    and write_deny_attestation.denied is True)
-    write_deny_mechanism = (write_deny_attestation.mechanism
-                            if write_denied else "")
-    write_deny_reason = (write_deny_attestation.reason
-                         if write_deny_attestation is not None else
-                         "no_attestation_supplied")
+    write_denied = (
+        write_deny_attestation is not None and write_deny_attestation.denied is True
+    )
+    write_deny_mechanism = write_deny_attestation.mechanism if write_denied else ""
+    write_deny_reason = (
+        write_deny_attestation.reason
+        if write_deny_attestation is not None
+        else "no_attestation_supplied"
+    )
 
     # Purpose identity for the write-ahead provider-start ledger (B4/B-1)
     purpose = compute_purpose_identity(config.market, config.symbol)
@@ -579,10 +617,13 @@ def run_canary_session(*, root: Path, config: CanaryConfigV1,
         cumulative = evidence.cumulative_provider_starts_by_purpose(purpose)
 
         # M3: verify stored config matches current config
-        if (existing["max_ticks"] != config.max_ticks
-                or existing["max_provider_starts"] != config.max_provider_starts):
+        if (
+            existing["max_ticks"] != config.max_ticks
+            or existing["max_provider_starts"] != config.max_provider_starts
+        ):
             evidence.finish_session(
-                session_id, completed_ticks=len(completed),
+                session_id,
+                completed_ticks=len(completed),
                 total_provider_starts=inherited + cumulative,
                 stop_reason="config_mismatch_refusal",
             )
@@ -605,10 +646,12 @@ def run_canary_session(*, root: Path, config: CanaryConfigV1,
         cumulative = 0
         evidence.start_session(
             session_id=session_id,
-            market=config.market.value, symbol=config.symbol,
+            market=config.market.value,
+            symbol=config.symbol,
             max_ticks=config.max_ticks,
             max_provider_starts=config.max_provider_starts,
-            t0_utc=t0, canonical_fingerprint_pre=fingerprint_pre,
+            t0_utc=t0,
+            canonical_fingerprint_pre=fingerprint_pre,
         )
 
     # Check if already complete
@@ -620,14 +663,17 @@ def run_canary_session(*, root: Path, config: CanaryConfigV1,
             gate_result = safety_gate.evaluate_post()
             fingerprint_post = gate_result.full_root_post_hash
             stop_reason, _attribution = adjudicate_safety_gate(
-                gate_result, write_denied=write_denied,
+                gate_result,
+                write_denied=write_denied,
                 cadence_receipt_reader=cadence_receipt_reader,
-                window_start=t0, window_end=deps.clock(),
+                window_start=t0,
+                window_end=deps.clock(),
             )
             if stop_reason:
                 fingerprint_ok = False
                 evidence.finish_session(
-                    session_id, completed_ticks=len(completed),
+                    session_id,
+                    completed_ticks=len(completed),
                     total_provider_starts=inherited + cumulative,
                     stop_reason=stop_reason,
                     canonical_fingerprint_post=fingerprint_post,
@@ -640,19 +686,24 @@ def run_canary_session(*, root: Path, config: CanaryConfigV1,
                     inherited_provider_starts=inherited,
                     local_provider_starts=cumulative,
                     canary_canonical_write_denied_by_os=write_denied,
-                write_deny_mechanism=write_deny_mechanism,
-                write_deny_reason=write_deny_reason,
+                    write_deny_mechanism=write_deny_mechanism,
+                    write_deny_reason=write_deny_reason,
                     stop_reason=stop_reason,
                     ticks=ticks,
                     is_fresh=False,
                 )
         elif canonical_root is not None:
             fingerprint_post = fingerprint_directory(canonical_root)
-            stored_pre = existing.get("canonical_fingerprint_pre") if existing else fingerprint_pre
+            stored_pre = (
+                existing.get("canonical_fingerprint_pre")
+                if existing
+                else fingerprint_pre
+            )
             if stored_pre is not None and fingerprint_post != stored_pre:
                 fingerprint_ok = False
                 evidence.finish_session(
-                    session_id, completed_ticks=len(completed),
+                    session_id,
+                    completed_ticks=len(completed),
                     total_provider_starts=inherited + cumulative,
                     stop_reason="canonical_fingerprint_mutated",
                     canonical_fingerprint_post=fingerprint_post,
@@ -665,14 +716,15 @@ def run_canary_session(*, root: Path, config: CanaryConfigV1,
                     inherited_provider_starts=inherited,
                     local_provider_starts=cumulative,
                     canary_canonical_write_denied_by_os=write_denied,
-                write_deny_mechanism=write_deny_mechanism,
-                write_deny_reason=write_deny_reason,
+                    write_deny_mechanism=write_deny_mechanism,
+                    write_deny_reason=write_deny_reason,
                     stop_reason="canonical_fingerprint_mutated",
                     ticks=ticks,
                     is_fresh=False,
                 )
         evidence.finish_session(
-            session_id, completed_ticks=len(completed),
+            session_id,
+            completed_ticks=len(completed),
             total_provider_starts=inherited + cumulative,
             stop_reason="already_complete",
             canonical_fingerprint_post=fingerprint_post,
@@ -698,12 +750,14 @@ def run_canary_session(*, root: Path, config: CanaryConfigV1,
     # outcome is never all_ticks_complete if any MISSED exists.
     prior_ticks = evidence.read_ticks(session_id)
     durable_missed_count = sum(
-        1 for t in prior_ticks if t.get("outcome") == "missed_past_slot")
+        1 for t in prior_ticks if t.get("outcome") == "missed_past_slot"
+    )
 
     # Check cap before starting (B4: purpose ledger is authoritative)
     if inherited + cumulative >= config.max_provider_starts:
         evidence.finish_session(
-            session_id, completed_ticks=len(completed),
+            session_id,
+            completed_ticks=len(completed),
             total_provider_starts=inherited + cumulative,
             stop_reason="provider_start_cap_exceeded",
         )
@@ -727,7 +781,8 @@ def run_canary_session(*, root: Path, config: CanaryConfigV1,
     v3_needed_starts = config.max_ticks * 2
     if inherited + v3_needed_starts > config.max_provider_starts:
         evidence.finish_session(
-            session_id, completed_ticks=len(completed),
+            session_id,
+            completed_ticks=len(completed),
             total_provider_starts=inherited + cumulative,
             stop_reason="provider_start_cap_exceeded",
         )
@@ -769,22 +824,33 @@ def run_canary_session(*, root: Path, config: CanaryConfigV1,
         if lag > _PAST_SLOT_GRACE_SECONDS:
             # Record as MISSED and continue to next future slot
             evidence.record_tick(
-                session_id=session_id, tick_index=tick_index,
-                scheduled_utc=scheduled, observed_utc=observed,
-                market=config.market.value, symbol=config.symbol,
-                price=None, currency=None, source=None,
-                quote_timestamp=None, quote_fetched_at=None,
-                token_started=0, price_batch_started=0,
+                session_id=session_id,
+                tick_index=tick_index,
+                scheduled_utc=scheduled,
+                observed_utc=observed,
+                market=config.market.value,
+                symbol=config.symbol,
+                price=None,
+                currency=None,
+                source=None,
+                quote_timestamp=None,
+                quote_fetched_at=None,
+                token_started=0,
+                price_batch_started=0,
                 provider_start_count=0,
                 cumulative_provider_starts=cumulative,
-                duration_ms=0, lag_seconds=max(0.0, lag),
-                outcome="missed_past_slot", reason="past_slot_not_replayed",
+                duration_ms=0,
+                lag_seconds=max(0.0, lag),
+                outcome="missed_past_slot",
+                reason="past_slot_not_replayed",
             )
-            tick_results.append({
-                "tick_index": tick_index,
-                "outcome": "missed_past_slot",
-                "reason": "past_slot_not_replayed",
-            })
+            tick_results.append(
+                {
+                    "tick_index": tick_index,
+                    "outcome": "missed_past_slot",
+                    "reason": "past_slot_not_replayed",
+                }
+            )
             local_missed += 1
             continue
 
@@ -801,7 +867,8 @@ def run_canary_session(*, root: Path, config: CanaryConfigV1,
 
         if inherited + cumulative + 1 > config.max_provider_starts:
             evidence.finish_session(
-                session_id, completed_ticks=len(completed),
+                session_id,
+                completed_ticks=len(completed),
                 total_provider_starts=inherited + cumulative,
                 stop_reason="provider_start_cap_exceeded",
             )
@@ -819,33 +886,42 @@ def run_canary_session(*, root: Path, config: CanaryConfigV1,
             )
         # B4: write-ahead intent before TOKEN call
         intent_id = evidence.record_provider_start_intent(
-            purpose_identity=purpose, operation="TOKEN",
-            session_id=session_id, tick_index=tick_index,
+            purpose_identity=purpose,
+            operation="TOKEN",
+            session_id=session_id,
+            tick_index=tick_index,
         )
         cumulative = evidence.cumulative_provider_starts_by_purpose(purpose)
         try:
             token_value = deps.token_fetch()
-            evidence.settle_provider_start_intent(
-                intent_id, outcome="success")
+            evidence.settle_provider_start_intent(intent_id, outcome="success")
         except Exception:
-            evidence.settle_provider_start_intent(
-                intent_id, outcome="token_failed")
+            evidence.settle_provider_start_intent(intent_id, outcome="token_failed")
             # B5: provider failure => immediate STOP
             evidence.record_tick(
-                session_id=session_id, tick_index=tick_index,
-                scheduled_utc=scheduled, observed_utc=observed,
-                market=config.market.value, symbol=config.symbol,
-                price=None, currency=None, source=None,
-                quote_timestamp=None, quote_fetched_at=None,
-                token_started=1, price_batch_started=0,
+                session_id=session_id,
+                tick_index=tick_index,
+                scheduled_utc=scheduled,
+                observed_utc=observed,
+                market=config.market.value,
+                symbol=config.symbol,
+                price=None,
+                currency=None,
+                source=None,
+                quote_timestamp=None,
+                quote_fetched_at=None,
+                token_started=1,
+                price_batch_started=0,
                 provider_start_count=1,
                 cumulative_provider_starts=cumulative,
                 duration_ms=int((time.monotonic() - start_time) * 1000),
                 lag_seconds=max(0.0, lag),
-                outcome="failed", reason="token_fetch_exception",
+                outcome="failed",
+                reason="token_fetch_exception",
             )
             evidence.finish_session(
-                session_id, completed_ticks=tick_index,
+                session_id,
+                completed_ticks=tick_index,
                 total_provider_starts=inherited + cumulative,
                 stop_reason="provider_failed",
             )
@@ -867,7 +943,8 @@ def run_canary_session(*, root: Path, config: CanaryConfigV1,
         # PRICE_BATCH
         if inherited + cumulative + 1 > config.max_provider_starts:
             evidence.finish_session(
-                session_id, completed_ticks=len(completed),
+                session_id,
+                completed_ticks=len(completed),
                 total_provider_starts=inherited + cumulative,
                 stop_reason="provider_start_cap_exceeded",
             )
@@ -886,8 +963,10 @@ def run_canary_session(*, root: Path, config: CanaryConfigV1,
 
         # B4: write-ahead intent before PRICE_BATCH
         intent_id = evidence.record_provider_start_intent(
-            purpose_identity=purpose, operation="PRICE_BATCH",
-            session_id=session_id, tick_index=tick_index,
+            purpose_identity=purpose,
+            operation="PRICE_BATCH",
+            session_id=session_id,
+            tick_index=tick_index,
         )
         cumulative = evidence.cumulative_provider_starts_by_purpose(purpose)
         price_batch_started = 1
@@ -897,8 +976,7 @@ def run_canary_session(*, root: Path, config: CanaryConfigV1,
         # v3: token_value is fresh per-tick
         bearer = token_value
         try:
-            outcome = deps.quotes_fetch(config.market, (config.symbol,),
-                                        bearer=bearer)
+            outcome = deps.quotes_fetch(config.market, (config.symbol,), bearer=bearer)
         except Exception:
             outcome = None
 
@@ -925,27 +1003,32 @@ def run_canary_session(*, root: Path, config: CanaryConfigV1,
                 quote_fetched_at = getattr(fact, "fetched_at", None)
                 outcome_str = "success"
                 reason = None
-                evidence.settle_provider_start_intent(
-                    intent_id, outcome="success")
+                evidence.settle_provider_start_intent(intent_id, outcome="success")
             elif code:
                 outcome_str = "failed"
                 reason = f"provider_{code}"
                 evidence.settle_provider_start_intent(
-                    intent_id, outcome=f"failed_{code}")
+                    intent_id, outcome=f"failed_{code}"
+                )
             else:
                 outcome_str = "failed"
                 reason = "unknown_outcome"
                 evidence.settle_provider_start_intent(
-                    intent_id, outcome="failed_unknown")
+                    intent_id, outcome="failed_unknown"
+                )
         else:
-            evidence.settle_provider_start_intent(
-                intent_id, outcome="fetch_exception")
+            evidence.settle_provider_start_intent(intent_id, outcome="fetch_exception")
 
         evidence.record_tick(
-            session_id=session_id, tick_index=tick_index,
-            scheduled_utc=scheduled, observed_utc=observed,
-            market=config.market.value, symbol=config.symbol,
-            price=price, currency=currency, source=source,
+            session_id=session_id,
+            tick_index=tick_index,
+            scheduled_utc=scheduled,
+            observed_utc=observed,
+            market=config.market.value,
+            symbol=config.symbol,
+            price=price,
+            currency=currency,
+            source=source,
             quote_timestamp=quote_timestamp,
             quote_fetched_at=quote_fetched_at,
             token_started=token_started,
@@ -954,18 +1037,22 @@ def run_canary_session(*, root: Path, config: CanaryConfigV1,
             cumulative_provider_starts=cumulative,
             duration_ms=duration_ms,
             lag_seconds=max(0.0, lag),
-            outcome=outcome_str, reason=reason,
+            outcome=outcome_str,
+            reason=reason,
         )
-        tick_results.append({
-            "tick_index": tick_index,
-            "outcome": outcome_str,
-            "reason": reason,
-        })
+        tick_results.append(
+            {
+                "tick_index": tick_index,
+                "outcome": outcome_str,
+                "reason": reason,
+            }
+        )
 
         # B5: provider failure => immediate STOP, no next tick
         if outcome_str != "success":
             evidence.finish_session(
-                session_id, completed_ticks=tick_index + 1,
+                session_id,
+                completed_ticks=tick_index + 1,
                 total_provider_starts=inherited + cumulative,
                 stop_reason="provider_failed",
             )
@@ -984,10 +1071,13 @@ def run_canary_session(*, root: Path, config: CanaryConfigV1,
             )
 
         # Check cap after tick
-        if inherited + cumulative >= config.max_provider_starts and \
-                tick_index + 1 < config.max_ticks:
+        if (
+            inherited + cumulative >= config.max_provider_starts
+            and tick_index + 1 < config.max_ticks
+        ):
             evidence.finish_session(
-                session_id, completed_ticks=tick_index + 1,
+                session_id,
+                completed_ticks=tick_index + 1,
                 total_provider_starts=inherited + cumulative,
                 stop_reason="provider_start_cap_exceeded",
             )
@@ -1024,13 +1114,16 @@ def run_canary_session(*, root: Path, config: CanaryConfigV1,
         gate_result = safety_gate.evaluate_post()
         fingerprint_post = gate_result.full_root_post_hash
         stop_reason, cadence_attribution = adjudicate_safety_gate(
-            gate_result, write_denied=write_denied,
+            gate_result,
+            write_denied=write_denied,
             cadence_receipt_reader=cadence_receipt_reader,
-            window_start=t0, window_end=deps.clock(),
+            window_start=t0,
+            window_end=deps.clock(),
         )
         if stop_reason:
             evidence.finish_session(
-                session_id, completed_ticks=config.max_ticks,
+                session_id,
+                completed_ticks=config.max_ticks,
                 total_provider_starts=inherited + cumulative,
                 stop_reason=stop_reason,
                 canonical_fingerprint_post=fingerprint_post,
@@ -1052,11 +1145,15 @@ def run_canary_session(*, root: Path, config: CanaryConfigV1,
         fingerprint_post = fingerprint_directory(canonical_root)
         # Compare against stored pre from session
         session_data = evidence.read_session(session_id)
-        stored_pre = (session_data.get("canonical_fingerprint_pre")
-                      if session_data else fingerprint_pre)
+        stored_pre = (
+            session_data.get("canonical_fingerprint_pre")
+            if session_data
+            else fingerprint_pre
+        )
         if stored_pre is not None and fingerprint_post != stored_pre:
             evidence.finish_session(
-                session_id, completed_ticks=config.max_ticks,
+                session_id,
+                completed_ticks=config.max_ticks,
                 total_provider_starts=inherited + cumulative,
                 stop_reason="canonical_fingerprint_mutated",
                 canonical_fingerprint_post=fingerprint_post,
@@ -1081,7 +1178,8 @@ def run_canary_session(*, root: Path, config: CanaryConfigV1,
     total_missed = durable_missed_count + local_missed
     if total_missed > 0:
         evidence.finish_session(
-            session_id, completed_ticks=config.max_ticks - total_missed,
+            session_id,
+            completed_ticks=config.max_ticks - total_missed,
             total_provider_starts=inherited + cumulative,
             stop_reason="missed_past_slots",
             canonical_fingerprint_post=fingerprint_post,
@@ -1101,7 +1199,8 @@ def run_canary_session(*, root: Path, config: CanaryConfigV1,
         )
 
     evidence.finish_session(
-        session_id, completed_ticks=config.max_ticks,
+        session_id,
+        completed_ticks=config.max_ticks,
         total_provider_starts=inherited + cumulative,
         stop_reason="all_ticks_complete",
         canonical_fingerprint_post=fingerprint_post,
@@ -1124,7 +1223,7 @@ def run_canary_session(*, root: Path, config: CanaryConfigV1,
 
 def _real_sleep_until(target_utc: datetime) -> None:
     """Real wall-clock sleep until the target UTC datetime (B2)."""
-    now = datetime.fromtimestamp(time.time(), tz=timezone.utc)
+    now = datetime.fromtimestamp(time.time(), tz=UTC)
     delta = (target_utc - now).total_seconds()
     if delta > 0:
         time.sleep(delta)
@@ -1146,11 +1245,14 @@ def _real_sleep_until(target_utc: datetime) -> None:
 # must be exactly CANARY_CAMPAIGN_MARKET/CANARY_CAMPAIGN_SYMBOL.
 # Fixture mode is handled by tools/run_tokmo_pulse_canary_fixture.py.
 
-def run_canary_cli(argv: "list[str] | None" = None, *,
-                   live_deps_factory: "Callable | None" = None,
-                   evidence_root_override: "Path | None" = None,
-                   canonical_root_anchor_override: "Path | None" = None,
-                   ) -> int:
+
+def run_canary_cli(
+    argv: "list[str] | None" = None,
+    *,
+    live_deps_factory: "Callable | None" = None,
+    evidence_root_override: "Path | None" = None,
+    canonical_root_anchor_override: "Path | None" = None,
+) -> int:
     """CLI entrypoint for the bounded live canary (live-only).
 
     M2: exit 0 only for fresh all_ticks_complete.
@@ -1178,7 +1280,8 @@ def run_canary_cli(argv: "list[str] | None" = None, *,
                            derived canonical_root_anchor() is used.
     """
     parser = argparse.ArgumentParser(
-        prog="tokmo-pulse-canary", add_help=True,
+        prog="tokmo-pulse-canary",
+        add_help=True,
     )
     parser.add_argument("--mode", default="bounded-live-canary")
     parser.add_argument("--market", default=None)
@@ -1186,11 +1289,13 @@ def run_canary_cli(argv: "list[str] | None" = None, *,
     parser.add_argument("--canonical-root", default=None)
     parser.add_argument("--project-root", default=None)
     parser.add_argument("--max-ticks", type=int, default=CANARY_MAX_TICKS)
-    parser.add_argument("--max-provider-starts", type=int,
-                        default=CANARY_MAX_PROVIDER_STARTS_DEFAULT)
+    parser.add_argument(
+        "--max-provider-starts", type=int, default=CANARY_MAX_PROVIDER_STARTS_DEFAULT
+    )
     parser.add_argument("--base-commit", default=None)
-    parser.add_argument("--t0", default=None,
-                        help="t0 UTC ISO timestamp (default: now)")
+    parser.add_argument(
+        "--t0", default=None, help="t0 UTC ISO timestamp (default: now)"
+    )
     try:
         args = parser.parse_args(argv)
     except SystemExit:
@@ -1215,10 +1320,10 @@ def run_canary_cli(argv: "list[str] | None" = None, *,
     # Different values fail before credential/provider assembly.
     if market != CANARY_CAMPAIGN_MARKET:
         return refuse(
-            f"market_must_be_{CANARY_CAMPAIGN_MARKET.value}_for_this_campaign")
+            f"market_must_be_{CANARY_CAMPAIGN_MARKET.value}_for_this_campaign"
+        )
     if args.symbol != CANARY_CAMPAIGN_SYMBOL:
-        return refuse(
-            f"symbol_must_be_{CANARY_CAMPAIGN_SYMBOL}_for_this_campaign")
+        return refuse(f"symbol_must_be_{CANARY_CAMPAIGN_SYMBOL}_for_this_campaign")
 
     if not args.project_root:
         return refuse("project_root_required")
@@ -1229,13 +1334,15 @@ def run_canary_cli(argv: "list[str] | None" = None, *,
     if args.max_provider_starts != CANARY_FAMILY_CUMULATIVE_CAP:
         return refuse(
             f"max_provider_starts_must_be_exactly_"
-            f"{CANARY_FAMILY_CUMULATIVE_CAP}_for_v4_campaign")
+            f"{CANARY_FAMILY_CUMULATIVE_CAP}_for_v4_campaign"
+        )
     if args.max_provider_starts <= 0:
         return refuse("max_provider_starts_must_be_positive")
 
     try:
         config = CanaryConfigV1(
-            market=market, symbol=args.symbol,
+            market=market,
+            symbol=args.symbol,
             max_ticks=args.max_ticks,
             max_provider_starts=args.max_provider_starts,
         )
@@ -1245,14 +1352,13 @@ def run_canary_cli(argv: "list[str] | None" = None, *,
     # Determine t0
     if args.t0:
         try:
-            t0 = datetime.fromisoformat(
-                args.t0.replace("Z", "+00:00"))
+            t0 = datetime.fromisoformat(args.t0.replace("Z", "+00:00"))
         except ValueError:
             return refuse("invalid_t0")
     else:
         epoch = time.time()
         t0_epoch = int(epoch) - (int(epoch) % 60) + 60
-        t0 = datetime.fromtimestamp(t0_epoch, tz=timezone.utc)
+        t0 = datetime.fromtimestamp(t0_epoch, tz=UTC)
 
     # Validate t0 alignment
     if t0.microsecond != 0 or t0.second % 60 != 0:
@@ -1286,21 +1392,25 @@ def run_canary_cli(argv: "list[str] | None" = None, *,
 
     # Verify HEAD matches base-commit
     import subprocess
+
     try:
         head_result = subprocess.run(
             ["git", "rev-parse", "HEAD"],
-            capture_output=True, text=True, cwd=str(project_root),
+            capture_output=True,
+            text=True,
+            cwd=str(project_root),
             timeout=5,
         )
         if head_result.returncode != 0:
             return refuse("git_not_available")
         actual_head = head_result.stdout.strip()
         # Allow both short and full hash forms
-        if (actual_head != args.base_commit
-                and not actual_head.startswith(args.base_commit)):
+        if actual_head != args.base_commit and not actual_head.startswith(
+            args.base_commit
+        ):
             return refuse(
-                f"base_commit_mismatch:expected={args.base_commit}"
-                f":actual={actual_head}")
+                f"base_commit_mismatch:expected={args.base_commit}:actual={actual_head}"
+            )
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return refuse("git_revision_check_failed")
 
@@ -1310,7 +1420,9 @@ def run_canary_cli(argv: "list[str] | None" = None, *,
     try:
         status_result = subprocess.run(
             ["git", "status", "--porcelain", "--untracked-files=no"],
-            capture_output=True, text=True, cwd=str(project_root),
+            capture_output=True,
+            text=True,
+            cwd=str(project_root),
             timeout=5,
         )
         if status_result.returncode != 0:
@@ -1330,9 +1442,11 @@ def run_canary_cli(argv: "list[str] | None" = None, *,
     # nothing about the real canonical root — a decoy path the process
     # cannot write would forge a passing attestation. The expected anchor
     # is derived here; --canonical-root must match it exactly.
-    expected_canonical = (Path(canonical_root_anchor_override)
-                          if canonical_root_anchor_override is not None
-                          else canonical_root_anchor())
+    expected_canonical = (
+        Path(canonical_root_anchor_override)
+        if canonical_root_anchor_override is not None
+        else canonical_root_anchor()
+    )
     if canonical_root.resolve() != Path(expected_canonical).resolve():
         return refuse("canonical_root_must_be_the_derived_anchor")
 
@@ -1342,17 +1456,17 @@ def run_canary_cli(argv: "list[str] | None" = None, *,
     # first probe is idempotent, so an unsandboxed run refuses here
     # without ever having written to the canonical root.
     attestation = attest_canonical_write_denied(
-        canonical_root, nested_relatives=DEFAULT_PROTECTED_PATHS)
+        canonical_root, nested_relatives=DEFAULT_PROTECTED_PATHS
+    )
     if not attestation.denied:
-        return refuse(
-            f"sandbox_write_deny_not_proven:{attestation.reason}")
+        return refuse(f"sandbox_write_deny_not_proven:{attestation.reason}")
 
     # B1: live deps must be injected by the tool (outside the seal)
     if live_deps_factory is None:
         return refuse("live_deps_factory_required")
 
     def _utc_now():
-        return datetime.fromtimestamp(time.time(), tz=timezone.utc)
+        return datetime.fromtimestamp(time.time(), tz=UTC)
 
     deps = live_deps_factory(
         project_root=project_root,
@@ -1365,13 +1479,19 @@ def run_canary_cli(argv: "list[str] | None" = None, *,
     inherited = read_inherited_provider_starts(market, args.symbol)
 
     result = run_canary_session(
-        root=evidence_root, config=config, deps=deps, t0=t0,
+        root=evidence_root,
+        config=config,
+        deps=deps,
+        t0=t0,
         canonical_root=canonical_root,
         protected_paths=DEFAULT_PROTECTED_PATHS,
         expected_mutable_paths=DEFAULT_EXPECTED_MUTABLE_PATHS,
         inherited_provider_starts=inherited,
         write_deny_attestation=attestation,
-        cadence_receipt_reader=lambda: read_cadence_receipts_from_manifests() + read_cadence_receipts(canonical_root),
+        cadence_receipt_reader=lambda: (
+            read_cadence_receipts_from_manifests()
+            + read_cadence_receipts(canonical_root)
+        ),
     )
 
     # Output sanitized summary
@@ -1385,8 +1505,7 @@ def run_canary_cli(argv: "list[str] | None" = None, *,
         "canary_canonical_write_denied_by_os": result.canary_canonical_write_denied_by_os,
         "write_deny_mechanism": result.write_deny_mechanism,
         "write_deny_probes": [
-            {"probe": name, "verdict": verdict}
-            for name, verdict in attestation.probes
+            {"probe": name, "verdict": verdict} for name, verdict in attestation.probes
         ],
         "cadence_attribution": list(result.cadence_attribution),
         "stop_reason": result.stop_reason,

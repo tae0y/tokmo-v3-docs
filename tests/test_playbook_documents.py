@@ -41,20 +41,34 @@ def test_validator_accepts_document_and_rejects_broken_anchor(tmp_path):
     playbooks = tmp_path / "playbooks"
     target = playbooks / "personal" / "KR" / "005380.md"
     target.parent.mkdir(parents=True)
-    target.write_text(mod.render_instrument_document(
-        scope="personal", market="KR", code="005380", name="현대차",
-        entries=[mod.TimelineEntry(
-            entry_id="strategy-1", heading_date="2026-07-21",
-            heading="V2 최신 플레이북 이관", source_kind="v2_strategy_playbook",
-            source_ref="strategy_advisor.yaml@abc", payload="원문\n",
-            event_date="unknown", recorded_date="unknown",
-            source_snapshot_date="2026-07-21",
-            source_snapshot_basis="latest_git_commit_touching_source",
-        )],
-    ), encoding="utf-8")
+    target.write_text(
+        mod.render_instrument_document(
+            scope="personal",
+            market="KR",
+            code="005380",
+            name="현대차",
+            entries=[
+                mod.TimelineEntry(
+                    entry_id="strategy-1",
+                    heading_date="2026-07-21",
+                    heading="V2 최신 플레이북 이관",
+                    source_kind="v2_strategy_playbook",
+                    source_ref="strategy_advisor.yaml@abc",
+                    payload="원문\n",
+                    event_date="unknown",
+                    recorded_date="unknown",
+                    source_snapshot_date="2026-07-21",
+                    source_snapshot_basis="latest_git_commit_touching_source",
+                )
+            ],
+        ),
+        encoding="utf-8",
+    )
     assert mod.validate_tree(playbooks) == []
 
-    text = target.read_text(encoding="utf-8").replace("#entry-strategy-1", "#entry-missing")
+    text = target.read_text(encoding="utf-8").replace(
+        "#entry-strategy-1", "#entry-missing"
+    )
     target.write_text(text, encoding="utf-8")
     assert any("missing anchor" in error for error in mod.validate_tree(playbooks))
 

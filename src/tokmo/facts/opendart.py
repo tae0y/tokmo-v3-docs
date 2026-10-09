@@ -52,8 +52,11 @@ STATUS_RATE_LIMITED = frozenset({"020", "021"})
 # Provider status classes ride next to the shared transport failure codes so
 # the campaign controller can distinguish auth/rate stops from mismatches.
 ATTEMPT_CODES = LIVE_TRANSPORT_FAILURE_CODES | {
-    "success", "response_contract_failure",
-    "provider_no_data", "provider_key_rejected", "provider_rate_limited",
+    "success",
+    "response_contract_failure",
+    "provider_no_data",
+    "provider_key_rejected",
+    "provider_rate_limited",
 }
 
 _PROVIDER_REASONS = {
@@ -154,29 +157,41 @@ class OpenDartQueryResult:
 
 
 OpenDartTransport = Callable[
-    [OpenDartRequest], "_OpenDartTransportSuccess | _OpenDartTransportFailure"]
+    [OpenDartRequest], "_OpenDartTransportSuccess | _OpenDartTransportFailure"
+]
 Clock = Callable[[], datetime]
 
 
 def build_corp_code_request(*, api_key: str) -> OpenDartRequest:
     return OpenDartRequest(
-        endpoint_id=CORP_CODE_ENDPOINT_ID, corp_code=None,
-        begin_date=None, end_date=None,
-        timeout_seconds=REQUEST_TIMEOUT_SECONDS, api_key=api_key,
+        endpoint_id=CORP_CODE_ENDPOINT_ID,
+        corp_code=None,
+        begin_date=None,
+        end_date=None,
+        timeout_seconds=REQUEST_TIMEOUT_SECONDS,
+        api_key=api_key,
     )
 
 
-def build_list_request(*, corp_code: str | None, begin_date: str | None,
-                       end_date: str | None, api_key: str) -> OpenDartRequest:
+def build_list_request(
+    *, corp_code: str | None, begin_date: str | None, end_date: str | None, api_key: str
+) -> OpenDartRequest:
     return OpenDartRequest(
-        endpoint_id=LIST_ENDPOINT_ID, corp_code=corp_code,
-        begin_date=begin_date, end_date=end_date,
-        timeout_seconds=REQUEST_TIMEOUT_SECONDS, api_key=api_key,
+        endpoint_id=LIST_ENDPOINT_ID,
+        corp_code=corp_code,
+        begin_date=begin_date,
+        end_date=end_date,
+        timeout_seconds=REQUEST_TIMEOUT_SECONDS,
+        api_key=api_key,
     )
 
 
-def parse_corp_code_zip(body: bytes, *, stock_code: str, observed_at: datetime,
-                        ) -> "OpenDartCorpMapping | UnavailableFact | _ProviderStatusFailure":
+def parse_corp_code_zip(
+    body: bytes,
+    *,
+    stock_code: str,
+    observed_at: datetime,
+) -> "OpenDartCorpMapping | UnavailableFact | _ProviderStatusFailure":
     buffer = io.BytesIO(body)
     if not zipfile.is_zipfile(buffer):
         return _classify_error_envelope(body, observed_at)
@@ -190,9 +205,13 @@ def parse_corp_code_zip(body: bytes, *, stock_code: str, observed_at: datetime,
     return _mapping_from_xml(xml_bytes, stock_code, observed_at)
 
 
-def parse_disclosure_list(body: bytes, *, corp_code: str, stock_code: str,
-                          observed_at: datetime,
-                          ) -> "OpenDartDisclosureFact | UnavailableFact | _ProviderStatusFailure":
+def parse_disclosure_list(
+    body: bytes,
+    *,
+    corp_code: str,
+    stock_code: str,
+    observed_at: datetime,
+) -> "OpenDartDisclosureFact | UnavailableFact | _ProviderStatusFailure":
     try:
         payload = json.loads(body)
     except (json.JSONDecodeError, UnicodeDecodeError):
@@ -214,8 +233,16 @@ def parse_disclosure_list(body: bytes, *, corp_code: str, stock_code: str,
         return UnavailableFact(SOURCE, "contract_mismatch", observed_at)
 
     text: dict[str, str] = {}
-    for name in ("corp_code", "corp_name", "stock_code", "corp_cls",
-                 "report_nm", "rcept_no", "flr_nm", "rcept_dt"):
+    for name in (
+        "corp_code",
+        "corp_name",
+        "stock_code",
+        "corp_cls",
+        "report_nm",
+        "rcept_no",
+        "flr_nm",
+        "rcept_dt",
+    ):
         value = row.get(name)
         if not isinstance(value, str) or not value.strip():
             return UnavailableFact(SOURCE, "contract_mismatch", observed_at)
@@ -240,11 +267,17 @@ def parse_disclosure_list(body: bytes, *, corp_code: str, stock_code: str,
     remark = raw_remark.strip() if isinstance(raw_remark, str) else None
 
     return OpenDartDisclosureFact(
-        source=SOURCE, stock_code=stock_code, corp_code=corp_code,
-        corp_name=text["corp_name"], corp_cls=text["corp_cls"],
-        report_name=text["report_nm"], receipt_number=text["rcept_no"],
-        filer_name=text["flr_nm"], receipt_date=receipt_date,
-        remark=remark or None, observed_at=observed_at,
+        source=SOURCE,
+        stock_code=stock_code,
+        corp_code=corp_code,
+        corp_name=text["corp_name"],
+        corp_cls=text["corp_cls"],
+        report_name=text["report_nm"],
+        receipt_number=text["rcept_no"],
+        filer_name=text["flr_nm"],
+        receipt_date=receipt_date,
+        remark=remark or None,
+        observed_at=observed_at,
     )
 
 
@@ -257,9 +290,13 @@ def _bounded_xml_entry(archive: zipfile.ZipFile) -> bytes | None:
     for entry in entries:
         name = entry.filename
         file_type = stat.S_IFMT(entry.external_attr >> 16)
-        if (name.startswith("/") or "\\" in name or name.endswith("/")
-                or ".." in name.split("/")
-                or (file_type and file_type != stat.S_IFREG)):
+        if (
+            name.startswith("/")
+            or "\\" in name
+            or name.endswith("/")
+            or ".." in name.split("/")
+            or (file_type and file_type != stat.S_IFREG)
+        ):
             return None
         total_declared += entry.file_size
     if total_declared > ZIP_MAX_UNCOMPRESSED_BYTES:
@@ -274,13 +311,17 @@ def _bounded_xml_entry(archive: zipfile.ZipFile) -> bytes | None:
     return xml_bytes
 
 
-def _mapping_from_xml(xml_bytes: bytes, stock_code: str, observed_at: datetime,
-                      ) -> "OpenDartCorpMapping | UnavailableFact":
+def _mapping_from_xml(
+    xml_bytes: bytes,
+    stock_code: str,
+    observed_at: datetime,
+) -> "OpenDartCorpMapping | UnavailableFact":
     """In-memory stdlib parse; ElementTree performs no external entity or
     network expansion. Only the selected row is materialized."""
     try:
         for _event, element in ElementTree.iterparse(
-                io.BytesIO(xml_bytes), events=("end",)):
+            io.BytesIO(xml_bytes), events=("end",)
+        ):
             if element.tag != "list":
                 continue
             row_stock = _stripped_text(element, "stock_code")
@@ -290,23 +331,30 @@ def _mapping_from_xml(xml_bytes: bytes, stock_code: str, observed_at: datetime,
             corp_code = _stripped_text(element, "corp_code")
             corp_name = _stripped_text(element, "corp_name")
             modify_raw = _stripped_text(element, "modify_date")
-            if (not _exact_digits(row_stock, STOCK_CODE_DIGITS)
-                    or not _exact_digits(corp_code, CORP_CODE_DIGITS)
-                    or not corp_name):
+            if (
+                not _exact_digits(row_stock, STOCK_CODE_DIGITS)
+                or not _exact_digits(corp_code, CORP_CODE_DIGITS)
+                or not corp_name
+            ):
                 return UnavailableFact(SOURCE, "contract_mismatch", observed_at)
             modify_date = _yyyymmdd(modify_raw)
             if modify_date is None:
                 return UnavailableFact(SOURCE, "parse_error", observed_at)
             return OpenDartCorpMapping(
-                stock_code=row_stock, corp_code=corp_code,
-                corp_name=corp_name, modify_date=modify_date)
+                stock_code=row_stock,
+                corp_code=corp_code,
+                corp_name=corp_name,
+                modify_date=modify_date,
+            )
     except ElementTree.ParseError:
         return UnavailableFact(SOURCE, "parse_error", observed_at)
     return UnavailableFact(SOURCE, "no_published_data", observed_at)
 
 
-def _classify_error_envelope(body: bytes, observed_at: datetime,
-                             ) -> "UnavailableFact | _ProviderStatusFailure":
+def _classify_error_envelope(
+    body: bytes,
+    observed_at: datetime,
+) -> "UnavailableFact | _ProviderStatusFailure":
     """A non-ZIP corpCode body is acceptable only as the official XML error
     envelope; its status is classified and its message never surfaced."""
     if len(body) > ZIP_MAX_ERROR_ENVELOPE_BYTES:
@@ -316,12 +364,15 @@ def _classify_error_envelope(body: bytes, observed_at: datetime,
     except ElementTree.ParseError:
         return UnavailableFact(SOURCE, "parse_error", observed_at)
     status = root.findtext("status")
-    return _classify_status(status.strip() if isinstance(status, str) else "",
-                            observed_at)
+    return _classify_status(
+        status.strip() if isinstance(status, str) else "", observed_at
+    )
 
 
-def _classify_status(status: str, observed_at: datetime,
-                     ) -> "UnavailableFact | _ProviderStatusFailure":
+def _classify_status(
+    status: str,
+    observed_at: datetime,
+) -> "UnavailableFact | _ProviderStatusFailure":
     if status in STATUS_NO_DATA:
         return _ProviderStatusFailure("provider_no_data")
     if status in STATUS_KEY_REJECTED:
@@ -344,8 +395,12 @@ def _stripped_text(element, tag: str) -> str:
 
 
 def _exact_digits(value, count: int) -> bool:
-    return (isinstance(value, str) and len(value) == count
-            and value.isascii() and value.isdigit())
+    return (
+        isinstance(value, str)
+        and len(value) == count
+        and value.isascii()
+        and value.isdigit()
+    )
 
 
 def _yyyymmdd(raw: str) -> date | None:
@@ -358,29 +413,53 @@ def _yyyymmdd(raw: str) -> date | None:
         return None
 
 
-def query_corp_code(*, stock_code: str, api_key: str,
-                    transport: OpenDartTransport, clock: Clock) -> OpenDartQueryResult:
+def query_corp_code(
+    *, stock_code: str, api_key: str, transport: OpenDartTransport, clock: Clock
+) -> OpenDartQueryResult:
     request = build_corp_code_request(api_key=api_key)
-    return _query(request, transport, clock,
-                  lambda body, observed_at: parse_corp_code_zip(
-                      body, stock_code=stock_code, observed_at=observed_at),
-                  success_type=OpenDartCorpMapping)
+    return _query(
+        request,
+        transport,
+        clock,
+        lambda body, observed_at: parse_corp_code_zip(
+            body, stock_code=stock_code, observed_at=observed_at
+        ),
+        success_type=OpenDartCorpMapping,
+    )
 
 
-def query_disclosure_list(*, corp_code: str, stock_code: str, begin_date: str,
-                          end_date: str, api_key: str,
-                          transport: OpenDartTransport, clock: Clock) -> OpenDartQueryResult:
-    request = build_list_request(corp_code=corp_code, begin_date=begin_date,
-                                 end_date=end_date, api_key=api_key)
-    return _query(request, transport, clock,
-                  lambda body, observed_at: parse_disclosure_list(
-                      body, corp_code=corp_code, stock_code=stock_code,
-                      observed_at=observed_at),
-                  success_type=OpenDartDisclosureFact)
+def query_disclosure_list(
+    *,
+    corp_code: str,
+    stock_code: str,
+    begin_date: str,
+    end_date: str,
+    api_key: str,
+    transport: OpenDartTransport,
+    clock: Clock,
+) -> OpenDartQueryResult:
+    request = build_list_request(
+        corp_code=corp_code, begin_date=begin_date, end_date=end_date, api_key=api_key
+    )
+    return _query(
+        request,
+        transport,
+        clock,
+        lambda body, observed_at: parse_disclosure_list(
+            body, corp_code=corp_code, stock_code=stock_code, observed_at=observed_at
+        ),
+        success_type=OpenDartDisclosureFact,
+    )
 
 
-def _query(request: OpenDartRequest, transport: OpenDartTransport, clock: Clock,
-           parse, *, success_type: type) -> OpenDartQueryResult:
+def _query(
+    request: OpenDartRequest,
+    transport: OpenDartTransport,
+    clock: Clock,
+    parse,
+    *,
+    success_type: type,
+) -> OpenDartQueryResult:
     """One transport call per invocation; escaping exceptions are sanitized."""
     observed_at = clock()
     try:
@@ -397,14 +476,16 @@ def _query(request: OpenDartRequest, transport: OpenDartTransport, clock: Clock,
             fact = UnavailableFact(SOURCE, _PROVIDER_REASONS[parsed.code], observed_at)
             return OpenDartQueryResult(fact, OpenDartAttemptOutcome(code=parsed.code))
         return OpenDartQueryResult(
-            parsed, OpenDartAttemptOutcome(code="response_contract_failure"))
+            parsed, OpenDartAttemptOutcome(code="response_contract_failure")
+        )
 
     if isinstance(outcome, _OpenDartTransportFailure):
         reason = _FAILURE_REASONS[outcome.code]
         fact = UnavailableFact(SOURCE, reason, observed_at, outcome.retry_after)
         return OpenDartQueryResult(
-            fact, OpenDartAttemptOutcome(code=outcome.code,
-                                         retry_after=outcome.retry_after))
+            fact,
+            OpenDartAttemptOutcome(code=outcome.code, retry_after=outcome.retry_after),
+        )
 
     return OpenDartQueryResult(
         UnavailableFact(SOURCE, "transport_error", observed_at),

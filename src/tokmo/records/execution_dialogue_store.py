@@ -8,12 +8,12 @@ so a crash never double-consumes or skips a Telegram update. Message text
 stored here is already masked (no scope, native ref, token, or path).
 """
 
-from datetime import datetime, timedelta, timezone
 import json
 import os
-from pathlib import Path
 import sqlite3
 import stat
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from tokmo.values.ops_kernel import iso, parse_iso
 from tokmo.values.trade_event import (
@@ -152,15 +152,19 @@ class ExecutionDialogueStore:
             # ADD COLUMN in place. A pre-existing row keeps NULL, which the
             # readers treat as "legacy preview handshake, zero attempts" —
             # so an old in-flight bubble is never auto-settled by the sweep.
-            columns = {row[1] for row in connection.execute(
-                "PRAGMA table_info(pending_appends)")}
-            for name, declaration in (("payload", "BLOB"),
-                                      ("save_intent", "INTEGER"),
-                                      ("attempts", "INTEGER")):
+            columns = {
+                row[1]
+                for row in connection.execute("PRAGMA table_info(pending_appends)")
+            }
+            for name, declaration in (
+                ("payload", "BLOB"),
+                ("save_intent", "INTEGER"),
+                ("attempts", "INTEGER"),
+            ):
                 if name not in columns:
                     connection.execute(
-                        f"ALTER TABLE pending_appends ADD COLUMN {name} "
-                        f"{declaration}")
+                        f"ALTER TABLE pending_appends ADD COLUMN {name} {declaration}"
+                    )
             return connection
         except sqlite3.DatabaseError:
             connection.close()
@@ -171,18 +175,37 @@ class ExecutionDialogueStore:
 
     # --- trade events ----------------------------------------------------
 
-    def register_event(self, event_id: str, *, source: str,
-                       account_scope: str, source_record_key: str,
-                       symbol: str, side: str, quantity: str,
-                       unit_price: str, amount: str, currency: str,
-                       classified_market: str,
-                       times: TradeEventTimesV1) -> str:
+    def register_event(
+        self,
+        event_id: str,
+        *,
+        source: str,
+        account_scope: str,
+        source_record_key: str,
+        symbol: str,
+        side: str,
+        quantity: str,
+        unit_price: str,
+        amount: str,
+        currency: str,
+        classified_market: str,
+        times: TradeEventTimesV1,
+    ) -> str:
         """Insert DETECTED once; the ledger-identical replay is a duplicate."""
         if type(event_id) is not str or len(event_id) != 64:
             raise DialogueStoreError("invalid trade event id")
-        for value in (source, account_scope, source_record_key, symbol, side,
-                      quantity, unit_price, amount, currency,
-                      classified_market):
+        for value in (
+            source,
+            account_scope,
+            source_record_key,
+            symbol,
+            side,
+            quantity,
+            unit_price,
+            amount,
+            currency,
+            classified_market,
+        ):
             if type(value) is not str or not value:
                 raise DialogueStoreError("invalid event identity")
         if not isinstance(times, TradeEventTimesV1):
@@ -200,21 +223,40 @@ class ExecutionDialogueStore:
             connection.execute(
                 "INSERT INTO trade_events VALUES(?,?,?,?, 'DETECTED', "
                 "?,?,?,?,?,?,?, ?,?,?,?,?,?,NULL,?,?)",
-                (event_id, source, account_scope, source_record_key,
-                 symbol, side, quantity, unit_price, amount, currency,
-                 classified_market,
-                 iso(times.filled_at),
-                 None if times.provider_observed_at is None
-                 else iso(times.provider_observed_at),
-                 iso(times.discovered_at), iso(times.stored_at),
-                 None if times.notified_at is None else iso(times.notified_at),
-                 int(times.late_arrival), now, now),
+                (
+                    event_id,
+                    source,
+                    account_scope,
+                    source_record_key,
+                    symbol,
+                    side,
+                    quantity,
+                    unit_price,
+                    amount,
+                    currency,
+                    classified_market,
+                    iso(times.filled_at),
+                    None
+                    if times.provider_observed_at is None
+                    else iso(times.provider_observed_at),
+                    iso(times.discovered_at),
+                    iso(times.stored_at),
+                    None if times.notified_at is None else iso(times.notified_at),
+                    int(times.late_arrival),
+                    now,
+                    now,
+                ),
             )
             return "created"
 
-    def transition_event(self, event_id: str, target: TradeEventState, *,
-                         evaluation_policy_version: "str | None" = None,
-                         notified_at: "datetime | None" = None) -> None:
+    def transition_event(
+        self,
+        event_id: str,
+        target: TradeEventState,
+        *,
+        evaluation_policy_version: "str | None" = None,
+        notified_at: "datetime | None" = None,
+    ) -> None:
         if not isinstance(target, TradeEventState):
             raise DialogueStoreError("invalid target state")
         with self._connect() as connection:
@@ -230,9 +272,13 @@ class ExecutionDialogueStore:
                 "evaluation_policy_version=COALESCE(?, evaluation_policy_version), "
                 "notified_at=COALESCE(?, notified_at), updated_at=? "
                 "WHERE trade_event_id=?",
-                (target.value, evaluation_policy_version,
-                 None if notified_at is None else iso(notified_at),
-                 iso(self._clock()), event_id),
+                (
+                    target.value,
+                    evaluation_policy_version,
+                    None if notified_at is None else iso(notified_at),
+                    iso(self._clock()),
+                    event_id,
+                ),
             )
 
     def read_event(self, event_id: str) -> "dict | None":
@@ -258,12 +304,15 @@ class ExecutionDialogueStore:
             "state": TradeEventState(row["state"]),
             "filled_at": parse_iso(row["filled_at"]),
             "provider_observed_at": (
-                None if row["provider_observed_at"] is None
-                else parse_iso(row["provider_observed_at"])),
+                None
+                if row["provider_observed_at"] is None
+                else parse_iso(row["provider_observed_at"])
+            ),
             "discovered_at": parse_iso(row["discovered_at"]),
             "stored_at": parse_iso(row["stored_at"]),
-            "notified_at": (None if row["notified_at"] is None
-                            else parse_iso(row["notified_at"])),
+            "notified_at": (
+                None if row["notified_at"] is None else parse_iso(row["notified_at"])
+            ),
             "late_arrival": bool(row["late_arrival"]),
             "evaluation_policy_version": row["evaluation_policy_version"],
         }
@@ -276,23 +325,27 @@ class ExecutionDialogueStore:
             ).fetchall()
         return tuple(row["trade_event_id"] for row in rows)
 
-    def find_event_by_source_record_key(
-            self, source_record_key: str) -> "str | None":
+    def find_event_by_source_record_key(self, source_record_key: str) -> "str | None":
         """Reverse-arrival pre-check (conditional SDS §3.1(d)): the migrated
         regular event already exists for this provider order id."""
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT trade_event_id FROM trade_events "
-                "WHERE source_record_key=?",
+                "SELECT trade_event_id FROM trade_events WHERE source_record_key=?",
                 (source_record_key,),
             ).fetchone()
         return None if row is None else row["trade_event_id"]
 
     # --- outbox ----------------------------------------------------------
 
-    def enqueue_outbox(self, dedupe_key: str, *, trade_event_id: str,
-                       prompt_kind: str, prompt_version: str,
-                       message_text: str) -> str:
+    def enqueue_outbox(
+        self,
+        dedupe_key: str,
+        *,
+        trade_event_id: str,
+        prompt_kind: str,
+        prompt_version: str,
+        message_text: str,
+    ) -> str:
         if type(dedupe_key) is not str or len(dedupe_key) != 64:
             raise DialogueStoreError("invalid dedupe key")
         if prompt_kind not in PROMPT_KINDS:
@@ -308,15 +361,22 @@ class ExecutionDialogueStore:
             if existing is not None:
                 return "duplicate"
             connection.execute(
-                "INSERT INTO dialogue_outbox VALUES(?,?,?,?, 'PENDING', "
-                "?,NULL,?,?)",
-                (dedupe_key, trade_event_id, prompt_kind, prompt_version,
-                 message_text, now, now),
+                "INSERT INTO dialogue_outbox VALUES(?,?,?,?, 'PENDING', ?,NULL,?,?)",
+                (
+                    dedupe_key,
+                    trade_event_id,
+                    prompt_kind,
+                    prompt_version,
+                    message_text,
+                    now,
+                    now,
+                ),
             )
             return "created"
 
-    def mark_outbox(self, dedupe_key: str, status: str, *,
-                    telegram_message_id: "int | None" = None) -> None:
+    def mark_outbox(
+        self, dedupe_key: str, status: str, *, telegram_message_id: "int | None" = None
+    ) -> None:
         """PENDING→SENT/UNKNOWN/FAILED only. UNKNOWN never auto-resends."""
         if status not in OUTBOX_STATUS_TOKENS - {"PENDING"}:
             raise DialogueStoreError("invalid outbox status")
@@ -329,7 +389,8 @@ class ExecutionDialogueStore:
                 raise DialogueStoreError("unknown outbox row")
             if row["status"] != "PENDING":
                 raise TradeEventTransitionError(
-                    "outbox rows settle exactly once (no auto-resend)")
+                    "outbox rows settle exactly once (no auto-resend)"
+                )
             connection.execute(
                 "UPDATE dialogue_outbox SET status=?, telegram_message_id=?, "
                 "updated_at=? WHERE dedupe_key=?",
@@ -354,19 +415,22 @@ class ExecutionDialogueStore:
             "telegram_message_id": row["telegram_message_id"],
         }
 
-    def list_outbox(self, *, status: "str | None" = None,
-                    send_eligible_after=None) -> tuple[dict, ...]:
+    def list_outbox(
+        self, *, status: "str | None" = None, send_eligible_after=None
+    ) -> tuple[dict, ...]:
         query = "SELECT dedupe_key FROM dialogue_outbox"
         params = []
         if status is not None:
             query += " WHERE status=?"
             params.append(status)
         if send_eligible_after is not None:
-            if (not isinstance(send_eligible_after, datetime)
-                    or send_eligible_after.tzinfo is None
-                    or send_eligible_after.utcoffset() is None):
+            if (
+                not isinstance(send_eligible_after, datetime)
+                or send_eligible_after.tzinfo is None
+                or send_eligible_after.utcoffset() is None
+            ):
                 return ()
-            cutoff = send_eligible_after.astimezone(timezone.utc)
+            cutoff = send_eligible_after.astimezone(UTC)
             query += (" AND " if params else " WHERE ") + "created_at >= ?"
             params.append(iso(cutoff))
         query += " ORDER BY created_at, dedupe_key"
@@ -374,20 +438,27 @@ class ExecutionDialogueStore:
             rows = connection.execute(query, tuple(params)).fetchall()
         return tuple(self.read_outbox(row["dedupe_key"]) for row in rows)
 
-    def find_outbox_by_telegram_message(self, telegram_message_id: int) -> "dict | None":
+    def find_outbox_by_telegram_message(
+        self, telegram_message_id: int
+    ) -> "dict | None":
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT dedupe_key FROM dialogue_outbox WHERE "
-                "telegram_message_id=?",
+                "SELECT dedupe_key FROM dialogue_outbox WHERE telegram_message_id=?",
                 (telegram_message_id,),
             ).fetchone()
         return None if row is None else self.read_outbox(row["dedupe_key"])
 
     # --- inbound ---------------------------------------------------------
 
-    def record_inbound(self, *, provider_update_id: int, message_id: int,
-                       reply_to_message_id: "int | None", raw_text: bytes,
-                       next_offset: int) -> str:
+    def record_inbound(
+        self,
+        *,
+        provider_update_id: int,
+        message_id: int,
+        reply_to_message_id: "int | None",
+        raw_text: bytes,
+        next_offset: int,
+    ) -> str:
         """Reply insert and offset advance in one transaction (§22.3)."""
         for value in (provider_update_id, message_id, next_offset):
             if type(value) is not int:
@@ -408,8 +479,13 @@ class ExecutionDialogueStore:
                 if existing is None:
                     connection.execute(
                         "INSERT INTO inbound_replies VALUES(?,?,?,?,?)",
-                        (provider_update_id, message_id, reply_to_message_id,
-                         raw_text, iso(self._clock())),
+                        (
+                            provider_update_id,
+                            message_id,
+                            reply_to_message_id,
+                            raw_text,
+                            iso(self._clock()),
+                        ),
                     )
                     outcome = "created"
                 connection.execute(
@@ -460,18 +536,31 @@ class ExecutionDialogueStore:
 
     def list_news_inbound(self):
         with self._connect() as connection:
-            rows=connection.execute("SELECT provider_update_id,message_id,raw_text FROM inbound_replies WHERE CAST(raw_text AS TEXT) LIKE 'n1:%' ORDER BY provider_update_id").fetchall()
-        return tuple({"update_id":row["provider_update_id"],"message_id":row["message_id"],
-            "data":bytes(row["raw_text"]).decode("utf-8"),"callback":True} for row in rows)
+            rows = connection.execute(
+                "SELECT provider_update_id,message_id,raw_text FROM inbound_replies WHERE CAST(raw_text AS TEXT) LIKE 'n1:%' ORDER BY provider_update_id"
+            ).fetchall()
+        return tuple(
+            {
+                "update_id": row["provider_update_id"],
+                "message_id": row["message_id"],
+                "data": bytes(row["raw_text"]).decode("utf-8"),
+                "callback": True,
+            }
+            for row in rows
+        )
 
     # --- pending append (preview handshake §22.2) ------------------------
 
-    def create_pending_append(self, *, trade_event_id: str,
-                              provider_update_id: int,
-                              inbound_message_id: int,
-                              preview_dedupe_key: str,
-                              payload: "bytes | None" = None,
-                              save_intent: bool = False) -> None:
+    def create_pending_append(
+        self,
+        *,
+        trade_event_id: str,
+        provider_update_id: int,
+        inbound_message_id: int,
+        preview_dedupe_key: str,
+        payload: "bytes | None" = None,
+        save_intent: bool = False,
+    ) -> None:
         """Durable record of bytes the user has committed to (or is about to).
 
         ``save_intent`` marks the 2026-08-21 contract: the user has already
@@ -485,11 +574,16 @@ class ExecutionDialogueStore:
             raise DialogueStoreError("save intent must be a bool")
         with self._connect() as connection:
             connection.execute(
-                "INSERT OR REPLACE INTO pending_appends "
-                "VALUES(?,?,?,?,?,?,?,0)",
-                (trade_event_id, provider_update_id, inbound_message_id,
-                 preview_dedupe_key, iso(self._clock()), payload,
-                 int(save_intent)),
+                "INSERT OR REPLACE INTO pending_appends VALUES(?,?,?,?,?,?,?,0)",
+                (
+                    trade_event_id,
+                    provider_update_id,
+                    inbound_message_id,
+                    preview_dedupe_key,
+                    iso(self._clock()),
+                    payload,
+                    int(save_intent),
+                ),
             )
 
     @staticmethod
@@ -516,8 +610,7 @@ class ExecutionDialogueStore:
         """Every unsettled row, oldest first (the bounded sweep's input)."""
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT * FROM pending_appends "
-                "ORDER BY created_at, trade_event_id",
+                "SELECT * FROM pending_appends ORDER BY created_at, trade_event_id",
             ).fetchall()
         return tuple(self._pending_row(row) for row in rows)
 
@@ -535,16 +628,13 @@ class ExecutionDialogueStore:
             ).fetchone()
         return 0 if row is None else (row["attempts"] or 0)
 
-    def find_pending_append_by_preview(
-            self, preview_dedupe_key: str) -> "dict | None":
+    def find_pending_append_by_preview(self, preview_dedupe_key: str) -> "dict | None":
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT trade_event_id FROM pending_appends WHERE "
-                "preview_dedupe_key=?",
+                "SELECT trade_event_id FROM pending_appends WHERE preview_dedupe_key=?",
                 (preview_dedupe_key,),
             ).fetchone()
-        return None if row is None else self.read_pending_append(
-            row["trade_event_id"])
+        return None if row is None else self.read_pending_append(row["trade_event_id"])
 
     def delete_pending_append(self, trade_event_id: str) -> None:
         with self._connect() as connection:
@@ -555,26 +645,40 @@ class ExecutionDialogueStore:
 
     # --- conditional alerts (conditional SDS v0.4 §4.1/§4.5) --------------
 
-    def record_conditional_alert(self, conditional_alert_id: str, *,
-                                 conditional_order_id: str, leg_index: int,
-                                 triggered_order_id: "str | None",
-                                 account_scope: str, symbol: str,
-                                 market_class: str, order_type: str,
-                                 quantity_ordered: str, prev_status: str,
-                                 new_status: str) -> str:
+    def record_conditional_alert(
+        self,
+        conditional_alert_id: str,
+        *,
+        conditional_order_id: str,
+        leg_index: int,
+        triggered_order_id: "str | None",
+        account_scope: str,
+        symbol: str,
+        market_class: str,
+        order_type: str,
+        quantity_ordered: str,
+        prev_status: str,
+        new_status: str,
+    ) -> str:
         """One row per leg trigger; the restart replay is a no-op duplicate."""
-        if type(conditional_alert_id) is not str \
-                or len(conditional_alert_id) != 64:
+        if type(conditional_alert_id) is not str or len(conditional_alert_id) != 64:
             raise DialogueStoreError("invalid conditional alert id")
         if type(leg_index) is not int or leg_index not in (0, 1):
             raise DialogueStoreError("invalid conditional leg index")
-        if triggered_order_id is not None \
-                and (type(triggered_order_id) is not str
-                     or not triggered_order_id):
+        if triggered_order_id is not None and (
+            type(triggered_order_id) is not str or not triggered_order_id
+        ):
             raise DialogueStoreError("invalid triggered order id")
-        for value in (conditional_order_id, account_scope, symbol,
-                      market_class, order_type, quantity_ordered,
-                      prev_status, new_status):
+        for value in (
+            conditional_order_id,
+            account_scope,
+            symbol,
+            market_class,
+            order_type,
+            quantity_ordered,
+            prev_status,
+            new_status,
+        ):
             if type(value) is not str or not value:
                 raise DialogueStoreError("invalid conditional alert identity")
         if market_class not in ("KR", "US"):
@@ -584,18 +688,26 @@ class ExecutionDialogueStore:
                 "SELECT conditional_alert_id FROM conditional_alerts WHERE "
                 "conditional_alert_id=? OR (conditional_order_id=? AND "
                 "leg_index=? AND new_status=?)",
-                (conditional_alert_id, conditional_order_id, leg_index,
-                 new_status),
+                (conditional_alert_id, conditional_order_id, leg_index, new_status),
             ).fetchone()
             if existing is not None:
                 return "duplicate"
             connection.execute(
-                "INSERT INTO conditional_alerts VALUES(?,?,?,?,?,?,?,?,?,?,"
-                "?,?,NULL)",
-                (conditional_alert_id, conditional_order_id, leg_index,
-                 triggered_order_id, account_scope, symbol, market_class,
-                 order_type, quantity_ordered, prev_status, new_status,
-                 iso(self._clock())),
+                "INSERT INTO conditional_alerts VALUES(?,?,?,?,?,?,?,?,?,?,?,?,NULL)",
+                (
+                    conditional_alert_id,
+                    conditional_order_id,
+                    leg_index,
+                    triggered_order_id,
+                    account_scope,
+                    symbol,
+                    market_class,
+                    order_type,
+                    quantity_ordered,
+                    prev_status,
+                    new_status,
+                    iso(self._clock()),
+                ),
             )
             return "created"
 
@@ -617,12 +729,10 @@ class ExecutionDialogueStore:
             "migrated_event_id": row["migrated_event_id"],
         }
 
-    def read_conditional_alert(
-            self, conditional_alert_id: str) -> "dict | None":
+    def read_conditional_alert(self, conditional_alert_id: str) -> "dict | None":
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT * FROM conditional_alerts WHERE "
-                "conditional_alert_id=?",
+                "SELECT * FROM conditional_alerts WHERE conditional_alert_id=?",
                 (conditional_alert_id,),
             ).fetchone()
         return None if row is None else self._alert_row(row)
@@ -635,8 +745,7 @@ class ExecutionDialogueStore:
             ).fetchall()
         return tuple(self._alert_row(row) for row in rows)
 
-    def find_alert_by_triggered_order(
-            self, triggered_order_id: str) -> "dict | None":
+    def find_alert_by_triggered_order(self, triggered_order_id: str) -> "dict | None":
         """Merge primary key (§4.3(1)); a NULL id never matches anything."""
         if type(triggered_order_id) is not str or not triggered_order_id:
             return None
@@ -650,16 +759,22 @@ class ExecutionDialogueStore:
         return None if row is None else self._alert_row(row)
 
     def find_unmigrated_alerts_in_window(
-            self, *, account_scope: str, symbol: str, center: datetime,
-            window_hours: int = 25) -> tuple[dict, ...]:
+        self,
+        *,
+        account_scope: str,
+        symbol: str,
+        center: datetime,
+        window_hours: int = 25,
+    ) -> tuple[dict, ...]:
         """Merge fallback key (§4.3(2)): scope + symbol + ±window candidates."""
-        if (not isinstance(center, datetime) or center.tzinfo is None
-                or center.utcoffset() is None):
+        if (
+            not isinstance(center, datetime)
+            or center.tzinfo is None
+            or center.utcoffset() is None
+        ):
             raise DialogueStoreError("fallback window center must be aware")
-        low = iso((center - timedelta(hours=window_hours))
-                  .astimezone(timezone.utc))
-        high = iso((center + timedelta(hours=window_hours))
-                   .astimezone(timezone.utc))
+        low = iso((center - timedelta(hours=window_hours)).astimezone(UTC))
+        high = iso((center + timedelta(hours=window_hours)).astimezone(UTC))
         with self._connect() as connection:
             rows = connection.execute(
                 "SELECT * FROM conditional_alerts WHERE "
@@ -670,8 +785,9 @@ class ExecutionDialogueStore:
             ).fetchall()
         return tuple(self._alert_row(row) for row in rows)
 
-    def backfill_migrated_event(self, conditional_alert_id: str,
-                                trade_event_id: str) -> None:
+    def backfill_migrated_event(
+        self, conditional_alert_id: str, trade_event_id: str
+    ) -> None:
         with self._connect() as connection:
             row = connection.execute(
                 "SELECT migrated_event_id FROM conditional_alerts WHERE "
@@ -681,8 +797,7 @@ class ExecutionDialogueStore:
             if row is None:
                 raise DialogueStoreError("unknown conditional alert")
             if row["migrated_event_id"] is not None:
-                raise TradeEventTransitionError(
-                    "conditional alerts merge exactly once")
+                raise TradeEventTransitionError("conditional alerts merge exactly once")
             connection.execute(
                 "UPDATE conditional_alerts SET migrated_event_id=? "
                 "WHERE conditional_alert_id=?",
@@ -692,8 +807,7 @@ class ExecutionDialogueStore:
             # regular order becomes canonical, the same preview bubble can
             # settle against the real event instead of the synthetic alert id.
             connection.execute(
-                "UPDATE pending_appends SET trade_event_id=? "
-                "WHERE trade_event_id=?",
+                "UPDATE pending_appends SET trade_event_id=? WHERE trade_event_id=?",
                 (trade_event_id, conditional_alert_id),
             )
             connection.execute(
@@ -742,8 +856,9 @@ class ExecutionDialogueStore:
 
     # --- question recommendations (button UI 예 adoption source) ----------
 
-    def record_question_recommendation(self, trade_event_id: str,
-                                       recommendation: bytes) -> str:
+    def record_question_recommendation(
+        self, trade_event_id: str, recommendation: bytes
+    ) -> str:
         """First write wins; the identical tick replay is a duplicate."""
         if type(trade_event_id) is not str or len(trade_event_id) != 64:
             raise DialogueStoreError("invalid trade event id")
@@ -763,8 +878,7 @@ class ExecutionDialogueStore:
             )
             return "created"
 
-    def read_question_recommendation(
-            self, trade_event_id: str) -> "bytes | None":
+    def read_question_recommendation(self, trade_event_id: str) -> "bytes | None":
         with self._connect() as connection:
             row = connection.execute(
                 "SELECT recommendation FROM question_recommendations "
@@ -775,8 +889,9 @@ class ExecutionDialogueStore:
 
     # --- append gate -----------------------------------------------------
 
-    def record_reason_append(self, append_id: str, *, trade_event_id: str,
-                             inbound_message_id: int) -> str:
+    def record_reason_append(
+        self, append_id: str, *, trade_event_id: str, inbound_message_id: int
+    ) -> str:
         if type(append_id) is not str or len(append_id) != 64:
             raise DialogueStoreError("invalid append id")
         with self._connect() as connection:
@@ -789,13 +904,11 @@ class ExecutionDialogueStore:
                 return "duplicate"
             connection.execute(
                 "INSERT INTO reason_appends VALUES(?,?,?,?)",
-                (append_id, trade_event_id, inbound_message_id,
-                 iso(self._clock())),
+                (append_id, trade_event_id, inbound_message_id, iso(self._clock())),
             )
             return "created"
 
-    def read_latest_reason_append(self,
-                                  trade_event_id: str) -> "dict | None":
+    def read_latest_reason_append(self, trade_event_id: str) -> "dict | None":
         """The most recent settled append for one event.
 
         A later submission for the same event is a correction of this one:

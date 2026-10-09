@@ -15,14 +15,14 @@ insufficient or corrupt history raises ``ValueError`` — the trades collector's
 truthful ``failed_calendar``.
 """
 
-from contextlib import contextmanager
-from datetime import date, datetime, timedelta
 import fcntl
 import os
-from pathlib import Path
 import re
 import sqlite3
 import stat
+from contextlib import contextmanager
+from datetime import date, datetime, timedelta
+from pathlib import Path
 
 from tokmo.values.ops_kernel import iso, parse_iso
 from tokmo.values.session_gate import Market
@@ -118,13 +118,18 @@ class RegularSessionHistoryStore:
             if self.path.exists() or self.path.is_symlink():
                 return  # another creator published first; validated on open
             fresh = self.path.with_name(self.path.name + ".fresh")
-            for stale in (fresh, fresh.with_name(fresh.name + "-wal"),
-                          fresh.with_name(fresh.name + "-shm")):
+            for stale in (
+                fresh,
+                fresh.with_name(fresh.name + "-wal"),
+                fresh.with_name(fresh.name + "-shm"),
+            ):
                 stale.unlink(missing_ok=True)
             os.close(os.open(fresh, self._open_flags(), 0o600))
             try:
                 connection = sqlite3.connect(
-                    fresh, timeout=5.0, isolation_level=None,
+                    fresh,
+                    timeout=5.0,
+                    isolation_level=None,
                 )
                 try:
                     connection.execute("PRAGMA trusted_schema=OFF")
@@ -183,8 +188,12 @@ class RegularSessionHistoryStore:
 
         def objects(database):
             return {
-                (row["type"], row["name"], row["tbl_name"],
-                 None if row["sql"] is None else " ".join(row["sql"].split()))
+                (
+                    row["type"],
+                    row["name"],
+                    row["tbl_name"],
+                    None if row["sql"] is None else " ".join(row["sql"].split()),
+                )
                 for row in database.execute(
                     "SELECT type,name,tbl_name,sql FROM sqlite_schema"
                     " WHERE name NOT LIKE 'sqlite_stat%'"
@@ -202,10 +211,11 @@ class RegularSessionHistoryStore:
 
     @staticmethod
     def _row(row) -> dict:
-        if (row["session"] not in HISTORY_SESSION_TOKENS
-                or not _SOURCE_IDENTITY.fullmatch(row["source_identity"])
-                or date.fromisoformat(row["local_date"]).isoformat()
-                != row["local_date"]):
+        if (
+            row["session"] not in HISTORY_SESSION_TOKENS
+            or not _SOURCE_IDENTITY.fullmatch(row["source_identity"])
+            or date.fromisoformat(row["local_date"]).isoformat() != row["local_date"]
+        ):
             raise RegularSessionHistoryCorruptError("non-canonical history row")
         return {
             "market": Market(row["market"]),
@@ -237,8 +247,13 @@ class RegularSessionHistoryStore:
                     )
                 connection.execute(
                     "INSERT INTO regular_session_history VALUES(?,?,?,?,?)",
-                    (market.value, local_date.isoformat(), session,
-                     source_identity, iso(self._clock())),
+                    (
+                        market.value,
+                        local_date.isoformat(),
+                        session,
+                        source_identity,
+                        iso(self._clock()),
+                    ),
                 )
                 connection.execute("COMMIT")
             except BaseException:
@@ -247,8 +262,9 @@ class RegularSessionHistoryStore:
                 raise
         return "created"
 
-    def append_backfilled(self, market, local_date, session, *, receipt,
-                          authority) -> str:
+    def append_backfilled(
+        self, market, local_date, session, *, receipt, authority
+    ) -> str:
         """Append one backfilled official fact under a live claimed receipt.
 
         ``authority`` is the operations kernel: the receipt is validated
@@ -261,8 +277,10 @@ class RegularSessionHistoryStore:
             raise RegularSessionHistoryProvenanceError(
                 "history append requires the kernel authority"
             )
-        if (getattr(receipt, "market", None) is not market
-                or getattr(receipt, "market_local_date", None) != local_date):
+        if (
+            getattr(receipt, "market", None) is not market
+            or getattr(receipt, "market_local_date", None) != local_date
+        ):
             raise RegularSessionHistoryProvenanceError(
                 "calendar receipt identity mismatch"
             )
@@ -289,7 +307,10 @@ class RegularSessionHistoryStore:
                 "no validated official calendar provenance"
             )
         return self._insert(
-            market, local_date, session, provenance["native_identity"],
+            market,
+            local_date,
+            session,
+            provenance["native_identity"],
         )
 
     def read(self, market, local_date) -> dict | None:
@@ -298,14 +319,17 @@ class RegularSessionHistoryStore:
             return None
         with self._connect(create=False) as connection:
             row = connection.execute(
-                "SELECT * FROM regular_session_history "
-                "WHERE market=? AND local_date=?",
+                "SELECT * FROM regular_session_history WHERE market=? AND local_date=?",
                 (market.value, local_date.isoformat()),
             ).fetchone()
         return None if row is None else self._row(row)
 
     def next_backfill_target(
-        self, market, anchor, *, sessions: int = BACKFILL_TARGET_SESSIONS,
+        self,
+        market,
+        anchor,
+        *,
+        sessions: int = BACKFILL_TARGET_SESSIONS,
         max_examined: int = BACKFILL_MAX_EXAMINED_DATES,
     ) -> date | None:
         """First missing historical local date on the deterministic walk.

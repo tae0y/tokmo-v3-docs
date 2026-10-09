@@ -18,8 +18,12 @@ def call(tool, args, *, home, session=None):
     env = os.environ.copy()
     env["HOME"] = str(home)
     cp = subprocess.run(
-        [sys.executable, str(HOOK)], input=json.dumps(payload), text=True,
-        capture_output=True, env=env, check=True,
+        [sys.executable, str(HOOK)],
+        input=json.dumps(payload),
+        text=True,
+        capture_output=True,
+        env=env,
+        check=True,
     )
     return json.loads(cp.stdout) if cp.stdout.strip() else None
 
@@ -47,9 +51,16 @@ def test_second_attempt_requires_same_session_and_same_scope(tmp_path):
     session = "scope-session"
     first = {"query": "OpenDART API 공식 개발가이드"}
     other = {"query": "KOSDAQ 공식 분류 source"}
-    assert call("web_search", first, home=tmp_path, session=session)["action"] == "block"
-    assert call("web_search", other, home=tmp_path, session=session)["action"] == "block"
-    assert call("web_search", first, home=tmp_path, session="different-session")["action"] == "block"
+    assert (
+        call("web_search", first, home=tmp_path, session=session)["action"] == "block"
+    )
+    assert (
+        call("web_search", other, home=tmp_path, session=session)["action"] == "block"
+    )
+    assert (
+        call("web_search", first, home=tmp_path, session="different-session")["action"]
+        == "block"
+    )
 
 
 def test_current_quote_also_uses_one_internal_first_gate_only(tmp_path):
@@ -83,25 +94,34 @@ def test_first_gate_message_says_external_retry_is_allowed_without_receipt(tmp_p
 
 
 def test_non_finance_search_is_allowed_immediately(tmp_path):
-    assert call("web_search", {"query": "Python dataclass documentation"}, home=tmp_path) is None
+    assert (
+        call("web_search", {"query": "Python dataclass documentation"}, home=tmp_path)
+        is None
+    )
 
 
 def test_browser_finance_navigation_uses_same_one_time_gate(tmp_path):
     session = "browser-session"
     args = {"url": "https://example.com/finance?symbol=005930"}
-    assert call("computer_use", args, home=tmp_path, session=session)["action"] == "block"
+    assert (
+        call("computer_use", args, home=tmp_path, session=session)["action"] == "block"
+    )
     assert call("computer_use", args, home=tmp_path, session=session) is None
 
 
 def test_direct_third_party_quote_terminal_remains_hard_blocked(tmp_path):
     session = "terminal-session"
-    args = {"command": "curl https://polling.finance.naver.com/api/realtime/domestic/stock/091230"}
+    args = {
+        "command": "curl https://polling.finance.naver.com/api/realtime/domestic/stock/091230"
+    }
     assert call("terminal", args, home=tmp_path, session=session)["action"] == "block"
     assert call("terminal", args, home=tmp_path, session=session)["action"] == "block"
 
 
 def test_official_toss_terminal_is_allowed(tmp_path):
-    args = {"command": "python query.py # TossReadsLiveTransport openapi.tossinvest.com"}
+    args = {
+        "command": "python query.py # TossReadsLiveTransport openapi.tossinvest.com"
+    }
     assert call("terminal", args, home=tmp_path) is None
 
 

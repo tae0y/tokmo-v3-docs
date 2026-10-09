@@ -2,11 +2,10 @@
 
 import sqlite3
 from contextlib import closing
-from datetime import datetime, timezone
 from dataclasses import replace
+from datetime import UTC, datetime
 
 import pytest
-
 
 # Immutable W1 bytes measured after adding the inactive membership shape.
 # These are deliberately literals, never derived from the post-change policy.
@@ -40,24 +39,40 @@ def test_production_v1_policy_matches_the_reviewed_sds_declaration():
     assert CADENCE_POLICY_V1.termination_margin_seconds == 30
     assert CADENCE_POLICY_V1.request_limits is TICK_REQUEST_LIMITS_V1
     limits = CADENCE_POLICY_V1.request_limits
-    assert (limits.total_wire_starts, limits.token_starts, limits.calendar_starts,
-            limits.holdings_starts, limits.quote_starts, limits.trades_starts) == (
-        27, 1, 2, 8, 4, 12,
+    assert (
+        limits.total_wire_starts,
+        limits.token_starts,
+        limits.calendar_starts,
+        limits.holdings_starts,
+        limits.quote_starts,
+        limits.trades_starts,
+    ) == (
+        27,
+        1,
+        2,
+        8,
+        4,
+        12,
     )
-    assert (TRADES_CHILD_LIMITS_V1.orders_page_starts,
-            TRADES_CHILD_LIMITS_V1.order_detail_starts) == (10, 2)
+    assert (
+        TRADES_CHILD_LIMITS_V1.orders_page_starts,
+        TRADES_CHILD_LIMITS_V1.order_detail_starts,
+    ) == (10, 2)
 
 
 def test_group_sum_must_not_exceed_total_wire_starts():
     from tokmo.values.cadence_policy import TICK_REQUEST_LIMITS_V1
 
     with pytest.raises(ValueError, match="group limits exceed total wire starts"):
-        replace(TICK_REQUEST_LIMITS_V1, quote_starts=TICK_REQUEST_LIMITS_V1.quote_starts + 1)
+        replace(
+            TICK_REQUEST_LIMITS_V1, quote_starts=TICK_REQUEST_LIMITS_V1.quote_starts + 1
+        )
 
 
 def test_g1ca_lane_validation_and_group_sum_non_regression():
     from tokmo.values.cadence_policy import (
-        CADENCE_MARKET_PORTFOLIO_POLICY_V1, GROUP_LIMIT_FIELDS,
+        CADENCE_MARKET_PORTFOLIO_POLICY_V1,
+        GROUP_LIMIT_FIELDS,
         TickRequestLimitsV1,
     )
 
@@ -67,18 +82,24 @@ def test_g1ca_lane_validation_and_group_sum_non_regression():
         TickRequestLimitsV1(quant_daily_candle_starts=-1)
     with pytest.raises(ValueError, match="daily candle lanes must equal"):
         TickRequestLimitsV1(
-            total_wire_starts=30, daily_candle_starts=3,
-            market_daily_candle_starts=0, quant_daily_candle_starts=0,
+            total_wire_starts=30,
+            daily_candle_starts=3,
+            market_daily_candle_starts=0,
+            quant_daily_candle_starts=0,
         )
     with pytest.raises(ValueError, match="daily candle lanes must equal"):
         TickRequestLimitsV1(
-            total_wire_starts=30, daily_candle_starts=3,
-            market_daily_candle_starts=2, quant_daily_candle_starts=0,
+            total_wire_starts=30,
+            daily_candle_starts=3,
+            market_daily_candle_starts=2,
+            quant_daily_candle_starts=0,
         )
     with pytest.raises(ValueError, match="daily candle lanes must equal"):
         TickRequestLimitsV1(
-            total_wire_starts=30, daily_candle_starts=3,
-            market_daily_candle_starts=3, quant_daily_candle_starts=1,
+            total_wire_starts=30,
+            daily_candle_starts=3,
+            market_daily_candle_starts=3,
+            quant_daily_candle_starts=1,
         )
     with pytest.raises(ValueError, match="daily candle lanes must equal"):
         TickRequestLimitsV1(market_daily_candle_starts=1)
@@ -90,8 +111,10 @@ def test_g1ca_lane_validation_and_group_sum_non_regression():
 
 def test_g1ca_all_real_policy_lanes_registry_and_pulse_defaults():
     from tokmo.values.cadence_policy import (
-        CADENCE_CORE_SHADOW_POLICY_V1, CADENCE_MARKET_PORTFOLIO_POLICY_V1,
-        CADENCE_POLICY_REGISTRY, CADENCE_POLICY_V1,
+        CADENCE_CORE_SHADOW_POLICY_V1,
+        CADENCE_MARKET_PORTFOLIO_POLICY_V1,
+        CADENCE_POLICY_REGISTRY,
+        CADENCE_POLICY_V1,
         CADENCE_QUANT_PROFILES_SHADOW_POLICY_V1,
         CADENCE_QUANT_SHADOW_POLICY_V1,
         CADENCE_TARGETED_ONESHOT_POLICY_V1,
@@ -109,19 +132,26 @@ def test_g1ca_all_real_policy_lanes_registry_and_pulse_defaults():
     }
     for policy, lanes in expected.items():
         limits = policy.request_limits
-        assert (limits.daily_candle_starts, limits.market_daily_candle_starts,
-                limits.quant_daily_candle_starts) == lanes
+        assert (
+            limits.daily_candle_starts,
+            limits.market_daily_candle_starts,
+            limits.quant_daily_candle_starts,
+        ) == lanes
     assert tuple(CADENCE_POLICY_REGISTRY) == (
-        "cadence-300s-v1", "cadence-300s-core-shadow-v1",
+        "cadence-300s-v1",
+        "cadence-300s-core-shadow-v1",
         "cadence-300s-market-portfolio-v1",
         "cadence-300s-market-quant4-shadow-v1",
         "cadence-300s-quant-profiles-shadow-v1",
     )
     assert CADENCE_QUANT_SHADOW_POLICY_V1.request_limits.quant_daily_candle_starts == 8
     assert CADENCE_QUANT_SHADOW_POLICY_V1.request_limits.membership_starts == 7
-    assert (CADENCE_POLICY_REGISTRY[CADENCE_QUANT_SHADOW_POLICY_V1.policy_version]
-            is CADENCE_QUANT_SHADOW_POLICY_V1)
+    assert (
+        CADENCE_POLICY_REGISTRY[CADENCE_QUANT_SHADOW_POLICY_V1.policy_version]
+        is CADENCE_QUANT_SHADOW_POLICY_V1
+    )
     from tools.run_tokmo_cadence import ACTIVE_POLICY
+
     assert ACTIVE_POLICY is CADENCE_MARKET_PORTFOLIO_POLICY_V1
     assert ACTIVE_POLICY.request_limits.quant_daily_candle_starts == 0
     assert ACTIVE_POLICY.request_limits.membership_starts == 0
@@ -130,35 +160,46 @@ def test_g1ca_all_real_policy_lanes_registry_and_pulse_defaults():
 def test_g1ca_snapshot_digest_bytes_and_tmp_kernel_repin_are_unchanged(tmp_path):
     from tokmo.records.ops_kernel import OpsKernelStore
     from tokmo.values.cadence_policy import (
-        CADENCE_POLICY_REGISTRY, TradesChildLimitsV1, policy_digest,
+        CADENCE_POLICY_REGISTRY,
+        TradesChildLimitsV1,
+        policy_digest,
         policy_snapshot,
     )
     from tokmo.values.material_pack import canonical_encode
     from tokmo.values.ops_kernel import ProducerRole
 
     child = TradesChildLimitsV1()
-    slot = datetime(2026, 8, 12, 0, 0, tzinfo=timezone.utc)
-    now = datetime(2026, 8, 12, 0, 0, 1, tzinfo=timezone.utc)
+    slot = datetime(2026, 8, 12, 0, 0, tzinfo=UTC)
+    now = datetime(2026, 8, 12, 0, 0, 1, tzinfo=UTC)
     for version, policy in CADENCE_POLICY_REGISTRY.items():
-        assert canonical_encode(policy_snapshot(policy, child)).decode() == (
-            POLICY_SNAPSHOT_JSON_LITERALS[version])
+        assert (
+            canonical_encode(policy_snapshot(policy, child)).decode()
+            == (POLICY_SNAPSHOT_JSON_LITERALS[version])
+        )
         assert policy_digest(policy, child) == POLICY_DIGEST_LITERALS[version]
         path = tmp_path / f"{version}.sqlite3"
         store = OpsKernelStore(path)
         store.pin_cadence_tick(
-            ProducerRole.COLLECTOR, policy, scheduled_for_utc=slot,
-            now=now, child_limits=child,
+            ProducerRole.COLLECTOR,
+            policy,
+            scheduled_for_utc=slot,
+            now=now,
+            child_limits=child,
         )
-        with closing(sqlite3.connect(path)) as connection:
-            with connection:
-                row = connection.execute(
-                    "SELECT snapshot_json,policy_digest FROM cadence_ticks"
-                ).fetchone()
-        assert row == (POLICY_SNAPSHOT_JSON_LITERALS[version],
-                       POLICY_DIGEST_LITERALS[version])
+        with closing(sqlite3.connect(path)) as connection, connection:
+            row = connection.execute(
+                "SELECT snapshot_json,policy_digest FROM cadence_ticks"
+            ).fetchone()
+        assert row == (
+            POLICY_SNAPSHOT_JSON_LITERALS[version],
+            POLICY_DIGEST_LITERALS[version],
+        )
         store.pin_cadence_tick(
-            ProducerRole.COLLECTOR, policy, scheduled_for_utc=slot,
-            now=now, child_limits=child,
+            ProducerRole.COLLECTOR,
+            policy,
+            scheduled_for_utc=slot,
+            now=now,
+            child_limits=child,
         )
 
 
@@ -216,8 +257,14 @@ def test_operation_groups_map_onto_named_limit_fields():
     from tokmo.values.cadence_policy import GROUP_LIMIT_FIELDS, TICK_REQUEST_LIMITS_V1
 
     assert set(GROUP_LIMIT_FIELDS) == {
-        "TOKEN", "CALENDAR", "HOLDINGS", "QUOTES", "TRADES", "DAILY_CANDLES",
-        "MEMBERSHIP", "CONDITIONAL_ORDER_HISTORY",
+        "TOKEN",
+        "CALENDAR",
+        "HOLDINGS",
+        "QUOTES",
+        "TRADES",
+        "DAILY_CANDLES",
+        "MEMBERSHIP",
+        "CONDITIONAL_ORDER_HISTORY",
     }
     for field_name in GROUP_LIMIT_FIELDS.values():
         assert hasattr(TICK_REQUEST_LIMITS_V1, field_name)

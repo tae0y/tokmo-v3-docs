@@ -32,21 +32,22 @@ a missing or unreadable ledger attributes nothing. Both cases fail closed
 at the call site.
 """
 
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
 import json
 import sqlite3
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from tokmo.values.ops_kernel import parse_iso
-
 
 # Relative location of the cadence receipt ledger inside the canonical root.
 CADENCE_RECEIPT_RELATIVE = "ops/cadence_ticks.sqlite3"
 
 # Fixed Hermes runtime cadence directory (outside canonical root).
 # This path is derived from Path.home() and is NOT caller-selectable.
-RUNTIME_CADENCE_DIR = Path(__file__).resolve().parents[3] / "var" / "runtime" / "cadence"  # relocated from ~/.hermes/runtime 2026-09-24
+RUNTIME_CADENCE_DIR = (
+    Path(__file__).resolve().parents[3] / "var" / "runtime" / "cadence"
+)  # relocated from ~/.hermes/runtime 2026-09-24
 
 # Tolerance applied to a receipt's activity interval when matching an
 # observed mtime. Filesystem mtimes are recorded by the writing process
@@ -80,8 +81,9 @@ class CadenceReceiptWindow:
             "scheduled_for_utc": self.scheduled_for_utc,
             "status": self.status,
             "started_at": self.started_at.isoformat(),
-            "finished_at": (None if self.finished_at is None
-                            else self.finished_at.isoformat()),
+            "finished_at": (
+                None if self.finished_at is None else self.finished_at.isoformat()
+            ),
         }
 
 
@@ -95,8 +97,7 @@ def read_cadence_receipts(canonical_root: Path) -> "tuple[CadenceReceiptWindow, 
     if not path.exists():
         return ()
     try:
-        connection = sqlite3.connect(
-            f"file:{path}?mode=ro", uri=True, timeout=1.0)
+        connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1.0)
     except sqlite3.Error:
         return ()
     try:
@@ -118,22 +119,25 @@ def read_cadence_receipts(canonical_root: Path) -> "tuple[CadenceReceiptWindow, 
             continue
         if started_at is None:
             continue
-        receipts.append(CadenceReceiptWindow(
-            policy_version=str(policy_version),
-            scheduled_for_utc=str(scheduled),
-            status=str(status),
-            started_at=started_at,
-            finished_at=finished_at,
-        ))
+        receipts.append(
+            CadenceReceiptWindow(
+                policy_version=str(policy_version),
+                scheduled_for_utc=str(scheduled),
+                status=str(status),
+                started_at=started_at,
+                finished_at=finished_at,
+            )
+        )
     return tuple(receipts)
 
 
 def read_cadence_receipts_from_manifests(
-        cadence_dir: "Path | None" = None, *,
-        window_start: "datetime | None" = None,
-        window_end: "datetime | None" = None,
-        grace: timedelta = DEFAULT_ATTRIBUTION_GRACE,
-        ) -> "tuple[CadenceReceiptWindow, ...]":
+    cadence_dir: "Path | None" = None,
+    *,
+    window_start: "datetime | None" = None,
+    window_end: "datetime | None" = None,
+    grace: timedelta = DEFAULT_ATTRIBUTION_GRACE,
+) -> "tuple[CadenceReceiptWindow, ...]":
     """Read cadence receipts from Hermes runtime manifests.
 
     Each subdirectory of ``cadence_dir`` named like ``20260810T2305``
@@ -173,17 +177,15 @@ def read_cadence_receipts_from_manifests(
         status = "COMPLETE" if status_raw == "SUCCEEDED" else status_raw
 
         try:
-            started_at = datetime.fromisoformat(
-                manifest["started_at"])
-            finished_at = datetime.fromisoformat(
-                manifest["finished_at"])
+            started_at = datetime.fromisoformat(manifest["started_at"])
+            finished_at = datetime.fromisoformat(manifest["finished_at"])
         except (KeyError, ValueError, TypeError):
             continue
 
         if started_at.tzinfo is None:
-            started_at = started_at.replace(tzinfo=timezone.utc)
+            started_at = started_at.replace(tzinfo=UTC)
         if finished_at is not None and finished_at.tzinfo is None:
-            finished_at = finished_at.replace(tzinfo=timezone.utc)
+            finished_at = finished_at.replace(tzinfo=UTC)
 
         receipt = CadenceReceiptWindow(
             policy_version="runtime-manifest",
@@ -204,10 +206,13 @@ def read_cadence_receipts_from_manifests(
     return tuple(receipts)
 
 
-def fresh_receipts(receipts: "tuple[CadenceReceiptWindow, ...]",
-                   *, window_start: datetime, window_end: datetime,
-                   grace: timedelta = DEFAULT_ATTRIBUTION_GRACE,
-                   ) -> "tuple[CadenceReceiptWindow, ...]":
+def fresh_receipts(
+    receipts: "tuple[CadenceReceiptWindow, ...]",
+    *,
+    window_start: datetime,
+    window_end: datetime,
+    grace: timedelta = DEFAULT_ATTRIBUTION_GRACE,
+) -> "tuple[CadenceReceiptWindow, ...]":
     """Receipts whose activity interval overlaps the canary session window.
 
     Anything entirely before ``window_start`` is stale: the cadence run it
@@ -223,9 +228,12 @@ def fresh_receipts(receipts: "tuple[CadenceReceiptWindow, ...]",
     return tuple(selected)
 
 
-def mtime_attributed(receipts: "tuple[CadenceReceiptWindow, ...]",
-                     mtime: datetime,
-                     *, grace: timedelta = DEFAULT_ATTRIBUTION_GRACE) -> bool:
+def mtime_attributed(
+    receipts: "tuple[CadenceReceiptWindow, ...]",
+    mtime: datetime,
+    *,
+    grace: timedelta = DEFAULT_ATTRIBUTION_GRACE,
+) -> bool:
     """True when ``mtime`` falls inside some receipt's activity interval."""
     for receipt in receipts:
         begin, end = receipt.active_interval(grace)

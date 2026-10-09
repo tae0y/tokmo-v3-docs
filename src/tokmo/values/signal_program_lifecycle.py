@@ -12,11 +12,11 @@ from datetime import datetime
 from enum import Enum
 
 __all__ = [
-    "ProgramKindV1",
-    "ProgramLifecycleStatusV1",
     "LifecycleReasonCode",
+    "ProgramKindV1",
     "ProgramLifecycleSpecV1",
     "ProgramLifecycleStateV1",
+    "ProgramLifecycleStatusV1",
     "evaluate_lifecycle_status",
 ]
 
@@ -24,6 +24,7 @@ __all__ = [
 # ==========================================================================
 # §3.1  Program identity
 # ==========================================================================
+
 
 class ProgramKindV1(Enum):
     CORE_ANALYZER = "CORE_ANALYZER"
@@ -33,6 +34,7 @@ class ProgramKindV1(Enum):
 # ==========================================================================
 # §3.2  Lifecycle status — closed set of 6 members
 # ==========================================================================
+
 
 class ProgramLifecycleStatusV1(Enum):
     SHADOW = "SHADOW"
@@ -47,6 +49,7 @@ class ProgramLifecycleStatusV1(Enum):
 # §3.7  Lifecycle reason codes
 # ==========================================================================
 
+
 class LifecycleReasonCode(Enum):
     OK = "OK"
     NOT_YET_ACTIVE = "NOT_YET_ACTIVE"
@@ -60,7 +63,7 @@ class LifecycleReasonCode(Enum):
 # Helpers
 # ==========================================================================
 
-import re  # noqa: E402
+import re
 
 _PROGRAM_ID_RE: re.Pattern[str] = re.compile(r"^[A-Za-z0-9_-]+$")
 _VERSION_RE: re.Pattern[str] = re.compile(r"^\d+\.\d+\.\d+$")
@@ -78,6 +81,7 @@ def _require_aware(dt: datetime, field_name: str) -> None:
 # ==========================================================================
 # §3.3  Lifecycle spec — immutable policy
 # ==========================================================================
+
 
 @dataclass(frozen=True)
 class ProgramLifecycleSpecV1:
@@ -129,13 +133,16 @@ class ProgramLifecycleSpecV1:
             raise ValueError("review_cadence_days must be 1..365")
 
         # spec_digest
-        if not isinstance(self.spec_digest, str) or not _DIGEST_RE.match(self.spec_digest):
+        if not isinstance(self.spec_digest, str) or not _DIGEST_RE.match(
+            self.spec_digest
+        ):
             raise ValueError("spec_digest must be 64-char lowercase hex")
 
 
 # ==========================================================================
 # §3.4  Lifecycle state — effective state at evaluation time
 # ==========================================================================
+
 
 @dataclass(frozen=True)
 class ProgramLifecycleStateV1:
@@ -159,13 +166,17 @@ class ProgramLifecycleStateV1:
                 raise ValueError("last_evidence_at must be <= as_of")
 
         # evidence_count, renewal_count
-        if not isinstance(self.evidence_count, int) or isinstance(
-            self.evidence_count, bool
-        ) or self.evidence_count < 0:
+        if (
+            not isinstance(self.evidence_count, int)
+            or isinstance(self.evidence_count, bool)
+            or self.evidence_count < 0
+        ):
             raise ValueError("evidence_count must be int >= 0")
-        if not isinstance(self.renewal_count, int) or isinstance(
-            self.renewal_count, bool
-        ) or self.renewal_count < 0:
+        if (
+            not isinstance(self.renewal_count, int)
+            or isinstance(self.renewal_count, bool)
+            or self.renewal_count < 0
+        ):
             raise ValueError("renewal_count must be int >= 0")
 
         kind = spec.kind
@@ -199,9 +210,7 @@ class ProgramLifecycleStateV1:
                 raise ValueError("SHADOW requires as_of < activated_at")
         else:
             if self.as_of < spec.activated_at:
-                raise ValueError(
-                    f"{status.value} requires as_of >= activated_at"
-                )
+                raise ValueError(f"{status.value} requires as_of >= activated_at")
 
         # REVIEW_DUE consistency
         if status is ProgramLifecycleStatusV1.REVIEW_DUE:

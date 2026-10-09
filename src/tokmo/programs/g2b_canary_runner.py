@@ -28,27 +28,38 @@ This module owns no HTTP.  The live Toss adapters and credential loader are
 constructed only by ``tokmo.composition`` and injected as production deps.
 """
 
-from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
 import fcntl
 import hashlib
 import json
 import os
-from pathlib import Path
 import secrets
 import sqlite3
 import stat
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
+from pathlib import Path
 from types import MappingProxyType
-from typing import Callable, Mapping
 
 from tokmo.programs.g2a_shadow_runner import (
-    G2APreflightError, G2AStopError, TICK_COUNT, TICK_SECONDS, _aware_utc,
-    _confine_shadow_root, _data_root, _grid_base, _private_dir,
-    _production_kernel_path, _run_one_tick, preflight,
-    shadow_root, stable_run_id,
+    TICK_COUNT,
+    TICK_SECONDS,
+    G2AStopError,
+    _aware_utc,
+    _confine_shadow_root,
+    _data_root,
+    _grid_base,
+    _private_dir,
+    _production_kernel_path,
+    _run_one_tick,
+    preflight,
+    shadow_root,
+    stable_run_id,
 )
 from tokmo.programs.integrated_fake_cadence import (
-    IntegratedCadenceCountersV1, IntegratedCadenceDepsV1, _acquire_day_lock,
+    IntegratedCadenceCountersV1,
+    IntegratedCadenceDepsV1,
+    _acquire_day_lock,
     _production_stage_deps,
 )
 from tokmo.records.ops_kernel import OpsKernelStore
@@ -60,8 +71,14 @@ from tokmo.values.session_gate import Market
 # HTTPS open on the live path (the live socket/DNS counts themselves are not
 # instrumented here, exactly as in G2-A).
 _WIRE_OPERATIONS = (
-    "TOKEN", "ACCOUNTS", "ACCOUNT_HOLDINGS", "PRICE_BATCH", "ORDERS_PAGE",
-    "ORDER_DETAIL", "CALENDAR_DAY_KR", "CALENDAR_DAY_US",
+    "TOKEN",
+    "ACCOUNTS",
+    "ACCOUNT_HOLDINGS",
+    "PRICE_BATCH",
+    "ORDERS_PAGE",
+    "ORDER_DETAIL",
+    "CALENDAR_DAY_KR",
+    "CALENDAR_DAY_US",
 )
 
 # G2-B exercises only the live *data* path (holdings, US quotes, completed
@@ -69,7 +86,10 @@ _WIRE_OPERATIONS = (
 # call the GLM/SOL models, which a bounded live data canary must never touch, so
 # B truncates the production stage order after trades.
 _B_STAGE_ORDER = (
-    "calendar_provider", "session_gate", "holdings_runner", "quotes_runner",
+    "calendar_provider",
+    "session_gate",
+    "holdings_runner",
+    "quotes_runner",
     "trades_runner",
 )
 
@@ -97,6 +117,7 @@ def _require_b_green_receipts(metric) -> None:
 # Session policy: this canary demands US open and KR closed.
 # ---------------------------------------------------------------------------
 
+
 def _b_gate_policy(session) -> None:
     """STOP before any data provider unless US is open and KR is closed."""
     verdicts = {verdict.market: verdict for verdict in session.verdicts}
@@ -113,6 +134,7 @@ def _b_gate_policy(session) -> None:
 # ---------------------------------------------------------------------------
 # Production-state fingerprint (existence, kind, mode, size, mtime_ns, sha256).
 # ---------------------------------------------------------------------------
+
 
 def _fingerprint(path: Path) -> tuple:
     """A privacy-safe fingerprint of one production path.
@@ -137,8 +159,14 @@ def _fingerprint(path: Path) -> tuple:
         except OSError:
             return ("unsafe",)
     kind = "symlink" if is_link else ("regular" if is_regular else "other")
-    return ("present", kind, stat.S_IMODE(info.st_mode), info.st_size,
-            info.st_mtime_ns, digest)
+    return (
+        "present",
+        kind,
+        stat.S_IMODE(info.st_mode),
+        info.st_size,
+        info.st_mtime_ns,
+        digest,
+    )
 
 
 def _production_paths(home: Path) -> tuple[Path, ...]:
@@ -159,6 +187,7 @@ def _snapshot_production(paths) -> tuple:
 # ---------------------------------------------------------------------------
 # Report (masked aggregate counts only).
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class G2BReport:
@@ -184,6 +213,7 @@ class G2BReport:
 # Durable one-tick progress + B run state.
 # ---------------------------------------------------------------------------
 
+
 def _open_progress(path: Path) -> sqlite3.Connection:
     connection = sqlite3.connect(path)
     os.chmod(path, 0o600)
@@ -196,8 +226,9 @@ def _open_progress(path: Path) -> sqlite3.Connection:
     return connection
 
 
-def _write_b_state(root: Path, status: str, stop_code: str | None,
-                   now: datetime) -> None:
+def _write_b_state(
+    root: Path, status: str, stop_code: str | None, now: datetime
+) -> None:
     payload = {"status": status, "stop_code": stop_code, "updated_at": now.isoformat()}
     path = root / "g2b_run_state.json"
     temp = path.with_name(".g2b_run_state.json.tmp")
@@ -218,9 +249,14 @@ def _write_b_state(root: Path, status: str, stop_code: str | None,
 # One-tick driver.
 # ---------------------------------------------------------------------------
 
+
 def run_b_canary(
-    *, home: Path, utc_day: date, deps: IntegratedCadenceDepsV1,
-    credential_path: Path | None, clock: Callable[[], datetime],
+    *,
+    home: Path,
+    utc_day: date,
+    deps: IntegratedCadenceDepsV1,
+    credential_path: Path | None,
+    clock: Callable[[], datetime],
     open_handle_probe: Callable[[Path], int],
     metrics_sink: Callable[[dict], None] | None = None,
 ) -> G2BReport:
@@ -231,8 +267,13 @@ def run_b_canary(
     # Preflight reuses the G2-A guards: production kernel absent, zero open
     # handles under the data root, private-mode credential, shadow schema, clean
     # run state.  It opens no socket and mutates nothing.
-    preflight(home=home, utc_day=utc_day, credential_path=credential_path,
-              clock=clock, open_handle_probe=open_handle_probe)
+    preflight(
+        home=home,
+        utc_day=utc_day,
+        credential_path=credential_path,
+        clock=clock,
+        open_handle_probe=open_handle_probe,
+    )
 
     root = _confine_shadow_root(home, shadow_root(home, utc_day))
     _private_dir(_data_root(home) / "shadow")
@@ -260,12 +301,14 @@ def run_b_canary(
         _write_b_state(root, "RUNNING", None, start_wall)
         store = OpsKernelStore(root / "ops" / "ops_kernel.sqlite3")
         progress = _open_progress(root / "ops" / "g2b_progress.sqlite3")
-        if progress.execute("SELECT COUNT(*) FROM g2b_ticks WHERE run_id=?",
-                            (run_id,)).fetchone()[0]:
+        if progress.execute(
+            "SELECT COUNT(*) FROM g2b_ticks WHERE run_id=?", (run_id,)
+        ).fetchone()[0]:
             raise G2AStopError("canary_already_ran")
 
-        store.reconcile_requests(ProducerRole.COLLECTOR,
-                                 invocation_id=secrets.token_hex(16), now=start_wall)
+        store.reconcile_requests(
+            ProducerRole.COLLECTOR, invocation_id=secrets.token_hex(16), now=start_wall
+        )
         stages = _production_stage_deps(root, deps)
         stage_callables = tuple(getattr(stages, name) for name in _B_STAGE_ORDER)
 
@@ -275,16 +318,24 @@ def run_b_canary(
         scheduled = tick_id_from_utc(start_wall).start_utc
         try:
             metric = _run_one_tick(
-                index=0, scheduled=scheduled, store=store,
-                stage_callables=stage_callables, counters=counters, root=root,
-                clock=clock, metrics_sink=metrics_sink, gate_policy=_b_gate_policy)
+                index=0,
+                scheduled=scheduled,
+                store=store,
+                stage_callables=stage_callables,
+                counters=counters,
+                root=root,
+                clock=clock,
+                metrics_sink=metrics_sink,
+                gate_policy=_b_gate_policy,
+            )
             # The tick only counts if the whole data path proved green; an
             # unproven tick STOPs before it is durably committed.
             _require_b_green_receipts(metric)
             progress.execute(
                 "INSERT INTO g2b_ticks(run_id,tick_id,scheduled_at,completed_at) "
                 "VALUES(?,?,?,?)",
-                (run_id, metric.tick_id, metric.scheduled_at, metric.ended_at))
+                (run_id, metric.tick_id, metric.scheduled_at, metric.ended_at),
+            )
             progress.commit()
         except G2AStopError as stop:
             code = _reconcile_production(production_paths, before, stop.code)
@@ -297,8 +348,9 @@ def run_b_canary(
             raise G2AStopError(code)
         end_wall = _aware_utc(clock())
         _write_b_state(root, "COMPLETED", None, end_wall)
-        return _build_report(run_id, utc_day, root,
-                             (end_wall - start_wall).total_seconds())
+        return _build_report(
+            run_id, utc_day, root, (end_wall - start_wall).total_seconds()
+        )
     finally:
         if progress is not None:
             progress.close()
@@ -322,12 +374,14 @@ def _reconcile_production(paths, before, prior_code: str | None) -> str | None:
 # Report assembly from durable started rows + the day counter.
 # ---------------------------------------------------------------------------
 
+
 def _started_operations(root: Path) -> dict[str, int]:
     connection = sqlite3.connect(root / "ops" / "ops_kernel.sqlite3")
     try:
         rows = connection.execute(
             "SELECT operation, COUNT(*) FROM planned_requests "
-            "WHERE started_at IS NOT NULL GROUP BY operation").fetchall()
+            "WHERE started_at IS NOT NULL GROUP BY operation"
+        ).fetchall()
     finally:
         connection.close()
     return {operation: count for operation, count in rows}
@@ -338,21 +392,29 @@ def _provider_started_count(root: Path, utc_day: date) -> int:
     try:
         row = connection.execute(
             "SELECT provider_started_count FROM request_day_counters WHERE utc_day=?",
-            (utc_day.isoformat(),)).fetchone()
+            (utc_day.isoformat(),),
+        ).fetchone()
     finally:
         connection.close()
     return 0 if row is None else row[0]
 
 
-def _build_report(run_id: str, utc_day: date, root: Path,
-                  duration_seconds: float, tick_count: int = 1) -> G2BReport:
+def _build_report(
+    run_id: str, utc_day: date, root: Path, duration_seconds: float, tick_count: int = 1
+) -> G2BReport:
     started = _started_operations(root)
-    calendar = sum(count for operation, count in started.items()
-                   if operation.startswith("CALENDAR_DAY_"))
-    wire = sum(count for operation, count in started.items()
-               if operation in _WIRE_OPERATIONS)
+    calendar = sum(
+        count
+        for operation, count in started.items()
+        if operation.startswith("CALENDAR_DAY_")
+    )
+    wire = sum(
+        count for operation, count in started.items() if operation in _WIRE_OPERATIONS
+    )
     return G2BReport(
-        run_id=run_id, utc_day=utc_day.isoformat(), tick_count=tick_count,
+        run_id=run_id,
+        utc_day=utc_day.isoformat(),
+        tick_count=tick_count,
         provider_started_count=_provider_started_count(root, utc_day),
         token_started_count=started.get("TOKEN", 0),
         accounts_started_count=started.get("ACCOUNTS", 0),
@@ -396,9 +458,14 @@ def _open_hour_progress(path: Path) -> sqlite3.Connection:
 
 
 def run_b_one_hour(
-    *, home: Path, utc_day: date, deps: IntegratedCadenceDepsV1,
-    credential_path: Path | None, clock: Callable[[], datetime],
-    sleeper: Callable[[float], None], open_handle_probe: Callable[[Path], int],
+    *,
+    home: Path,
+    utc_day: date,
+    deps: IntegratedCadenceDepsV1,
+    credential_path: Path | None,
+    clock: Callable[[], datetime],
+    sleeper: Callable[[float], None],
+    open_handle_probe: Callable[[Path], int],
     metrics_sink: Callable[[dict], None] | None = None,
 ) -> G2BReport:
     """Run exactly twelve 300s live data ticks over one US-open/KR-closed hour.
@@ -411,8 +478,13 @@ def run_b_one_hour(
     if not isinstance(deps, IntegratedCadenceDepsV1):
         raise ValueError("invalid integrated cadence deps")
 
-    preflight(home=home, utc_day=utc_day, credential_path=credential_path,
-              clock=clock, open_handle_probe=open_handle_probe)
+    preflight(
+        home=home,
+        utc_day=utc_day,
+        credential_path=credential_path,
+        clock=clock,
+        open_handle_probe=open_handle_probe,
+    )
 
     root = _confine_shadow_root(home, shadow_root(home, utc_day))
     _private_dir(_data_root(home) / "shadow")
@@ -445,11 +517,14 @@ def run_b_one_hour(
         store = OpsKernelStore(root / "ops" / "ops_kernel.sqlite3")
         progress = _open_hour_progress(root / "ops" / "g2b_hour_progress.sqlite3")
         completed = {
-            row[0] for row in progress.execute(
-                "SELECT tick_index FROM g2b_hour_ticks WHERE run_id=?", (run_id,))
+            row[0]
+            for row in progress.execute(
+                "SELECT tick_index FROM g2b_hour_ticks WHERE run_id=?", (run_id,)
+            )
         }
-        store.reconcile_requests(ProducerRole.COLLECTOR,
-                                 invocation_id=secrets.token_hex(16), now=start_wall)
+        store.reconcile_requests(
+            ProducerRole.COLLECTOR, invocation_id=secrets.token_hex(16), now=start_wall
+        )
         stages = _production_stage_deps(root, deps)
         stage_callables = tuple(getattr(stages, name) for name in _B_STAGE_ORDER)
 
@@ -467,10 +542,17 @@ def run_b_one_hour(
                     # replaying ticks back to back.
                     raise G2AStopError("tick_missed")
                 metric = _run_one_tick(
-                    index=index, scheduled=scheduled, store=store,
-                    stage_callables=stage_callables, counters=counters, root=root,
-                    clock=clock, metrics_sink=metrics_sink,
-                    gate_policy=_b_gate_policy, metrics_leaf=_HOUR_METRICS_LEAF)
+                    index=index,
+                    scheduled=scheduled,
+                    store=store,
+                    stage_callables=stage_callables,
+                    counters=counters,
+                    root=root,
+                    clock=clock,
+                    metrics_sink=metrics_sink,
+                    gate_policy=_b_gate_policy,
+                    metrics_leaf=_HOUR_METRICS_LEAF,
+                )
                 # Every tick — the first canary tick and every later one — must
                 # prove all three data receipts green before it is committed or
                 # the hour is allowed to continue.
@@ -478,8 +560,14 @@ def run_b_one_hour(
                 progress.execute(
                     "INSERT INTO g2b_hour_ticks(run_id,tick_index,tick_id,"
                     "scheduled_at,completed_at) VALUES(?,?,?,?,?)",
-                    (run_id, index, metric.tick_id, metric.scheduled_at,
-                     metric.ended_at))
+                    (
+                        run_id,
+                        index,
+                        metric.tick_id,
+                        metric.scheduled_at,
+                        metric.ended_at,
+                    ),
+                )
                 progress.commit()
         except G2AStopError as stop:
             code = _reconcile_production(production_paths, before, stop.code)
@@ -493,9 +581,11 @@ def run_b_one_hour(
         end_wall = _aware_utc(clock())
         _write_b_state(root, "COMPLETED", None, end_wall)
         total_ticks = progress.execute(
-            "SELECT COUNT(*) FROM g2b_hour_ticks WHERE run_id=?", (run_id,)).fetchone()[0]
-        return _build_report(run_id, utc_day, root,
-                             (end_wall - start_wall).total_seconds(), total_ticks)
+            "SELECT COUNT(*) FROM g2b_hour_ticks WHERE run_id=?", (run_id,)
+        ).fetchone()[0]
+        return _build_report(
+            run_id, utc_day, root, (end_wall - start_wall).total_seconds(), total_ticks
+        )
     finally:
         if progress is not None:
             progress.close()

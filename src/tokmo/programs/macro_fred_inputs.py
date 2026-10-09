@@ -46,6 +46,7 @@ from tokmo.values.fred_query import (
     DUE_STATES,
     FAILURE_COOLDOWN,
     FRESH_FOR,
+    SERIES_PAYEMS,
     FredCoverageV1,
     FredDueDecisionV1,
     FredDueStateV1,
@@ -56,7 +57,6 @@ from tokmo.values.fred_query import (
     FredSeriesFactV1,
     FredSeriesQueryV1,
     MacroFredInputV1,
-    SERIES_PAYEMS,
     compute_macro_provenance_digest,
     observation_direction,
 )
@@ -79,8 +79,9 @@ def last_day_of_month(year: int, month: int) -> date:
     return date(following_year, following_month, 1) - timedelta(days=1)
 
 
-def derive_query_window_v1(*, release_date: date,
-                           as_of: datetime) -> tuple[FredSeriesQueryV1, tuple]:
+def derive_query_window_v1(
+    *, release_date: date, as_of: datetime
+) -> tuple[FredSeriesQueryV1, tuple]:
     """Derive the one query window and the terminal month it is bounded by.
 
     ``expected_terminal_month`` is computed here exactly once and is consumed
@@ -90,17 +91,25 @@ def derive_query_window_v1(*, release_date: date,
     """
     if type(release_date) is not date:
         raise ValueError("invalid_release_date")
-    if (type(as_of) is not datetime or as_of.tzinfo is None
-            or as_of.utcoffset() is None
-            or as_of.utcoffset().total_seconds() != 0):
+    if (
+        type(as_of) is not datetime
+        or as_of.tzinfo is None
+        or as_of.utcoffset() is None
+        or as_of.utcoffset().total_seconds() != 0
+    ):
         raise ValueError("aware_utc_required")
-    expected_terminal_month = previous_calendar_month(release_date.year,
-                                                      release_date.month)
+    expected_terminal_month = previous_calendar_month(
+        release_date.year, release_date.month
+    )
     window = expected_terminal_month
     for _step in range(WINDOW_MONTHS_BEFORE_TERMINAL):
         window = previous_calendar_month(*window)
-    query = FredSeriesQueryV1(SERIES_PAYEMS, date(window[0], window[1], 1),
-                              last_day_of_month(*expected_terminal_month), as_of)
+    query = FredSeriesQueryV1(
+        SERIES_PAYEMS,
+        date(window[0], window[1], 1),
+        last_day_of_month(*expected_terminal_month),
+        as_of,
+    )
     return query, expected_terminal_month
 
 
@@ -112,22 +121,29 @@ class _Admission:
 
 
 def _require_aware_utc(value: object) -> datetime:
-    if (type(value) is not datetime or value.tzinfo is None
-            or value.utcoffset() is None
-            or value.utcoffset().total_seconds() != 0):
+    if (
+        type(value) is not datetime
+        or value.tzinfo is None
+        or value.utcoffset() is None
+        or value.utcoffset().total_seconds() != 0
+    ):
         raise ValueError("aware_utc_required")
     return value
 
 
-def _schedule_is_valid(query: FredSeriesQueryV1, schedule: object,
-                       now: datetime) -> bool:
-    return (isinstance(schedule, FredReleaseScheduleV1)
-            and schedule.series_id == query.series_id
-            and now <= schedule.valid_until)
+def _schedule_is_valid(
+    query: FredSeriesQueryV1, schedule: object, now: datetime
+) -> bool:
+    return (
+        isinstance(schedule, FredReleaseScheduleV1)
+        and schedule.series_id == query.series_id
+        and now <= schedule.valid_until
+    )
 
 
-def _admit(*, query: FredSeriesQueryV1, schedule: object, cache,
-           now: datetime) -> _Admission:
+def _admit(
+    *, query: FredSeriesQueryV1, schedule: object, cache, now: datetime
+) -> _Admission:
     if not isinstance(query, FredSeriesQueryV1):
         raise ValueError("query_required")
     _require_aware_utc(now)
@@ -136,35 +152,55 @@ def _admit(*, query: FredSeriesQueryV1, schedule: object, cache,
         try:
             cache.read_success_for_series(query.series_id, now=now)
         except FredQueryCacheCorruption:
-            return _Admission(FredDueDecisionV1(
-                FredDueStateV1.UNAVAILABLE_LOCAL_STATE, identity, None),
-                None, False)
-        return _Admission(FredDueDecisionV1(
-            FredDueStateV1.UNAVAILABLE_RELEASE_SCHEDULE, identity, None),
-            None, False)
+            return _Admission(
+                FredDueDecisionV1(
+                    FredDueStateV1.UNAVAILABLE_LOCAL_STATE, identity, None
+                ),
+                None,
+                False,
+            )
+        return _Admission(
+            FredDueDecisionV1(
+                FredDueStateV1.UNAVAILABLE_RELEASE_SCHEDULE, identity, None
+            ),
+            None,
+            False,
+        )
     slot = schedule.release_slot
     try:
         cached = cache.read_success_for_series(query.series_id, now=now)
         attempts = cache.read_attempt_state(identity, slot, now=now)
     except FredQueryCacheCorruption:
-        return _Admission(FredDueDecisionV1(
-            FredDueStateV1.UNAVAILABLE_LOCAL_STATE, identity, slot), None, False)
+        return _Admission(
+            FredDueDecisionV1(FredDueStateV1.UNAVAILABLE_LOCAL_STATE, identity, slot),
+            None,
+            False,
+        )
 
     def decided(state: FredDueStateV1) -> _Admission:
-        usable = (cached is not None
-                  and cached.query_identity == identity
-                  and cached.due_slot == slot
-                  and (now - cached.fetched_at < FRESH_FOR
-                       or state is FredDueStateV1.NOT_DUE_REVISION_CURRENT))
+        usable = (
+            cached is not None
+            and cached.query_identity == identity
+            and cached.due_slot == slot
+            and (
+                now - cached.fetched_at < FRESH_FOR
+                or state is FredDueStateV1.NOT_DUE_REVISION_CURRENT
+            )
+        )
         return _Admission(FredDueDecisionV1(state, identity, slot), cached, usable)
 
     if now < schedule.eligible_from:
-        return _Admission(FredDueDecisionV1(
-            FredDueStateV1.NOT_DUE_BEFORE_RELEASE, identity, slot), cached, False)
+        return _Admission(
+            FredDueDecisionV1(FredDueStateV1.NOT_DUE_BEFORE_RELEASE, identity, slot),
+            cached,
+            False,
+        )
     if attempts.active_started_at is not None:
         return decided(FredDueStateV1.NOT_DUE_COOLDOWN)
-    if (attempts.last_failure_at is not None
-            and now - attempts.last_failure_at < FAILURE_COOLDOWN):
+    if (
+        attempts.last_failure_at is not None
+        and now - attempts.last_failure_at < FAILURE_COOLDOWN
+    ):
         return decided(FredDueStateV1.NOT_DUE_COOLDOWN)
     if cached is None:
         return decided(FredDueStateV1.DUE_MISSING)
@@ -182,8 +218,9 @@ def evaluate_fred_due_v1(*, query, schedule, cache, now) -> FredDueDecisionV1:
     return _admit(query=query, schedule=schedule, cache=cache, now=now).decision
 
 
-def run_macro_fred_enrichment_v1(*, query, schedule, cache, query_port,
-                                 clock) -> MacroFredInputV1:
+def run_macro_fred_enrichment_v1(
+    *, query, schedule, cache, query_port, clock
+) -> MacroFredInputV1:
     now = _require_aware_utc(clock())
     admission = _admit(query=query, schedule=schedule, cache=cache, now=now)
     decision = admission.decision
@@ -194,8 +231,11 @@ def run_macro_fred_enrichment_v1(*, query, schedule, cache, query_port,
         claim = cache.claim(decision.query_identity, decision.due_slot, now=now)
         if claim is None:
             # A concurrent invocation holds the single-flight claim.
-            decision = FredDueDecisionV1(FredDueStateV1.NOT_DUE_COOLDOWN,
-                                         decision.query_identity, decision.due_slot)
+            decision = FredDueDecisionV1(
+                FredDueStateV1.NOT_DUE_COOLDOWN,
+                decision.query_identity,
+                decision.due_slot,
+            )
         else:
             starts = 1
             outcome = query_port.query_series(query)
@@ -207,24 +247,35 @@ def run_macro_fred_enrichment_v1(*, query, schedule, cache, query_port,
                 failure = outcome
             else:
                 raise ValueError("closed_query_outcome_required")
-    return _project(query=query, schedule=schedule, decision=decision,
-                    admission=admission, fetched=fetched, failure=failure,
-                    starts=starts)
+    return _project(
+        query=query,
+        schedule=schedule,
+        decision=decision,
+        admission=admission,
+        fetched=fetched,
+        failure=failure,
+        starts=starts,
+    )
 
 
-def _project(*, query, schedule, decision, admission, fetched, failure,
-             starts) -> MacroFredInputV1:
+def _project(
+    *, query, schedule, decision, admission, fetched, failure, starts
+) -> MacroFredInputV1:
     fact = fetched
     if fact is None and admission.usable:
         fact = admission.cached.fact
     if fact is not None:
         coverage = FredCoverageV1.USED
     elif failure is not None:
-        coverage = (FredCoverageV1.OMITTED_INCOMPLETE
-                    if failure.code is FredQueryFailureCodeV1.INCOMPLETE
-                    else FredCoverageV1.OMITTED_UNAVAILABLE)
-    elif decision.state in (FredDueStateV1.UNAVAILABLE_LOCAL_STATE,
-                            FredDueStateV1.UNAVAILABLE_RELEASE_SCHEDULE):
+        coverage = (
+            FredCoverageV1.OMITTED_INCOMPLETE
+            if failure.code is FredQueryFailureCodeV1.INCOMPLETE
+            else FredCoverageV1.OMITTED_UNAVAILABLE
+        )
+    elif decision.state in (
+        FredDueStateV1.UNAVAILABLE_LOCAL_STATE,
+        FredDueStateV1.UNAVAILABLE_RELEASE_SCHEDULE,
+    ):
         coverage = FredCoverageV1.OMITTED_UNAVAILABLE
     else:
         coverage = FredCoverageV1.OMITTED_NOT_DUE
@@ -233,17 +284,29 @@ def _project(*, query, schedule, decision, admission, fetched, failure,
     if fact is not None:
         revision_identity = fact.revision_identity
         current, prior, direction = observation_direction(fact.observations)
-    schedule_digest = (schedule.provenance_digest
-                       if isinstance(schedule, FredReleaseScheduleV1) else None)
+    schedule_digest = (
+        schedule.provenance_digest
+        if isinstance(schedule, FredReleaseScheduleV1)
+        else None
+    )
     return MacroFredInputV1(
-        query.series_id, coverage, decision.state, starts,
+        query.series_id,
+        coverage,
+        decision.state,
+        starts,
         None if current is None else current.value,
         None if current is None else current.observation_date,
         None if prior is None else prior.value,
         None if prior is None else prior.observation_date,
-        direction, decision.query_identity, revision_identity,
+        direction,
+        decision.query_identity,
+        revision_identity,
         compute_macro_provenance_digest(
             query_identity=decision.query_identity,
-            revision_identity=revision_identity, due_slot=decision.due_slot,
-            due_state=decision.state, coverage=coverage,
-            schedule_provenance_digest=schedule_digest))
+            revision_identity=revision_identity,
+            due_slot=decision.due_slot,
+            due_state=decision.state,
+            coverage=coverage,
+            schedule_provenance_digest=schedule_digest,
+        ),
+    )

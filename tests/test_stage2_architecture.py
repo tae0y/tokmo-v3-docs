@@ -42,21 +42,25 @@ LEGACY_CAPABILITY_NAME = "_LEGACY_G2_CAPABILITY"
 MASK_SEAM_NAMES = frozenset(PRODUCTION_MASK_FUNCTIONS) | frozenset(PRIVATE_LEGACY_SEAMS)
 
 LEGACY_MODULE = SRC / "programs" / "legacy_g2.py"
-LEGACY_WRAPPER_NAMES = frozenset({
-    "legacy_run_holdings_sync",
-    "legacy_run_quotes_sync",
-    "legacy_run_trades_sync",
-    "legacy_assemble_analysis_materials",
-})
+LEGACY_WRAPPER_NAMES = frozenset(
+    {
+        "legacy_run_holdings_sync",
+        "legacy_run_quotes_sync",
+        "legacy_run_trades_sync",
+        "legacy_assemble_analysis_materials",
+    }
+)
 
 # Closed historical allowlist (ROOT-relative): the sealed legacy module
 # itself plus the named historical G2 acceptance runner that predates the
 # mask. Nothing else in the recursive production graph may import or call
 # the legacy wrappers.
-LEGACY_CALLER_ALLOWLIST = frozenset({
-    "src/tokmo/programs/legacy_g2.py",
-    "src/tokmo/programs/integrated_fake_cadence.py",
-})
+LEGACY_CALLER_ALLOWLIST = frozenset(
+    {
+        "src/tokmo/programs/legacy_g2.py",
+        "src/tokmo/programs/integrated_fake_cadence.py",
+    }
+)
 
 
 def production_graph_files():
@@ -69,7 +73,10 @@ def production_graph_files():
 
 def function_def(tree, name):
     for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == name
+        ):
             return node
     return None
 
@@ -83,10 +90,7 @@ def _kwonly_default(node, arg_name):
 
 def all_param_names(node):
     args = node.args
-    return {
-        arg.arg
-        for arg in (args.posonlyargs + args.args + args.kwonlyargs)
-    }
+    return {arg.arg for arg in (args.posonlyargs + args.args + args.kwonlyargs)}
 
 
 # -- production signatures: mask + full tick identity are mandatory ---------------
@@ -126,7 +130,8 @@ def test_legacy_module_exists_and_every_wrapper_is_marked_legacy():
     module_doc = ast.get_docstring(tree) or ""
     assert "legacy" in module_doc.lower()
     defined = {
-        node.name: node for node in tree.body
+        node.name: node
+        for node in tree.body
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
     for name in sorted(LEGACY_WRAPPER_NAMES):
@@ -143,8 +148,7 @@ def legacy_reachable(tree) -> set:
             if node.module and "legacy_g2" in node.module:
                 reached.add(node.module)
             reached.update(
-                alias.name for alias in node.names
-                if alias.name in LEGACY_WRAPPER_NAMES
+                alias.name for alias in node.names if alias.name in LEGACY_WRAPPER_NAMES
             )
         elif isinstance(node, ast.Import):
             reached.update(
@@ -169,10 +173,12 @@ def test_whole_production_graph_cannot_reach_legacy_wrappers():
 def test_legacy_caller_allowlist_is_closed_and_real():
     for relative in LEGACY_CALLER_ALLOWLIST:
         assert (ROOT / relative).is_file(), f"stale allowlist entry: {relative}"
-    assert LEGACY_CALLER_ALLOWLIST == frozenset({
-        "src/tokmo/programs/legacy_g2.py",
-        "src/tokmo/programs/integrated_fake_cadence.py",
-    })
+    assert LEGACY_CALLER_ALLOWLIST == frozenset(
+        {
+            "src/tokmo/programs/legacy_g2.py",
+            "src/tokmo/programs/integrated_fake_cadence.py",
+        }
+    )
 
 
 # -- call sites: mask can be neither omitted nor None ------------------------------
@@ -185,16 +191,20 @@ def masked_call_violations(tree) -> list:
         if not isinstance(node, ast.Call):
             continue
         func = node.func
-        name = func.attr if isinstance(func, ast.Attribute) else (
-            func.id if isinstance(func, ast.Name) else None
+        name = (
+            func.attr
+            if isinstance(func, ast.Attribute)
+            else (func.id if isinstance(func, ast.Name) else None)
         )
         if name not in MASK_SEAM_NAMES:
             continue
         keywords = {keyword.arg: keyword.value for keyword in node.keywords}
-        if "mask" not in keywords and None not in keywords:  # **kwargs escapes via None key
+        if (
+            "mask" not in keywords and None not in keywords
+        ):  # **kwargs escapes via None key
             violations.append((node.lineno, name, "mask omitted"))
         mask_value = keywords.get("mask")
-        if (isinstance(mask_value, ast.Constant) and mask_value.value is None):
+        if isinstance(mask_value, ast.Constant) and mask_value.value is None:
             violations.append((node.lineno, name, "mask=None"))
     return violations
 
@@ -249,8 +259,7 @@ def private_seam_reachable(tree) -> set:
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
             reached.update(
-                ("import", alias.name) for alias in node.names
-                if alias.name in watched
+                ("import", alias.name) for alias in node.names if alias.name in watched
             )
         elif isinstance(node, ast.Attribute) and node.attr in watched:
             reached.add(("attribute", node.attr))
@@ -272,7 +281,8 @@ def test_whole_production_graph_cannot_reach_private_legacy_seams():
             # as bare names (definition + the masked public wrapper's call);
             # it may never import another module's seam or capability.
             allowed = {
-                ("name", owners[relative]), ("name", LEGACY_CAPABILITY_NAME),
+                ("name", owners[relative]),
+                ("name", LEGACY_CAPABILITY_NAME),
             }
         assert reached <= allowed, (
             f"{relative} reaches private legacy seam surface: {reached - allowed}"
@@ -331,36 +341,69 @@ def _seam_calls(tmp_path):
             kwargs = dict(base)
             kwargs.update(extra)
             return lambda: target(**kwargs)
+
         return build
 
     holdings = seam(
         _locked_holdings_sync,
-        tick=object(), session_result=object(), holdings_provider=None,
-        store=None, pack_writer=None, receipt_store=None,
-        reservation_seal=None, incident_writer=None, clock=None, now=None,
-        job_lock_path=tmp_path / "h.lock", mask=None,
+        tick=object(),
+        session_result=object(),
+        holdings_provider=None,
+        store=None,
+        pack_writer=None,
+        receipt_store=None,
+        reservation_seal=None,
+        incident_writer=None,
+        clock=None,
+        now=None,
+        job_lock_path=tmp_path / "h.lock",
+        mask=None,
     )
     quotes = seam(
         _locked_quotes_sync,
-        tick=object(), session_result=object(), holdings=None,
-        quotes_provider=None, quote_store=None, pack_writer=None,
-        receipt_store=None, reservation_seal=None, incident_writer=None,
-        clock=None, now=None, job_lock_path=tmp_path / "q.lock", mask=None,
+        tick=object(),
+        session_result=object(),
+        holdings=None,
+        quotes_provider=None,
+        quote_store=None,
+        pack_writer=None,
+        receipt_store=None,
+        reservation_seal=None,
+        incident_writer=None,
+        clock=None,
+        now=None,
+        job_lock_path=tmp_path / "q.lock",
+        mask=None,
     )
     trades = seam(
         _locked_trades_sync,
-        tick=object(), session_result=object(), holdings=None,
-        orders_provider=None, detail_provider=None, store=None,
-        scan_state=None, pack_writer=None, receipt_store=None,
-        reservation_seal=None, incident_writer=None,
-        regular_session_dates=None, clock=None,
-        now=None, job_lock_path=tmp_path / "t.lock", ops_kernel=None,
-        invocation_id=None, mask=None,
+        tick=object(),
+        session_result=object(),
+        holdings=None,
+        orders_provider=None,
+        detail_provider=None,
+        store=None,
+        scan_state=None,
+        pack_writer=None,
+        receipt_store=None,
+        reservation_seal=None,
+        incident_writer=None,
+        regular_session_dates=None,
+        clock=None,
+        now=None,
+        job_lock_path=tmp_path / "t.lock",
+        ops_kernel=None,
+        invocation_id=None,
+        mask=None,
     )
     assemble = seam(
         _assemble,
-        tick=object(), open_markets=None, receipt_readers=None,
-        pack_reader=None, now=None, mask=None,
+        tick=object(),
+        open_markets=None,
+        receipt_readers=None,
+        pack_reader=None,
+        now=None,
+        mask=None,
         legacy_market_date_ok=lambda *args: True,
     )
     return holdings, quotes, trades, assemble
@@ -368,6 +411,7 @@ def _seam_calls(tmp_path):
 
 def test_private_seams_reject_mask_none_without_the_legacy_capability(tmp_path):
     import pytest
+
     for seam in _seam_calls(tmp_path):
         with pytest.raises(PermissionError):
             seam()()
@@ -377,9 +421,14 @@ def test_private_seams_reject_mask_none_without_the_legacy_capability(tmp_path):
 
 def test_capability_cannot_launder_a_masked_production_call(tmp_path):
     import pytest
+
     from tokmo.programs import (
-        analysis_barrier, holdings_sync, quotes_sync, trades_sync,
+        analysis_barrier,
+        holdings_sync,
+        quotes_sync,
+        trades_sync,
     )
+
     modules = (holdings_sync, quotes_sync, trades_sync, analysis_barrier)
     for seam, module in zip(_seam_calls(tmp_path), modules):
         capability = getattr(module, LEGACY_CAPABILITY_NAME)
@@ -393,11 +442,16 @@ def test_legacy_wrappers_present_the_capability_and_still_run(tmp_path):
     # call cannot. The wrapper gets past the capability seal and fails only on
     # its junk collaborators, never with the seal's PermissionError.
     import pytest
+
     from tokmo.programs.legacy_g2 import legacy_assemble_analysis_materials
+
     with pytest.raises((TypeError, ValueError)):
         legacy_assemble_analysis_materials(
-            tick=object(), open_markets=None, receipt_readers=None,
-            pack_reader=None, now=None,
+            tick=object(),
+            open_markets=None,
+            receipt_readers=None,
+            pack_reader=None,
+            now=None,
         )
 
 
@@ -407,26 +461,26 @@ def test_legacy_wrappers_present_the_capability_and_still_run(tmp_path):
 def test_masked_barrier_owns_no_hand_dst_and_uses_zoneinfo():
     tree = ast.parse((SRC / "programs" / "analysis_barrier.py").read_text())
     defined = {
-        node.name for node in ast.walk(tree)
+        node.name
+        for node in ast.walk(tree)
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
     assert "_us_dst" not in defined
     assert "_local_date" not in defined
     imports = {
         alias.name
-        for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
         for alias in node.names
-    } | {
-        node.module
-        for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)
-    }
+    } | {node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
     assert "zoneinfo" in imports or "ZoneInfo" in imports
 
 
 def test_legacy_module_owns_the_hand_dst_calculation():
     tree = ast.parse(LEGACY_MODULE.read_text())
     defined = {
-        node.name for node in ast.walk(tree)
+        node.name
+        for node in ast.walk(tree)
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
     assert "_legacy_us_dst" in defined

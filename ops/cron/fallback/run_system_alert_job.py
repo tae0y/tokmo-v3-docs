@@ -6,9 +6,9 @@ Success is silent. On a non-zero exit the tail of stderr is sent through send_sy
 this file), which posts to Telegram when TELEGRAM_ALERT_BOT_TOKEN / TELEGRAM_ALERT_CHAT_ID are set and
 otherwise prints to stderr.
 """
+
 import argparse
 import subprocess
-import sys
 from pathlib import Path
 
 
@@ -19,7 +19,9 @@ def main(argv=None) -> int:
     parser.add_argument("--silent-marker", default="[SILENT]")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
-    command = args.command[1:] if args.command and args.command[0] == "--" else args.command
+    command = (
+        args.command[1:] if args.command and args.command[0] == "--" else args.command
+    )
     if not command:
         parser.error("command required after --")
     result = subprocess.run(command, capture_output=True, text=True)
@@ -27,8 +29,13 @@ def main(argv=None) -> int:
         return 0
     if result.returncode == 0 and args.silent_marker in result.stdout:
         return 0
-    message = f"{args.name}: exit {result.returncode}\n" + (result.stderr or result.stdout)[-1500:]
-    subprocess.run([str(Path(__file__).with_name("send_system_alert.sh")), message], check=False)
+    message = (
+        f"{args.name}: exit {result.returncode}\n"
+        + (result.stderr or result.stdout)[-1500:]
+    )
+    subprocess.run(
+        [str(Path(__file__).with_name("send_system_alert.sh")), message], check=False
+    )
     return result.returncode
 
 

@@ -53,15 +53,17 @@ def parse_google_news_rss(
             previous = identities.setdefault(path_identity, guid)
             if previous != guid:
                 raise ValueError("canonical identity collision")
-            items.append(NewsConnectorItem(
-                canonical_url=link,
-                source_article_id=guid,
-                title=title,
-                published_at=published_at,
-                observed_at=observed_at,
-                publisher_name=publisher_name,
-                publisher_site_url=publisher_site_url,
-            ))
+            items.append(
+                NewsConnectorItem(
+                    canonical_url=link,
+                    source_article_id=guid,
+                    title=title,
+                    published_at=published_at,
+                    observed_at=observed_at,
+                    publisher_name=publisher_name,
+                    publisher_site_url=publisher_site_url,
+                )
+            )
         if not items:
             return NewsFetchResult(NewsFetchStatus.EMPTY)
         return NewsFetchResult(NewsFetchStatus.COLLECTED, tuple(items))

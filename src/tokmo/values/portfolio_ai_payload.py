@@ -1,25 +1,34 @@
 """Typed, provider-safe portfolio EVENT payload values."""
+
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass, fields, is_dataclass, replace
-from datetime import date, datetime, timezone
-from decimal import Decimal
-from enum import Enum
 import hashlib
 import re
+from dataclasses import dataclass, fields, is_dataclass
+from datetime import UTC, date, datetime
+from decimal import Decimal
+from enum import Enum
 from types import MappingProxyType
 
+from tokmo.values import canonical_decimal
 from tokmo.values.analysis_contracts import (
-    AnalysisKind, FreshnessState, MaterialKindV1, TrustClass,
+    AnalysisKind,
+    FreshnessState,
+    MaterialKindV1,
+    TrustClass,
 )
 from tokmo.values.material_pack import (
-    CANONICAL_MAX_DEPTH, CANONICAL_MAX_LIST_COUNT, CANONICAL_MAX_STRING_LENGTH,
+    CANONICAL_MAX_DEPTH,
+    CANONICAL_MAX_LIST_COUNT,
+    CANONICAL_MAX_STRING_LENGTH,
     canonical_encode,
 )
-from tokmo.values import canonical_decimal
 from tokmo.values.portfolio_calculations import (
-    FxStatus, PortfolioScope, PricingState, RatioState, SnapshotStatus,
+    FxStatus,
+    PortfolioScope,
+    PricingState,
+    RatioState,
+    SnapshotStatus,
 )
 from tokmo.values.session_gate import Market
 
@@ -31,11 +40,23 @@ _DIRECTION_RAW = re.compile(r"^[A-Za-z0-9가-힣 _./+()\-]{1,32}$")
 _TRADE_DATE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 
 
-def normalize_instrument_symbol_v1(market: Market, instrument_raw: object) -> str | None:
+def normalize_instrument_symbol_v1(
+    market: Market, instrument_raw: object
+) -> str | None:
     if type(instrument_raw) is not str:
         return None
-    grammar = _KR_SYMBOL if market is Market.KR else _US_SYMBOL if market is Market.US else None
-    return instrument_raw if grammar is not None and grammar.fullmatch(instrument_raw) else None
+    grammar = (
+        _KR_SYMBOL
+        if market is Market.KR
+        else _US_SYMBOL
+        if market is Market.US
+        else None
+    )
+    return (
+        instrument_raw
+        if grammar is not None and grammar.fullmatch(instrument_raw)
+        else None
+    )
 
 
 def map_execution_direction_v1(raw: str) -> ExecutionDirectionV1:
@@ -67,7 +88,9 @@ class CandidateSuppressionReasonV1(str, Enum):
     POSITION_CLOSED_NO_CURRENT_POSITION = "POSITION_CLOSED_NO_CURRENT_POSITION"
     POSITION_NOT_CANONICALLY_MATCHED = "POSITION_NOT_CANONICALLY_MATCHED"
     EXECUTION_INSTRUMENT_UNMATCHED = "EXECUTION_INSTRUMENT_UNMATCHED"
-    OPERATIONAL_INCIDENT_NO_PORTFOLIO_DETAIL = "OPERATIONAL_INCIDENT_NO_PORTFOLIO_DETAIL"
+    OPERATIONAL_INCIDENT_NO_PORTFOLIO_DETAIL = (
+        "OPERATIONAL_INCIDENT_NO_PORTFOLIO_DETAIL"
+    )
     CAP_NOT_SELECTED = "CAP_NOT_SELECTED"
     EXPLICITLY_DEFERRED_NO_CALL = "EXPLICITLY_DEFERRED_NO_CALL"
     SAMPLED_AUDIT_NO_CALL = "SAMPLED_AUDIT_NO_CALL"
@@ -160,7 +183,9 @@ class CompletedExecutionPayloadV1:
     completion_status: str
 
     def __post_init__(self):
-        if not isinstance(self.portfolio_scope, PortfolioScope) or not isinstance(self.market, Market):
+        if not isinstance(self.portfolio_scope, PortfolioScope) or not isinstance(
+            self.market, Market
+        ):
             raise ValueError("invalid execution scope/market")
         if normalize_instrument_symbol_v1(self.market, self.symbol) != self.symbol:
             raise ValueError("invalid execution symbol")
@@ -169,7 +194,8 @@ class CompletedExecutionPayloadV1:
         if map_execution_direction_v1(self.direction_raw_fact) is not self.direction:
             raise ValueError("execution direction mismatch")
         for value, name in (
-            (self.quantity, "quantity"), (self.unit_price_native, "unit_price_native"),
+            (self.quantity, "quantity"),
+            (self.unit_price_native, "unit_price_native"),
             (self.amount_native, "amount_native"),
         ):
             if not isinstance(value, Decimal) or not value.is_finite() or value < 0:
@@ -177,7 +203,9 @@ class CompletedExecutionPayloadV1:
         expected_currency = "KRW" if self.market is Market.KR else "USD"
         if self.currency != expected_currency:
             raise ValueError("invalid execution currency")
-        if type(self.trade_date) is not str or not _TRADE_DATE.fullmatch(self.trade_date):
+        if type(self.trade_date) is not str or not _TRADE_DATE.fullmatch(
+            self.trade_date
+        ):
             raise ValueError("invalid trade_date")
         try:
             parsed_date = date.fromisoformat(self.trade_date)
@@ -185,7 +213,11 @@ class CompletedExecutionPayloadV1:
             raise ValueError("invalid trade_date") from exc
         if parsed_date.isoformat() != self.trade_date:
             raise ValueError("invalid trade_date")
-        if not isinstance(self.filled_at, datetime) or self.filled_at.tzinfo is None or self.filled_at.utcoffset() is None:
+        if (
+            not isinstance(self.filled_at, datetime)
+            or self.filled_at.tzinfo is None
+            or self.filled_at.utcoffset() is None
+        ):
             raise ValueError("filled_at must be aware")
         if self.completion_status != "COMPLETED_EXECUTION_FACT":
             raise ValueError("invalid completion_status")
@@ -231,19 +263,26 @@ class PortfolioEventCandidatePayloadV1:
         if self.schema_version != 1 or self.analysis_kind is not AnalysisKind.EVENT:
             raise ValueError("invalid portfolio payload version")
         if self.material_kind not in {
-            MaterialKindV1.HOLDINGS_CHANGE, MaterialKindV1.QUOTE_STATE,
+            MaterialKindV1.HOLDINGS_CHANGE,
+            MaterialKindV1.QUOTE_STATE,
             MaterialKindV1.COMPLETED_EXECUTION,
         }:
             raise ValueError("invalid portfolio payload kind")
-        for value in (self.portfolio_semantic_digest, self.material_binding_digest,
-                      self.admission_policy_digest, self.payload_digest):
+        for value in (
+            self.portfolio_semantic_digest,
+            self.material_binding_digest,
+            self.admission_policy_digest,
+            self.payload_digest,
+        ):
             if not isinstance(value, str) or not _HASH.fullmatch(value):
                 raise ValueError("invalid portfolio payload digest")
         if self.mask_digest is not None and not _HASH.fullmatch(self.mask_digest):
             raise ValueError("invalid portfolio payload digest")
-        if (self.detail.portfolio_scope is not self.summary.portfolio_scope
-                or self.detail.market is not self.market
-                or self.detail.symbol != self.symbol):
+        if (
+            self.detail.portfolio_scope is not self.summary.portfolio_scope
+            or self.detail.market is not self.market
+            or self.detail.symbol != self.symbol
+        ):
             raise ValueError("portfolio payload identity mismatch")
 
 
@@ -289,7 +328,7 @@ def normalize_portfolio_payload_v1(value: object, _depth: int = 0) -> object:
     if isinstance(value, datetime):
         if value.tzinfo is None or value.utcoffset() is None:
             raise TypeError("unsupported portfolio payload type")
-        return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
     if isinstance(value, Enum):
         return normalize_portfolio_payload_v1(value.value, _depth + 1)
     if is_dataclass(value):
@@ -297,7 +336,9 @@ def normalize_portfolio_payload_v1(value: object, _depth: int = 0) -> object:
         if type(value).__module__ != __name__ or not params or not params.frozen:
             raise TypeError("unsupported portfolio payload type")
         return {
-            field.name: normalize_portfolio_payload_v1(getattr(value, field.name), _depth + 1)
+            field.name: normalize_portfolio_payload_v1(
+                getattr(value, field.name), _depth + 1
+            )
             for field in fields(value)
         }
     if type(value) in (tuple, list):
@@ -307,7 +348,9 @@ def normalize_portfolio_payload_v1(value: object, _depth: int = 0) -> object:
     if type(value) is frozenset:
         if len(value) > CANONICAL_MAX_LIST_COUNT:
             raise ValueError("maximum list count exceeded")
-        normalized = [normalize_portfolio_payload_v1(item, _depth + 1) for item in value]
+        normalized = [
+            normalize_portfolio_payload_v1(item, _depth + 1) for item in value
+        ]
         encoded = [(canonical_encode(item), item) for item in normalized]
         encoded.sort(key=lambda row: row[0])
         if any(encoded[i - 1][0] == encoded[i][0] for i in range(1, len(encoded))):
@@ -323,7 +366,9 @@ def normalize_portfolio_payload_v1(value: object, _depth: int = 0) -> object:
     raise TypeError("unsupported portfolio payload type")
 
 
-def compute_portfolio_payload_digest_v1(payload: PortfolioEventCandidatePayloadV1) -> str:
+def compute_portfolio_payload_digest_v1(
+    payload: PortfolioEventCandidatePayloadV1,
+) -> str:
     normalized = normalize_portfolio_payload_v1(payload)
     normalized.pop("payload_digest")
     preimage = {
@@ -334,7 +379,9 @@ def compute_portfolio_payload_digest_v1(payload: PortfolioEventCandidatePayloadV
     return hashlib.sha256(canonical_encode(preimage)).hexdigest()
 
 
-def canonical_portfolio_payload_bytes_v1(payload: PortfolioEventCandidatePayloadV1) -> bytes:
+def canonical_portfolio_payload_bytes_v1(
+    payload: PortfolioEventCandidatePayloadV1,
+) -> bytes:
     if compute_portfolio_payload_digest_v1(payload) != payload.payload_digest:
         raise ValueError("portfolio payload digest mismatch")
     return canonical_encode(normalize_portfolio_payload_v1(payload))

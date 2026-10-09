@@ -1,6 +1,6 @@
 import json
 import stat
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -15,27 +15,44 @@ from tokmo.records.fact_store import FactStore
 from tokmo.runtime.config import ConfigError, load_config
 from tokmo.values import SaveStatus, UnavailableFact, WtiFact
 
-NOW = datetime(2026, 7, 27, 1, 2, 3, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 27, 1, 2, 3, tzinfo=UTC)
 BODY = b'{"response":{"data":[{"period":"2026-07-24","series":"RWTC","value":"78.420","units":"$/BBL"}]}}'
 FIXTURE = Path(__file__).parent / "fixtures" / "eia_wti_success.json"
 POLICY = "tracer1-v1"
 
 RECORD_FIELDS = {
-    "record_id", "source", "series", "period", "value",
-    "units", "observed_at", "stored_at", "policy_version",
+    "record_id",
+    "source",
+    "series",
+    "period",
+    "value",
+    "units",
+    "observed_at",
+    "stored_at",
+    "policy_version",
 }
 DECISION_FIELDS = {
-    "decision_id", "run_id", "source_ref", "action", "reason",
-    "observed_at", "decided_at", "policy_version",
+    "decision_id",
+    "run_id",
+    "source_ref",
+    "action",
+    "reason",
+    "observed_at",
+    "decided_at",
+    "policy_version",
 }
 
 
 def fact(value="78.420"):
-    return WtiFact("eia_wti_rwtc", "RWTC", date(2026, 7, 24), Decimal(value), "$/BBL", NOW)
+    return WtiFact(
+        "eia_wti_rwtc", "RWTC", date(2026, 7, 24), Decimal(value), "$/BBL", NOW
+    )
 
 
 def make_store(root, record_id="rec-1"):
-    return FactStore(root / "facts.json", clock=lambda: NOW, id_factory=lambda: record_id)
+    return FactStore(
+        root / "facts.json", clock=lambda: NOW, id_factory=lambda: record_id
+    )
 
 
 def test_env_canonical_and_export_forms_load_equally(tmp_path):
@@ -46,13 +63,16 @@ def test_env_canonical_and_export_forms_load_equally(tmp_path):
     assert load_config(canonical) == load_config(exported)
 
 
-@pytest.mark.parametrize("content,reason", [
-    (None, "config_missing"),
-    ("MODE=tracer\nEIA_API_KEY=replace-me\n", "config_invalid"),
-    ("MODE=tracer\nMODE=tracer\nEIA_API_KEY=x\n", "config_invalid"),
-    ("MODE=live\nEIA_API_KEY=x\n", "config_invalid"),
-    ("MODE tracer\nEIA_API_KEY=x\n", "config_invalid"),
-])
+@pytest.mark.parametrize(
+    "content,reason",
+    [
+        (None, "config_missing"),
+        ("MODE=tracer\nEIA_API_KEY=replace-me\n", "config_invalid"),
+        ("MODE=tracer\nMODE=tracer\nEIA_API_KEY=x\n", "config_invalid"),
+        ("MODE=live\nEIA_API_KEY=x\n", "config_invalid"),
+        ("MODE tracer\nEIA_API_KEY=x\n", "config_invalid"),
+    ],
+)
 def test_env_errors_are_typed_and_do_not_expose_values(tmp_path, content, reason):
     path = tmp_path / "x.env"
     if content is not None:
@@ -75,23 +95,43 @@ def test_eia_success_accepts_string_and_json_number(raw):
     assert result == fact("78.420" if isinstance(raw, str) else "78.42")
 
 
-@pytest.mark.parametrize("body,reason", [
-    (b'{"response":{"data":[]}}', "no_published_data"),
-    (b'{"response":{"data":[{"period":"2026-07-24","series":"BAD","value":"1","units":"$/BBL"}]}}',
-     "contract_mismatch"),
-    (b'{bad', "parse_error"),
-])
+@pytest.mark.parametrize(
+    "body,reason",
+    [
+        (b'{"response":{"data":[]}}', "no_published_data"),
+        (
+            b'{"response":{"data":[{"period":"2026-07-24","series":"BAD","value":"1","units":"$/BBL"}]}}',
+            "contract_mismatch",
+        ),
+        (b"{bad", "parse_error"),
+    ],
+)
 def test_eia_bad_fixtures_return_typed_unavailable(body, reason):
     result = parse_wti_response(body, observed_at=NOW)
     assert isinstance(result, UnavailableFact)
     assert result.reason == reason
 
 
-@pytest.mark.parametrize("transport,reason,retry", [
-    (lambda _request: (_ for _ in ()).throw(TimeoutError()), "transport_error", None),
-    (lambda _request: (_ for _ in ()).throw(ConnectionError()), "transport_error", None),
-    (lambda _request: HttpResponse(429, b"", {"Retry-After": "17"}), "rate_limited", 17),
-])
+@pytest.mark.parametrize(
+    "transport,reason,retry",
+    [
+        (
+            lambda _request: (_ for _ in ()).throw(TimeoutError()),
+            "transport_error",
+            None,
+        ),
+        (
+            lambda _request: (_ for _ in ()).throw(ConnectionError()),
+            "transport_error",
+            None,
+        ),
+        (
+            lambda _request: HttpResponse(429, b"", {"Retry-After": "17"}),
+            "rate_limited",
+            17,
+        ),
+    ],
+)
 def test_transport_failures_map_to_typed_unavailable(transport, reason, retry):
     result = get_wti(api_key="fixture-key", transport=transport, clock=lambda: NOW)
     assert isinstance(result, UnavailableFact)
@@ -103,7 +143,9 @@ def test_success_is_atomically_saved_and_journaled(tmp_path):
         fact(),
         store=make_store(tmp_path),
         journal=DecisionJournal(tmp_path / "decisions.jsonl"),
-        clock=lambda: NOW, id_factory=lambda: "dec-1", run_id="run-1",
+        clock=lambda: NOW,
+        id_factory=lambda: "dec-1",
+        run_id="run-1",
     )
 
     assert result.save_result.status is SaveStatus.SAVED
@@ -124,7 +166,9 @@ def test_unavailable_skips_store_and_journals_reason(tmp_path):
         UnavailableFact("eia_wti_rwtc", "no_published_data", NOW),
         store=make_store(tmp_path),
         journal=DecisionJournal(tmp_path / "decisions.jsonl"),
-        clock=lambda: NOW, id_factory=lambda: "dec-1", run_id="run-1",
+        clock=lambda: NOW,
+        id_factory=lambda: "dec-1",
+        run_id="run-1",
     )
 
     assert result.save_result is None
@@ -142,10 +186,15 @@ def test_duplicate_and_conflict_are_deterministic_and_preserve_original(tmp_path
     conflict = store.save(fact("99"), policy_version=POLICY)
 
     assert (first.status, duplicate.status, conflict.status) == (
-        SaveStatus.SAVED, SaveStatus.DUPLICATE, SaveStatus.CONFLICT,
+        SaveStatus.SAVED,
+        SaveStatus.DUPLICATE,
+        SaveStatus.CONFLICT,
     )
     assert conflict.reason == "identity_conflict"
-    assert json.loads((tmp_path / "facts.json").read_text())["records"][0]["value"] == "78.42"
+    assert (
+        json.loads((tmp_path / "facts.json").read_text())["records"][0]["value"]
+        == "78.42"
+    )
 
 
 def test_corrupt_store_fails_closed_and_writes_diagnostic(tmp_path):
@@ -173,7 +222,9 @@ def test_replay_with_same_injections_returns_same_action_reason(tmp_path):
             parsed,
             store=make_store(root),
             journal=DecisionJournal(root / "decisions.jsonl"),
-            clock=lambda: NOW, id_factory=lambda: "dec-1", run_id="run-1",
+            clock=lambda: NOW,
+            id_factory=lambda: "dec-1",
+            run_id="run-1",
         ).decision
 
     first = execute(tmp_path / "a")
@@ -183,12 +234,30 @@ def test_replay_with_same_injections_returns_same_action_reason(tmp_path):
 
 def test_logger_flushes_debug_on_error_and_rca_and_all_files_are_private(tmp_path):
     logger = TracerLogger(tmp_path, clock=lambda: NOW, capacity=2)
-    logger.debug(run_id="run", stage="parse", action="BEGIN",
-                 reason="sanitized_fixture", source="eia_wti_rwtc", decision_id=None)
-    logger.error(run_id="run", stage="parse", action="FAIL",
-                 reason="parse_error", source="eia_wti_rwtc", decision_id=None)
-    logger.debug(run_id="run", stage="retry", action="AGAIN",
-                 reason="sanitized_fixture", source="eia_wti_rwtc", decision_id=None)
+    logger.debug(
+        run_id="run",
+        stage="parse",
+        action="BEGIN",
+        reason="sanitized_fixture",
+        source="eia_wti_rwtc",
+        decision_id=None,
+    )
+    logger.error(
+        run_id="run",
+        stage="parse",
+        action="FAIL",
+        reason="parse_error",
+        source="eia_wti_rwtc",
+        decision_id=None,
+    )
+    logger.debug(
+        run_id="run",
+        stage="retry",
+        action="AGAIN",
+        reason="sanitized_fixture",
+        source="eia_wti_rwtc",
+        decision_id=None,
+    )
     logger.flush_rca("run")
 
     for path in tmp_path.iterdir():
@@ -206,8 +275,12 @@ def test_fixture_composition_runs_end_to_end_and_replays(tmp_path):
 
     def execute(output_dir):
         return run_fixture(
-            env_path=env, fixture_path=FIXTURE, output_dir=output_dir,
-            clock=lambda: NOW, id_factory=iter(["rec", "dec"]).__next__, run_id="run",
+            env_path=env,
+            fixture_path=FIXTURE,
+            output_dir=output_dir,
+            clock=lambda: NOW,
+            id_factory=iter(["rec", "dec"]).__next__,
+            run_id="run",
         )
 
     first = execute(tmp_path / "first")
@@ -225,8 +298,12 @@ def test_artifacts_do_not_contain_secret_url_or_legacy_path(tmp_path):
     output_dir = tmp_path / "out"
 
     run_fixture(
-        env_path=env, fixture_path=FIXTURE, output_dir=output_dir,
-        clock=lambda: NOW, id_factory=iter(["rec", "dec"]).__next__, run_id="run",
+        env_path=env,
+        fixture_path=FIXTURE,
+        output_dir=output_dir,
+        clock=lambda: NOW,
+        id_factory=iter(["rec", "dec"]).__next__,
+        run_id="run",
     )
 
     artifacts = [path for path in output_dir.rglob("*") if path.is_file()]

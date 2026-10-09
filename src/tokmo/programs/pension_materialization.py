@@ -2,25 +2,31 @@
 
 Evaluates freshness and reminder events.
 """
+
 from __future__ import annotations
 
 import hashlib
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from tokmo.records.ops_kernel import OpsKernelConflictError, OpsKernelStore
+from tokmo.records.pension_revisions import PensionRegistryStore
+from tokmo.values.ops_kernel import (
+    AlertChannel,
+    AlertOrigin,
+    AlertOutboxV1,
+    AlertStatus,
+    IncidentKeyV1,
+    ProducerRole,
+    ReplayResult,
+    alert_dedupe_key,
+)
 from tokmo.values.pension_holdings import (
-    PensionHoldingsRevisionV1,
     PensionFreshnessV1,
+    PensionHoldingsRevisionV1,
     classify_pension_freshness,
     pension_account_scope,
 )
-from tokmo.records.ops_kernel import OpsKernelStore, OpsKernelConflictError
-from tokmo.records.pension_revisions import PensionRegistryStore
-from tokmo.values.ops_kernel import (
-    AlertChannel, AlertOrigin, AlertOutboxV1, AlertStatus, IncidentKeyV1,
-    ProducerRole, ReplayResult, alert_dedupe_key,
-)
-
 
 _KST = ZoneInfo("Asia/Seoul")
 
@@ -124,7 +130,10 @@ def evaluate_reminder(
 
     key = IncidentKeyV1("pension-excel-age-31d", active.revision_id)
     ops_kernel.observe_incident(
-        role, key=key, impact_ref=f"revision:{active.revision_id}", now=tick_now,
+        role,
+        key=key,
+        impact_ref=f"revision:{active.revision_id}",
+        now=tick_now,
     )
     alert_id = hashlib.sha256(
         f"pension-reminder:{active.revision_id}".encode()
@@ -135,23 +144,35 @@ def evaluate_reminder(
     # with the alert_id linkage; the next tick sees the reservation and
     # skips, while a surviving PENDING outbox row is delivered normally.
     registry.reserve_reminder(
-        reminder_id, active.revision_id, freshness.source_age_days, tick_now,
+        reminder_id,
+        active.revision_id,
+        freshness.source_age_days,
+        tick_now,
         alert_id=alert_id,
     )
 
     identity = f"{key.kind}\0{key.subject}"
     outbox = AlertOutboxV1(
-        alert_id=alert_id, origin=AlertOrigin.INCIDENT, decision_id=None,
-        incident_kind=key.kind, incident_subject=key.subject, requeue_of=None,
-        tick_id=tick_id, subject_id=active.revision_id,
+        alert_id=alert_id,
+        origin=AlertOrigin.INCIDENT,
+        decision_id=None,
+        incident_kind=key.kind,
+        incident_subject=key.subject,
+        requeue_of=None,
+        tick_id=tick_id,
+        subject_id=active.revision_id,
         dedupe_key=alert_dedupe_key(AlertOrigin.INCIDENT, identity, "HIGH"),
-        channel=AlertChannel.TELEGRAM, severity="HIGH",
-        body_evidence=(reminder_text(freshness),), created_at=tick_now,
+        channel=AlertChannel.TELEGRAM,
+        severity="HIGH",
+        body_evidence=(reminder_text(freshness),),
+        created_at=tick_now,
         status=AlertStatus.PENDING,
     )
     try:
         result = ops_kernel.record_pension_reminder_outbox(
-            role, outbox, activation_enabled=True,
+            role,
+            outbox,
+            activation_enabled=True,
         )
     except OpsKernelConflictError:
         # B3: A surviving outbox row with the same alert_id (from a crash

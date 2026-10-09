@@ -12,6 +12,7 @@ Trade records capture the full history for delta verification and realized P&L t
 
 No network, no production DB, no side effects. Pure function producing typed dataclasses.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -26,8 +27,8 @@ from tokmo.values.pension_holdings import (
     PENSION_HOLDINGS_SCHEMA_VERSION,
     PENSION_PARSER_VERSION,
     PensionHoldingsRevisionV1,
-    pension_semantic_digest,
     pension_reconciliation_digest,
+    pension_semantic_digest,
 )
 
 _KST = ZoneInfo("Asia/Seoul")
@@ -41,7 +42,12 @@ _PENSION_SYMBOL_MAP: dict[str, tuple[str, str, str, str]] = {
     # contract_mismatch — verified live read-only 2026-08-05). Corrected to the
     # live-verified current Toss identities: 0204D0 and 269540.
     "KODEX 현대차로보틱스밸류체인TOP3플러스": ("0204D0", "KRW", "KR", "market"),
-    "PLUS 미국S&P500(H)": ("269540", "KRW", "KR", "market"),  # KRX listed, KRW denominated
+    "PLUS 미국S&P500(H)": (
+        "269540",
+        "KRW",
+        "KR",
+        "market",
+    ),  # KRX listed, KRW denominated
     # 423160/431190 were also wrong, but unlike the pair above they are live
     # codes for other instruments, so the price API answered instead of
     # rejecting the batch and the error stayed invisible for two months.
@@ -69,11 +75,12 @@ _PENSION_SYMBOL_MAP: dict[str, tuple[str, str, str, str]] = {
 @dataclass(frozen=True)
 class PensionTradeRecordV1:
     """Typed trade record for pension transaction history."""
+
     trade_date: datetime
     product_name: str
-    trade_type: str   # normalized "BUY" or "SELL"
+    trade_type: str  # normalized "BUY" or "SELL"
     transaction_type_raw: str  # raw cell value, e.g. "매수", "매도정정1"
-    amount: Decimal    # total trade amount in KRW
+    amount: Decimal  # total trade amount in KRW
     balance_quantity: int  # running balance after this trade
     trade_quantity: int
     unit_price: Decimal
@@ -111,7 +118,11 @@ def _parse_holdings_table(lines: list[str]) -> dict[str, int]:
                     break  # table ended
                 continue
             cells = [c.strip() for c in stripped[1:-1].split("|")]
-            if len(cells) >= 2 and cells[0] != "상품" and not cells[0].startswith("---"):
+            if (
+                len(cells) >= 2
+                and cells[0] != "상품"
+                and not cells[0].startswith("---")
+            ):
                 try:
                     qty = int(cells[1].replace(",", ""))
                     result[cells[0]] = qty
@@ -135,9 +146,15 @@ def _parse_trade_history(lines: list[str]) -> list[PensionTradeRecordV1]:
                     break  # table ended
                 continue
             cells = [c.strip() for c in stripped[1:-1].split("|")]
-            if len(cells) >= 8 and cells[0] != "날짜" and not cells[0].startswith("---"):
+            if (
+                len(cells) >= 8
+                and cells[0] != "날짜"
+                and not cells[0].startswith("---")
+            ):
                 try:
-                    trade_date = datetime.strptime(cells[0], "%Y-%m-%d").replace(tzinfo=_KST)
+                    trade_date = datetime.strptime(cells[0], "%Y-%m-%d").replace(
+                        tzinfo=_KST
+                    )
                     product_name = cells[1]
                     trade_type = _classify_trade_type(cells[2])
                     amount = _parse_krw_amount(cells[3])
@@ -145,17 +162,19 @@ def _parse_trade_history(lines: list[str]) -> list[PensionTradeRecordV1]:
                     qty = int(cells[5].replace(",", ""))
                     unit_price = _parse_krw_amount(cells[6])
                     medium = cells[7]
-                    trades.append(PensionTradeRecordV1(
-                        trade_date=trade_date,
-                        product_name=product_name,
-                        trade_type=trade_type,
-                        transaction_type_raw=cells[2],
-                        amount=amount,
-                        balance_quantity=balance,
-                        trade_quantity=qty,
-                        unit_price=unit_price,
-                        trade_medium=medium,
-                    ))
+                    trades.append(
+                        PensionTradeRecordV1(
+                            trade_date=trade_date,
+                            product_name=product_name,
+                            trade_type=trade_type,
+                            transaction_type_raw=cells[2],
+                            amount=amount,
+                            balance_quantity=balance,
+                            trade_quantity=qty,
+                            unit_price=unit_price,
+                            trade_medium=medium,
+                        )
+                    )
                 except (ValueError, IndexError, InvalidOperation):
                     pass
     return trades
@@ -167,15 +186,19 @@ def _compute_avg_prices(trades: list[PensionTradeRecordV1]) -> dict[str, Decimal
     buy_quantities: dict[str, int] = {}
     for t in trades:
         if t.trade_type == "BUY":
-            buy_totals[t.product_name] = buy_totals.get(t.product_name, Decimal("0")) + t.amount
-            buy_quantities[t.product_name] = buy_quantities.get(t.product_name, 0) + t.trade_quantity
+            buy_totals[t.product_name] = (
+                buy_totals.get(t.product_name, Decimal(0)) + t.amount
+            )
+            buy_quantities[t.product_name] = (
+                buy_quantities.get(t.product_name, 0) + t.trade_quantity
+            )
     result: dict[str, Decimal] = {}
     for name, total in buy_totals.items():
         qty = buy_quantities.get(name, 0)
         if qty > 0:
-            result[name] = (total / Decimal(qty)).quantize(Decimal("1"))
+            result[name] = (total / Decimal(qty)).quantize(Decimal(1))
         else:
-            result[name] = Decimal("0")
+            result[name] = Decimal(0)
     return result
 
 
@@ -220,7 +243,7 @@ def migrate_legacy_md(
         if symbol_info is None:
             raise ValueError(f"unknown product name: {name}")
         symbol, currency, market_raw, market_field = symbol_info
-        avg_price = avg_prices.get(name, Decimal("0"))
+        avg_price = avg_prices.get(name, Decimal(0))
         item = HoldingItemV1(
             symbol=symbol,
             quantity=str(qty),

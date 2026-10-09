@@ -9,7 +9,7 @@ M9: tests verify dir 0700, db file 0600, no exposure window.
 import json
 import os
 import stat
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -20,33 +20,32 @@ from tokmo.records.fundamental_material_store import (
     FundamentalMaterialStore,
     FundamentalMaterialStoreError,
     FundamentalStoreAbsentError,
-    FundamentalStoreCorruptError,
     FundamentalStoreCandidateCapError,
+    FundamentalStoreCorruptError,
     FundamentalStoreVocabularyError,
     read_admissible_materials_ro,
 )
-from tokmo.values.quant_multifactor_core import MarketV1
 from tokmo.values.fundamental_materials import (
-    AccountingRegime,
     DATE_ONLY_POLICY_VERSION,
     DATE_ONLY_SESSION_HISTORY_SOURCE,
+    SEC_FUNDAMENTAL_SOURCE,
+    AccountingRegime,
     AvailableAtResolution,
     MetricEvidence,
     MetricSelection,
     OfficialFundamentalMaterialV1,
-    SEC_FUNDAMENTAL_SOURCE,
     StatementScope,
 )
+from tokmo.values.quant_multifactor_core import MarketV1
 
-
-_AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
+_AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
 
 FIXTURES = Path(__file__).parent / "fixtures" / "sec_companyfacts"
 
 
 def _typed_resolver(filed_raw: str) -> AvailableAtResolution:
     return AvailableAtResolution(
-        available_at=datetime(2025, 11, 3, 21, 0, tzinfo=timezone.utc),
+        available_at=datetime(2025, 11, 3, 21, 0, tzinfo=UTC),
         policy_version=DATE_ONLY_POLICY_VERSION,
         session_history_source=DATE_ONLY_SESSION_HISTORY_SOURCE,
     )
@@ -58,7 +57,7 @@ def _parse_fixture_materials():
         (FIXTURES / "aapl_minimal.json").read_bytes(),
         cik="0000320193",
         canonical_symbol="AAPL",
-        observed_at=datetime(2025, 11, 1, 12, 0, tzinfo=timezone.utc),
+        observed_at=datetime(2025, 11, 1, 12, 0, tzinfo=UTC),
         available_at_resolver=_typed_resolver,
         market="US_NASDAQ",
         statement_scope=StatementScope.CONSOLIDATED,
@@ -102,13 +101,13 @@ def _make_material(fiscal_year=2025, entity_id="0000320193", symbol="AAPL"):
         period_end=date(2025, 9, 27),
         filing_id="0000320193-25-000079",
         filed_at_raw="2025-10-31",
-        available_at=datetime(2025, 11, 3, 21, 0, tzinfo=timezone.utc),
+        available_at=datetime(2025, 11, 3, 21, 0, tzinfo=UTC),
         revision_of=None,
         taxonomy_namespace="us-gaap",
         taxonomy_version="2024",
         mapping_version="v1",
         revenue_ttm=MetricEvidence(
-            value=Decimal("416161000000"),
+            value=Decimal(416161000000),
             source_concept_id="RevenueFromContractWithCustomerExcludingAssessedTax",
             unit="USD",
             selection=MetricSelection.EXACT,
@@ -120,7 +119,7 @@ def _make_material(fiscal_year=2025, entity_id="0000320193", symbol="AAPL"):
         diluted_shares_outstanding=None,
         source_request_identity_digest="abc123",
         raw_body_sha256="def456",
-        observed_at=datetime(2025, 10, 31, 22, 0, tzinfo=timezone.utc),
+        observed_at=datetime(2025, 10, 31, 22, 0, tzinfo=UTC),
         as_of=_AS_OF,
     )
 
@@ -139,20 +138,38 @@ class TestFundamentalMaterialStore:
     def test_read_only_absent_creates_nothing(self, tmp_path):
         path = tmp_path / "missing" / "fundamentals.db"
         with pytest.raises(FundamentalStoreAbsentError):
-            read_admissible_materials_ro(path, canonical_symbol="AAPL", market=MarketV1.US_NYSE_NASDAQ, as_of=_AS_OF, limit=64)
+            read_admissible_materials_ro(
+                path,
+                canonical_symbol="AAPL",
+                market=MarketV1.US_NYSE_NASDAQ,
+                as_of=_AS_OF,
+                limit=64,
+            )
         assert not path.parent.exists()
 
     def test_read_only_corrupt_and_candidate_cap_are_typed(self, tmp_path):
         corrupt = tmp_path / "corrupt.db"
         corrupt.write_bytes(b"not sqlite")
         with pytest.raises(FundamentalStoreCorruptError):
-            read_admissible_materials_ro(corrupt, canonical_symbol="AAPL", market=MarketV1.US_NYSE_NASDAQ, as_of=_AS_OF, limit=64)
+            read_admissible_materials_ro(
+                corrupt,
+                canonical_symbol="AAPL",
+                market=MarketV1.US_NYSE_NASDAQ,
+                as_of=_AS_OF,
+                limit=64,
+            )
         path = tmp_path / "fundamentals.db"
         store = FundamentalMaterialStore(path)
         for year in range(2020, 2023):
             store.insert(_make_material(fiscal_year=year))
         with pytest.raises(FundamentalStoreCandidateCapError):
-            read_admissible_materials_ro(path, canonical_symbol="AAPL", market=MarketV1.US_NYSE_NASDAQ, as_of=_AS_OF, limit=2)
+            read_admissible_materials_ro(
+                path,
+                canonical_symbol="AAPL",
+                market=MarketV1.US_NYSE_NASDAQ,
+                as_of=_AS_OF,
+                limit=2,
+            )
 
     def test_read_only_exact_market_vocabulary_and_utc_sort(self, tmp_path):
         path = tmp_path / "fundamentals.db"
@@ -160,7 +177,11 @@ class TestFundamentalMaterialStore:
         instants = (
             ("US_NYSE", datetime.fromisoformat("2025-11-02T01:30:00-04:00"), 2022),
             ("US_NASDAQ", datetime.fromisoformat("2025-11-02T01:15:00-05:00"), 2023),
-            ("US_NYSE_NASDAQ", datetime.fromisoformat("2025-11-02T01:00:00-05:00"), 2024),
+            (
+                "US_NYSE_NASDAQ",
+                datetime.fromisoformat("2025-11-02T01:00:00-05:00"),
+                2024,
+            ),
         )
         for market, available, year in instants:
             material = _make_material(fiscal_year=year)
@@ -168,8 +189,18 @@ class TestFundamentalMaterialStore:
             object.__setattr__(material, "available_at", available)
             object.__setattr__(material, "_source_ref", material._compute_source_ref())
             store.insert(material)
-        rows = read_admissible_materials_ro(path, canonical_symbol="AAPL", market=MarketV1.US_NYSE_NASDAQ, as_of=datetime.fromisoformat("2025-11-02T06:30:00+00:00"), limit=64)
-        assert tuple(row.market for row in rows) == ("US_NASDAQ", "US_NYSE_NASDAQ", "US_NYSE")
+        rows = read_admissible_materials_ro(
+            path,
+            canonical_symbol="AAPL",
+            market=MarketV1.US_NYSE_NASDAQ,
+            as_of=datetime.fromisoformat("2025-11-02T06:30:00+00:00"),
+            limit=64,
+        )
+        assert tuple(row.market for row in rows) == (
+            "US_NASDAQ",
+            "US_NYSE_NASDAQ",
+            "US_NYSE",
+        )
 
     def test_read_only_stops_on_vocabulary_drift_and_handles_uri_chars(self, tmp_path):
         path = tmp_path / "store?#%" / "fundamentals.db"
@@ -179,28 +210,52 @@ class TestFundamentalMaterialStore:
         object.__setattr__(material, "_source_ref", material._compute_source_ref())
         store.insert(material)
         with pytest.raises(FundamentalStoreVocabularyError):
-            read_admissible_materials_ro(path, canonical_symbol="AAPL", market=MarketV1.US_NYSE_NASDAQ, as_of=_AS_OF, limit=64)
+            read_admissible_materials_ro(
+                path,
+                canonical_symbol="AAPL",
+                market=MarketV1.US_NYSE_NASDAQ,
+                as_of=_AS_OF,
+                limit=64,
+            )
 
     def test_candidate_cap_applies_after_utc_admissibility_filter(self, tmp_path):
         path = tmp_path / "fundamentals.db"
         store = FundamentalMaterialStore(path)
         for year in range(2100, 2165):
             future = _make_material(fiscal_year=year)
-            object.__setattr__(future, "available_at", datetime(year, 1, 1, tzinfo=timezone.utc))
+            object.__setattr__(future, "available_at", datetime(year, 1, 1, tzinfo=UTC))
             object.__setattr__(future, "_source_ref", future._compute_source_ref())
             store.insert(future)
         current = _make_material(fiscal_year=2025)
         store.insert(current)
-        assert read_admissible_materials_ro(path, canonical_symbol="AAPL", market=MarketV1.US_NYSE_NASDAQ, as_of=_AS_OF, limit=2) == (current,)
+        assert read_admissible_materials_ro(
+            path,
+            canonical_symbol="AAPL",
+            market=MarketV1.US_NYSE_NASDAQ,
+            as_of=_AS_OF,
+            limit=2,
+        ) == (current,)
 
     def test_unaware_available_at_corruption_keeps_specific_typed_error(self, tmp_path):
         path = tmp_path / "fundamentals.db"
         store = FundamentalMaterialStore(path)
         material = _make_material()
         store.insert(material)
-        _rewrite_payload(path, material.source_ref, lambda payload: payload.__setitem__("available_at", "2025-11-03T21:00:00"))
-        with pytest.raises(FundamentalStoreCorruptError, match="available_at_not_aware"):
-            read_admissible_materials_ro(path, canonical_symbol="AAPL", market=MarketV1.US_NYSE_NASDAQ, as_of=_AS_OF, limit=64)
+        _rewrite_payload(
+            path,
+            material.source_ref,
+            lambda payload: payload.__setitem__("available_at", "2025-11-03T21:00:00"),
+        )
+        with pytest.raises(
+            FundamentalStoreCorruptError, match="available_at_not_aware"
+        ):
+            read_admissible_materials_ro(
+                path,
+                canonical_symbol="AAPL",
+                market=MarketV1.US_NYSE_NASDAQ,
+                as_of=_AS_OF,
+                limit=64,
+            )
 
     def test_store_directory_is_private(self, tmp_path):
         """M9: parent directory must be 0700."""
@@ -289,7 +344,7 @@ class TestFundamentalMaterialStore:
             taxonomy_version=material.taxonomy_version,
             mapping_version=material.mapping_version,
             revenue_ttm=MetricEvidence(
-                value=Decimal("0"),
+                value=Decimal(0),
                 source_concept_id="Test",
                 unit="USD",
                 selection=MetricSelection.EXACT,
@@ -308,7 +363,7 @@ class TestFundamentalMaterialStore:
         retrieved = store.get_by_source_ref(material.source_ref)
         assert retrieved is not None
         assert retrieved.revenue_ttm is not None
-        assert retrieved.revenue_ttm.value == Decimal("0")
+        assert retrieved.revenue_ttm.value == Decimal(0)
 
     def test_parser_created_materials_roundtrip_exactly(self, tmp_path):
         """B1: materials produced by the production parser — which always
@@ -394,6 +449,7 @@ class TestFundamentalMaterialStore:
         store.insert(material)
         # Tamper with the payload_json directly
         import sqlite3
+
         conn = sqlite3.connect(str(tmp_path / "fundamentals.db"))
         row = conn.execute(
             "SELECT payload_json FROM fundamental_materials WHERE source_ref = ?",

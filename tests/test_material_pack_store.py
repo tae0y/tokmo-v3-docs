@@ -1,17 +1,9 @@
 import hashlib
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
-from tokmo.values.material_pack import (
-    JobKind,
-    build_material_pack_v1,
-    canonical_decode,
-    canonical_encode,
-    canonical_pack_bytes,
-    canonical_pack_file_bytes,
-)
 from tokmo.records.material_pack_store import (
     MaterialPackWriter,
     PackCorruptError,
@@ -20,6 +12,14 @@ from tokmo.records.material_pack_store import (
 )
 from tokmo.records.ops_paths import confine_to_parent
 from tokmo.records.receipt_store import ReceiptStore
+from tokmo.values.material_pack import (
+    JobKind,
+    build_material_pack_v1,
+    canonical_decode,
+    canonical_encode,
+    canonical_pack_bytes,
+    canonical_pack_file_bytes,
+)
 from tokmo.values.receipt_v1 import (
     AttemptStatus,
     AttemptV1,
@@ -28,8 +28,7 @@ from tokmo.values.receipt_v1 import (
     ReceiptV1,
 )
 
-
-NOW = datetime(2026, 7, 30, 1, 2, 3, 456789, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 30, 1, 2, 3, 456789, tzinfo=UTC)
 
 
 def make_pack(*, tick_id=17, payload=None):
@@ -40,7 +39,11 @@ def make_pack(*, tick_id=17, payload=None):
         market_partition=("KR",),
         payload=payload or {"markets": {"KR": []}},
         captured_at=NOW,
-        source_timestamps={"provider": None, "fetched": "2026-07-30T01:02:03Z", "stored": None},
+        source_timestamps={
+            "provider": None,
+            "fetched": "2026-07-30T01:02:03Z",
+            "stored": None,
+        },
         parser_version="calendar-v1",
     )
 
@@ -52,10 +55,12 @@ def saved_receipt_for_pack(tick_id, path=None):
         pack_path = str(path)
         pack_sha = hashlib.sha256(path.read_bytes()).hexdigest()
     return ReceiptV1(
-        1, JobKind.QUOTES,
+        1,
+        JobKind.QUOTES,
         AttemptV1(tick_id, AttemptStatus.SAVED, "saved", NOW),
         LastSuccessV1(tick_id, pack_path, pack_sha, NOW, NOW),
-        {"KR": MarketFreshness("KR", "fresh", tick_id, NOW)}, None,
+        {"KR": MarketFreshness("KR", "fresh", tick_id, NOW)},
+        None,
     )
 
 
@@ -66,9 +71,20 @@ def test_canonical_codec_is_closed_bounded_and_byte_stable():
         b'{"at":"2026-07-30T01:02:03.456789Z","items":["x",null],"n":3,'
         b'"\xed\x95\x9c\xea\xb8\x80":true}'
     )
-    assert canonical_encode(canonical_decode(encoded, max_bytes=len(encoded))) == encoded
+    assert (
+        canonical_encode(canonical_decode(encoded, max_bytes=len(encoded))) == encoded
+    )
 
-    for rejected in (1.0, b"x", bytearray(b"x"), complex(1), {1}, frozenset({1}), NOW.replace(tzinfo=None), {1: "x"}):
+    for rejected in (
+        1.0,
+        b"x",
+        bytearray(b"x"),
+        complex(1),
+        {1},
+        frozenset({1}),
+        NOW.replace(tzinfo=None),
+        {1: "x"},
+    ):
         with pytest.raises((TypeError, ValueError)):
             canonical_encode(rejected)
     with pytest.raises(ValueError, match="duplicate"):
@@ -101,7 +117,9 @@ def test_material_pack_factory_rejects_final_file_over_pack_limit():
         "markets": {
             "KR": [
                 {
-                    "symbol": symbol, "last_price": "1", "currency_raw": "KRW",
+                    "symbol": symbol,
+                    "last_price": "1",
+                    "currency_raw": "KRW",
                     "provider_timestamp": None,
                     "fetched_at": "2026-07-30T01:02:03Z",
                     "stored_at": "2026-07-30T01:02:03Z",
@@ -201,30 +219,57 @@ def test_temp_only_is_not_visible_and_receipt_controls_pack_visibility(tmp_path)
 def test_pack_exact_types_and_reader_root_confinement(tmp_path):
     with pytest.raises(ValueError):
         build_material_pack_v1(
-            schema_version=True, job=JobKind.QUOTES, tick_id=1,
-            market_partition=("KR",), payload={"markets": {"KR": []}},
+            schema_version=True,
+            job=JobKind.QUOTES,
+            tick_id=1,
+            market_partition=("KR",),
+            payload={"markets": {"KR": []}},
             captured_at=NOW,
             source_timestamps={"provider": None, "fetched": None, "stored": None},
             parser_version="v1",
         )
     with pytest.raises(ValueError):
-        make_pack(payload={"markets": {"KR": [{
-            "symbol": 123, "last_price": "1", "currency_raw": "KRW",
-            "provider_timestamp": None, "fetched_at": "2026-07-30T01:02:03Z",
-            "stored_at": "2026-07-30T01:02:03Z",
-        }]}})
+        make_pack(
+            payload={
+                "markets": {
+                    "KR": [
+                        {
+                            "symbol": 123,
+                            "last_price": "1",
+                            "currency_raw": "KRW",
+                            "provider_timestamp": None,
+                            "fetched_at": "2026-07-30T01:02:03Z",
+                            "stored_at": "2026-07-30T01:02:03Z",
+                        }
+                    ]
+                }
+            }
+        )
     with pytest.raises(ValueError):
-        make_pack(payload={"markets": {"KR": [{
-            "symbol": "005930", "last_price": "1", "currency_raw": "KRW",
-            "provider_timestamp": None, "fetched_at": "2026-07-30T01:02:03",
-            "stored_at": "2026-07-30T01:02:03Z",
-        }]}})
+        make_pack(
+            payload={
+                "markets": {
+                    "KR": [
+                        {
+                            "symbol": "005930",
+                            "last_price": "1",
+                            "currency_raw": "KRW",
+                            "provider_timestamp": None,
+                            "fetched_at": "2026-07-30T01:02:03",
+                            "stored_at": "2026-07-30T01:02:03Z",
+                        }
+                    ]
+                }
+            }
+        )
 
     writer = MaterialPackWriter(tmp_path / "owned", clock=lambda: NOW)
     outside = tmp_path / "outside.json"
     outside.write_bytes(canonical_pack_file_bytes(make_pack()))
     with pytest.raises(Exception):
-        writer.read_and_verify(outside, hashlib.sha256(outside.read_bytes()).hexdigest())
+        writer.read_and_verify(
+            outside, hashlib.sha256(outside.read_bytes()).hexdigest()
+        )
 
     inside = writer.write(make_pack(tick_id=18))
     symlink = inside.parent / "19.json"

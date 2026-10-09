@@ -18,16 +18,16 @@ Usage:
 """
 
 import argparse
-from datetime import datetime, timezone
 import os
-from pathlib import Path
 import sys
+from datetime import UTC, datetime
+from pathlib import Path
 
 _TOOL_DIR = Path(__file__).resolve().parent
 if str(_TOOL_DIR.parent / "src") not in sys.path:
     sys.path.insert(0, str(_TOOL_DIR.parent / "src"))
 
-from tokmo.records.prelaunch_markers import (  # noqa: E402
+from tokmo.records.prelaunch_markers import (
     MarkerError,
     create_pass_marker,
 )
@@ -59,10 +59,14 @@ def main(argv: list[str] | None = None) -> int:
         hmac_key = value.encode()
     try:
         marker = create_pass_marker(
-            Path(args.out), kind=args.kind, commit_sha=args.commit,
-            command=args.command, test_count=args.test_count,
-            created_at=datetime.now(timezone.utc),
-            provenance=args.provenance, hmac_key=hmac_key,
+            Path(args.out),
+            kind=args.kind,
+            commit_sha=args.commit,
+            command=args.command,
+            test_count=args.test_count,
+            created_at=datetime.now(UTC),
+            provenance=args.provenance,
+            hmac_key=hmac_key,
         )
     except MarkerError as error:
         print(f"marker refusal: {error}", file=sys.stderr)

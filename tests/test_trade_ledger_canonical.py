@@ -143,17 +143,17 @@ def test_payload_bytes_use_the_frozen_key_order_and_compact_separators():
     # Compact separators: no whitespace after "," or ":" anywhere.
     assert b", " not in payload
     assert b": " not in payload
-    assert "ETF매수".encode("utf-8") in payload
+    assert "ETF매수".encode() in payload
 
 
 def test_payload_bytes_are_nfc_normalized_and_otherwise_verbatim():
     composed = event(instrument_raw="Fixture 가나 ETF")
-    decomposed = event(
-        instrument_raw=unicodedata.normalize("NFD", "Fixture 가나 ETF")
-    )
+    decomposed = event(instrument_raw=unicodedata.normalize("NFD", "Fixture 가나 ETF"))
     assert composed.instrument_raw != decomposed.instrument_raw
     assert canonical_payload_bytes(composed) == canonical_payload_bytes(decomposed)
-    spaced = event(transaction_type_raw="매수정정*", instrument_raw="Fixture  double  space")
+    spaced = event(
+        transaction_type_raw="매수정정*", instrument_raw="Fixture  double  space"
+    )
     decoded = json.loads(canonical_payload_bytes(spaced).decode("utf-8"))
     assert decoded["transaction_type_raw"] == "매수정정*"
     assert decoded["instrument_raw"] == "Fixture  double  space"

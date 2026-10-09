@@ -1,9 +1,8 @@
 import ast
-from pathlib import Path
 import re
+from pathlib import Path
 
 import pytest
-
 
 NEW = (
     Path("src/tokmo/values/completed_execution.py"),
@@ -12,9 +11,16 @@ NEW = (
     Path("src/tokmo/programs/trades_sync.py"),
 )
 
-TRANSPORT_ROOTS = frozenset({
-    "urllib", "http", "httpx", "requests", "socket", "ssl",
-})
+TRANSPORT_ROOTS = frozenset(
+    {
+        "urllib",
+        "http",
+        "httpx",
+        "requests",
+        "socket",
+        "ssl",
+    }
+)
 WRITE_VERBS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 DYNAMIC_BUILTINS = frozenset({"__import__", "getattr", "eval", "exec"})
 
@@ -41,8 +47,12 @@ def _static_text(node):
     if isinstance(node, (ast.Tuple, ast.List)):
         parts = [_static_text(item) for item in node.elts]
         return None if any(item is None for item in parts) else "".join(parts)
-    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "join" and len(node.args) == 1):
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "join"
+        and len(node.args) == 1
+    ):
         separator, values = _static_text(node.func.value), _static_text(node.args[0])
         if separator is not None and isinstance(node.args[0], (ast.Tuple, ast.List)):
             items = [_static_text(item) for item in node.args[0].elts]
@@ -66,9 +76,9 @@ def _architecture_violations(source, *, programs=False):
                     violations.append("transport_import")
                 if alias.name == "importlib":
                     importlib_aliases.add(alias.asname or alias.name)
-                if programs and alias.name.startswith((
-                        "tokmo.facts", "tokmo.live", "tokmo.records",
-                        "tokmo.composition")):
+                if programs and alias.name.startswith(
+                    ("tokmo.facts", "tokmo.live", "tokmo.records", "tokmo.composition")
+                ):
                     violations.append("program_layer_import")
         elif isinstance(node, ast.ImportFrom):
             module = node.module or ""
@@ -76,24 +86,35 @@ def _architecture_violations(source, *, programs=False):
                 violations.append("transport_from_import")
             if module == "importlib":
                 import_module_aliases.update(
-                    alias.asname or alias.name for alias in node.names
+                    alias.asname or alias.name
+                    for alias in node.names
                     if alias.name == "import_module"
                 )
             if programs and (
-                    module.startswith((
-                        "tokmo.facts", "tokmo.live", "tokmo.records",
-                        "tokmo.composition"))
-                    or (
-                        module == "tokmo"
-                        and any(alias.name in {
-                            "facts", "live", "records", "composition",
-                        } for alias in node.names)
-                    )):
+                module.startswith(
+                    ("tokmo.facts", "tokmo.live", "tokmo.records", "tokmo.composition")
+                )
+                or (
+                    module == "tokmo"
+                    and any(
+                        alias.name
+                        in {
+                            "facts",
+                            "live",
+                            "records",
+                            "composition",
+                        }
+                        for alias in node.names
+                    )
+                )
+            ):
                 violations.append("program_layer_from_import")
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             names = {
-                arg.arg for arg in (
-                    tuple(node.args.posonlyargs) + tuple(node.args.args)
+                arg.arg
+                for arg in (
+                    tuple(node.args.posonlyargs)
+                    + tuple(node.args.args)
                     + tuple(node.args.kwonlyargs)
                 )
             }
@@ -102,8 +123,7 @@ def _architecture_violations(source, *, programs=False):
         elif isinstance(node, ast.Assign):
             if isinstance(node.value, ast.Name) and node.value.id in DYNAMIC_BUILTINS:
                 aliases.update(
-                    target.id for target in node.targets
-                    if isinstance(target, ast.Name)
+                    target.id for target in node.targets if isinstance(target, ast.Name)
                 )
         elif isinstance(node, ast.Call):
             name = node.func.id if isinstance(node.func, ast.Name) else None
@@ -128,9 +148,16 @@ def _architecture_violations(source, *, programs=False):
 def test_slice_c_has_no_order_write_or_private_live_surface():
     joined = "\n".join(path.read_text() for path in NEW)
     for forbidden in (
-        "account" + "Seq", "/api/", "/oauth", "openapi.tossinvest.com",
-        '"POST"', '"PUT"', '"PATCH"', '"DELETE"',
-        "tokmo.facts.toss_reads_live", "tokmo.composition",
+        "account" + "Seq",
+        "/api/",
+        "/oauth",
+        "openapi.tossinvest.com",
+        '"POST"',
+        '"PUT"',
+        '"PATCH"',
+        '"DELETE"',
+        "tokmo.facts.toss_reads_live",
+        "tokmo.composition",
     ):
         assert forbidden not in joined
     program = NEW[-1].read_text()
@@ -147,9 +174,13 @@ def test_slice_c_has_no_order_write_or_private_live_surface():
 
 def test_slice_c_all_new_modules_reject_dynamic_transport_and_write_indirection():
     for path in NEW:
-        assert _architecture_violations(
-            path.read_text(), programs=path.parts[-2] == "programs",
-        ) == ()
+        assert (
+            _architecture_violations(
+                path.read_text(),
+                programs=path.parts[-2] == "programs",
+            )
+            == ()
+        )
         tree = ast.parse(path.read_text())
         if path.parts[-2] == "values":
             assert not any(
@@ -160,56 +191,67 @@ def test_slice_c_all_new_modules_reject_dynamic_transport_and_write_indirection(
                 for node in ast.walk(tree)
             )
         assert not any(
-            isinstance(node, ast.Constant) and isinstance(node.value, str)
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
             and re.search(r"https?://|/api/|/oauth", node.value)
             for node in ast.walk(tree)
         )
 
 
-@pytest.mark.parametrize("snippet", (
-    "import urllib.request",
-    "from http.client import HTTPSConnection",
-    "import httpx",
-    "import requests.sessions",
-    "import socket",
-    "from ssl import SSLContext",
-    "import importlib\nimportlib.import_module('ur' + 'llib.request')",
-    "from importlib import import_module as load\nload('http' + 'x')",
-    "__import__('requests')",
-    "g = getattr\ng(object(), 'send')",
-    "eval('1 + 1')",
-    "exec('pass')",
-    "verb = 'PO' + 'ST'",
-    "verb = ''.join(('DE', 'LETE'))",
-    "verb = f\"{'PA'}TCH\"",
-    "def request(method=None): pass",
-    "client(method='GET')",
-))
+@pytest.mark.parametrize(
+    "snippet",
+    (
+        "import urllib.request",
+        "from http.client import HTTPSConnection",
+        "import httpx",
+        "import requests.sessions",
+        "import socket",
+        "from ssl import SSLContext",
+        "import importlib\nimportlib.import_module('ur' + 'llib.request')",
+        "from importlib import import_module as load\nload('http' + 'x')",
+        "__import__('requests')",
+        "g = getattr\ng(object(), 'send')",
+        "eval('1 + 1')",
+        "exec('pass')",
+        "verb = 'PO' + 'ST'",
+        "verb = ''.join(('DE', 'LETE'))",
+        "verb = f\"{'PA'}TCH\"",
+        "def request(method=None): pass",
+        "client(method='GET')",
+    ),
+)
 def test_architecture_guard_rejects_bypass_snippets(snippet):
     assert _architecture_violations(snippet)
 
 
-@pytest.mark.parametrize("snippet", (
-    "import tokmo.facts.toss_reads",
-    "import tokmo.live",
-    "from tokmo.records import order_scan_state",
-    "from tokmo import composition",
-))
+@pytest.mark.parametrize(
+    "snippet",
+    (
+        "import tokmo.facts.toss_reads",
+        "import tokmo.live",
+        "from tokmo.records import order_scan_state",
+        "from tokmo import composition",
+    ),
+)
 def test_program_architecture_guard_rejects_forbidden_tokmo_layers(snippet):
     assert _architecture_violations(snippet, programs=True)
 
 
 def test_architecture_guard_allows_legitimate_local_sql_delete():
-    assert _architecture_violations(
-        "db.execute('DELETE FROM execution_quarantine WHERE account_scope=?')"
-    ) == ()
+    assert (
+        _architecture_violations(
+            "db.execute('DELETE FROM execution_quarantine WHERE account_scope=?')"
+        )
+        == ()
+    )
 
 
 def test_toss_orders_source_registry_uses_plain_literal():
     source = Path("src/tokmo/records/trade_ledger_preflight.py").read_text()
     tree = ast.parse(source)
     literals = [
-        node.value for node in ast.walk(tree)
+        node.value
+        for node in ast.walk(tree)
         if isinstance(node, ast.Constant) and node.value == "toss-orders-v1"
     ]
     assert len(literals) >= 2

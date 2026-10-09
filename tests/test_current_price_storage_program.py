@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from tokmo.facts.toss_prices import TossPriceQueryOutcome
 from tokmo.programs.current_price_storage import (
@@ -8,8 +8,7 @@ from tokmo.programs.current_price_storage import (
 from tokmo.records.latest_quotes import LatestQuoteSaveReceipt
 from tokmo.values import TossCurrentPriceFact
 
-
-NOW = datetime(2026, 7, 28, 1, 2, 3, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 28, 1, 2, 3, tzinfo=UTC)
 FACT = TossCurrentPriceFact(
     source="fixture-source",
     symbol="FixtureA",
@@ -31,9 +30,7 @@ class StubStore:
 
 
 def test_query_failure_and_protocol_failure_make_zero_store_calls():
-    store = StubStore(
-        LatestQuoteSaveReceipt("SAVED", 1, 0, "saved", NOW)
-    )
+    store = StubStore(LatestQuoteSaveReceipt("SAVED", 1, 0, "saved", NOW))
 
     failed = store_current_price_outcome(
         TossPriceQueryOutcome("rate_limited"), store=store
@@ -46,9 +43,7 @@ def test_query_failure_and_protocol_failure_make_zero_store_calls():
 
 
 def test_success_stores_exactly_once_and_store_failure_is_not_retried():
-    success_store = StubStore(
-        LatestQuoteSaveReceipt("SAVED", 1, 0, "saved", NOW)
-    )
+    success_store = StubStore(LatestQuoteSaveReceipt("SAVED", 1, 0, "saved", NOW))
     saved = store_current_price_outcome(
         TossPriceQueryOutcome("success", (FACT,)), store=success_store
     )

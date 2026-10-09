@@ -15,8 +15,8 @@ over.
 """
 
 from collections import Counter
-from datetime import datetime
 from collections.abc import Callable
+from datetime import datetime
 
 from tokmo.values import (
     TOSS_SOURCE,
@@ -122,8 +122,9 @@ def field_presence(facts) -> dict:
     items = [holding for fact in facts for holding in fact.holdings]
     return {
         "avg_price_fields": sorted({item.avg_price_field for item in items}),
-        "market_fields": sorted({item.market_field for item in items
-                                 if item.market_field}),
+        "market_fields": sorted(
+            {item.market_field for item in items if item.market_field}
+        ),
         "item_counts": [len(fact.holdings) for fact in facts],
     }
 
@@ -149,8 +150,7 @@ def captures(records) -> list[tuple[str, list[dict]]]:
         if record.get("source") != TOSS_SOURCE:
             continue
         grouped.setdefault(record["captured_at"], []).append(record)
-    return sorted(grouped.items(),
-                  key=lambda item: datetime.fromisoformat(item[0]))
+    return sorted(grouped.items(), key=lambda item: datetime.fromisoformat(item[0]))
 
 
 def summarise_capture(records) -> dict:
@@ -162,10 +162,12 @@ def summarise_capture(records) -> dict:
         "captured_at": ordered[-1][0] if ordered else None,
         "accounts": len(current),
         "holdings_items": len(items),
-        "currencies_observed": len({item["currency"] for item in items
-                                    if item["currency"]}),
-        "markets_observed": len({item["market_raw"] for item in items
-                                 if item["market_raw"]}),
+        "currencies_observed": len(
+            {item["currency"] for item in items if item["currency"]}
+        ),
+        "markets_observed": len(
+            {item["market_raw"] for item in items if item["market_raw"]}
+        ),
     }
 
 
@@ -201,11 +203,14 @@ def diff_latest(records) -> dict:
                 added.append(_entry(key, after))
             continue
         if any(before[field] != after[field] for field in DIFF_FIELDS):
-            changed.append({
-                "account_ordinal": key[0], "symbol": key[1],
-                **{f"{field}_from": before[field] for field in DIFF_FIELDS},
-                **{f"{field}_to": after[field] for field in DIFF_FIELDS},
-            })
+            changed.append(
+                {
+                    "account_ordinal": key[0],
+                    "symbol": key[1],
+                    **{f"{field}_from": before[field] for field in DIFF_FIELDS},
+                    **{f"{field}_to": after[field] for field in DIFF_FIELDS},
+                }
+            )
     for key in sorted(then_positions):
         if key not in now_positions:
             removed.append(_entry(key, then_positions[key]))
@@ -218,7 +223,9 @@ def diff_latest(records) -> dict:
         "added": added,
         "removed": removed,
         "counts": {
-            "changed": len(changed), "added": len(added), "removed": len(removed),
+            "changed": len(changed),
+            "added": len(added),
+            "removed": len(removed),
             "current_items": len(now_positions),
             "previous_items": len(then_positions),
         },
@@ -238,20 +245,27 @@ def format_report(diff: dict) -> str:
 
 
 def _positions(records) -> dict[tuple[int, str], dict]:
-    return {(record["account_ordinal"], item["symbol"]): item
-            for record in records for item in record["holdings"]}
+    return {
+        (record["account_ordinal"], item["symbol"]): item
+        for record in records
+        for item in record["holdings"]
+    }
 
 
 def _entry(key: tuple[int, str], item: dict) -> dict:
-    return {"account_ordinal": key[0], "symbol": key[1],
-            **{field: item[field] for field in DIFF_FIELDS}}
+    return {
+        "account_ordinal": key[0],
+        "symbol": key[1],
+        **{field: item[field] for field in DIFF_FIELDS},
+    }
 
 
 def _counts_differ(current, previous) -> bool:
     if not previous:
         return False
-    return ({record["account_count"] for record in current}
-            != {record["account_count"] for record in previous})
+    return {record["account_count"] for record in current} != {
+        record["account_count"] for record in previous
+    }
 
 
 def diff_latest_typed(
@@ -284,10 +298,15 @@ def diff_latest_typed(
             "current_captured_at": None,
             "previous_captured_at": None,
             "account_count_changed": False,
-            "changed": [], "added": [], "removed": [],
+            "changed": [],
+            "added": [],
+            "removed": [],
             "counts": {
-                "changed": 0, "added": 0, "removed": 0,
-                "current_items": 0, "previous_items": 0,
+                "changed": 0,
+                "added": 0,
+                "removed": 0,
+                "current_items": 0,
+                "previous_items": 0,
             },
         }
 
@@ -295,8 +314,8 @@ def diff_latest_typed(
     then_sig = _typed_signatures(previous) if previous else Counter()
 
     # Cancel exact multiplicities; the remainder is added/removed.
-    net_added = now_sig - then_sig          # surplus in current
-    net_removed = then_sig - now_sig        # surplus in previous
+    net_added = now_sig - then_sig  # surplus in current
+    net_removed = then_sig - now_sig  # surplus in previous
 
     added = [_sig_entry(sig) for sig in sorted(net_added.elements())]
     removed = [_sig_entry(sig) for sig in sorted(net_removed.elements())]
@@ -304,13 +323,16 @@ def diff_latest_typed(
     return {
         "current_captured_at": current.captured_at.isoformat(),
         "previous_captured_at": previous.captured_at.isoformat()
-            if previous is not None else None,
+        if previous is not None
+        else None,
         "account_count_changed": _typed_counts_differ(previous, current),
         "changed": [],
         "added": added,
         "removed": removed,
         "counts": {
-            "changed": 0, "added": len(added), "removed": len(removed),
+            "changed": 0,
+            "added": len(added),
+            "removed": len(removed),
             "current_items": sum(now_sig.values()),
             "previous_items": sum(then_sig.values()),
         },
@@ -329,10 +351,8 @@ def summarise_typed_snapshot(snapshot) -> dict:
         "captured_at": snapshot.captured_at.isoformat(),
         "accounts": snapshot.discovered_account_count,
         "holdings_items": len(items),
-        "currencies_observed": len({item.currency for item in items
-                                    if item.currency}),
-        "markets_observed": len({item.market_raw for item in items
-                                 if item.market_raw}),
+        "currencies_observed": len({item.currency for item in items if item.currency}),
+        "markets_observed": len({item.market_raw for item in items if item.market_raw}),
     }
 
 

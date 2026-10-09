@@ -6,13 +6,12 @@ stays fail-closed on unpinned tokens (SDS_GAP-1/2); tests that admit ETFs
 inject a clearly reconstructed vocabulary.
 """
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from types import MappingProxyType
 
 import pytest
 
-
-NOW = datetime(2026, 8, 21, 21, 10, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 21, 21, 10, tzinfo=UTC)
 SESSION = date(2026, 8, 21)
 TOSS_SCOPE = "toss-acct-" + "a" * 24
 PENSION_SCOPE = "pension-excel-" + "b" * 24
@@ -29,10 +28,16 @@ def _holdings(rows, *, captured_at=NOW):
     accounts = []
     identity_map = {}
     for ordinal, (scope, items) in enumerate(rows, start=1):
-        accounts.append(AccountHoldingsV1(scope, ordinal, tuple(
-            HoldingItemV1(symbol, "1", "100", currency, market_raw, None)
-            for symbol, market_raw, currency in items
-        )))
+        accounts.append(
+            AccountHoldingsV1(
+                scope,
+                ordinal,
+                tuple(
+                    HoldingItemV1(symbol, "1", "100", currency, market_raw, None)
+                    for symbol, market_raw, currency in items
+                ),
+            )
+        )
         identity_map[scope] = AccountScopeIdentityV1(scope, "brokerage", ordinal, None)
     return CurrentHoldingsV1(1, tuple(accounts), True, captured_at, identity_map)
 
@@ -45,10 +50,12 @@ def _reconstructed_vocabulary():
         active_status_tokens=frozenset({"ACTIVE"}),
         stock_security_type_token="STOCK",
         etf_security_type_tokens=frozenset({"RECONSTRUCTED_ETF"}),
-        market_tokens=MappingProxyType({
-            "KOSPI": MarketV1.KR_KOSPI,
-            "RECONSTRUCTED_KOSDAQ": MarketV1.KR_KOSDAQ,
-        }),
+        market_tokens=MappingProxyType(
+            {
+                "KOSPI": MarketV1.KR_KOSPI,
+                "RECONSTRUCTED_KOSDAQ": MarketV1.KR_KOSDAQ,
+            }
+        ),
     )
 
 
@@ -84,27 +91,32 @@ def _five_member_infos():
         _stock_info("RCS002"),
     ]
     for index in range(1, 4):
-        infos.append(_stock_info(
-            f"RCE00{index}",
-            security_type="RECONSTRUCTED_ETF",
-            is_common_share=False,
-        ))
+        infos.append(
+            _stock_info(
+                f"RCE00{index}",
+                security_type="RECONSTRUCTED_ETF",
+                is_common_share=False,
+            )
+        )
     return tuple(infos)
 
 
 def test_kr_cohort_predicate_includes_personal_kr_and_excludes_pension_and_us():
     from tokmo.facts.quant_kr_membership import predict_kr_personal_cohort
 
-    holdings = _holdings((
-        (TOSS_SCOPE, (
-            ("RCS002", "KR", "KRW"),
-            ("RCS001", "KR", "KRW"),
-            ("RCUS01", "US", "USD"),
-        )),
-        (PENSION_SCOPE, (
-            ("RCP001", "KR", "KRW"),
-        )),
-    ))
+    holdings = _holdings(
+        (
+            (
+                TOSS_SCOPE,
+                (
+                    ("RCS002", "KR", "KRW"),
+                    ("RCS001", "KR", "KRW"),
+                    ("RCUS01", "US", "USD"),
+                ),
+            ),
+            (PENSION_SCOPE, (("RCP001", "KR", "KRW"),)),
+        )
+    )
     assert predict_kr_personal_cohort(holdings) == ("RCS001", "RCS002")
     assert predict_kr_personal_cohort(None) == ()
 
@@ -113,14 +125,14 @@ def test_kr_membership_plan_is_exactly_one_stocks_start_and_bounded():
     from tokmo.facts.quant_kr_membership import kr_membership_operation_plan
 
     plan = kr_membership_operation_plan(
-        ("RCS002", "RCS001", "RCE001", "RCE002", "RCE003"), SESSION,
+        ("RCS002", "RCS001", "RCE001", "RCE002", "RCE003"),
+        SESSION,
     )
-    assert plan == (
-        ("MEMBERSHIP_TOSS_STOCKS", "membership:toss-stocks:2026-08-21"),
-    )
+    assert plan == (("MEMBERSHIP_TOSS_STOCKS", "membership:toss-stocks:2026-08-21"),)
     with pytest.raises(ValueError):  # 6-member cohort refused pre-wire
         kr_membership_operation_plan(
-            tuple(f"RC000{index}" for index in range(1, 7)), SESSION,
+            tuple(f"RC000{index}" for index in range(1, 7)),
+            SESSION,
         )
     with pytest.raises(ValueError):
         kr_membership_operation_plan((), SESSION)
@@ -141,13 +153,9 @@ def test_five_member_synthetic_cohort_admits_under_reconstructed_vocabulary():
     )
     assert result.refusals == ()
     assert tuple(member.symbol for member in result.admitted) == expected
-    assert all(
-        member.market is MarketV1.KR_KOSPI for member in result.admitted
-    )
+    assert all(member.market is MarketV1.KR_KOSPI for member in result.admitted)
     stock_members = [m for m in result.admitted if m.security_type == "STOCK"]
-    etf_members = [
-        m for m in result.admitted if m.security_type == "RECONSTRUCTED_ETF"
-    ]
+    etf_members = [m for m in result.admitted if m.security_type == "RECONSTRUCTED_ETF"]
     assert (len(stock_members), len(etf_members)) == (2, 3)
 
 
@@ -192,12 +200,15 @@ def test_each_admission_gate_refuses_fail_closed():
         "status_not_active": _stock_info("RCX001", status="NEW_STATUS"),
         "not_common_share": _stock_info("RCX001", is_common_share=False),
         "market_detail_missing": _stock_info(
-            "RCX001", korean_market_detail=MISSING,
+            "RCX001",
+            korean_market_detail=MISSING,
         ),
     }
     for expected_reason, info in cases.items():
         result = admit_kr_membership(
-            (info,), expected_symbols=("RCX001",), vocabulary=vocabulary,
+            (info,),
+            expected_symbols=("RCX001",),
+            vocabulary=vocabulary,
         )
         assert result.admitted == ()
         assert result.refusals == (("RCX001", expected_reason),), expected_reason
@@ -231,7 +242,9 @@ def test_provenance_digest_is_deterministic_over_typed_fields_only():
     infos = _five_member_infos()
     expected = tuple(sorted(info.symbol for info in infos))
     admitted = admit_kr_membership(
-        infos, expected_symbols=expected, vocabulary=vocabulary,
+        infos,
+        expected_symbols=expected,
+        vocabulary=vocabulary,
     ).admitted
     digest = kr_provenance_digest(
         members=admitted,
@@ -270,7 +283,9 @@ def test_admitted_members_bridge_to_material_member_records():
     infos = _five_member_infos()
     expected = tuple(sorted(info.symbol for info in infos))
     admitted = admit_kr_membership(
-        infos, expected_symbols=expected, vocabulary=vocabulary,
+        infos,
+        expected_symbols=expected,
+        vocabulary=vocabulary,
     ).admitted
     members = kr_material_members(admitted)
     assert [row["symbol"] for row in members] == list(expected)

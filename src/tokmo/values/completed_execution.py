@@ -46,7 +46,10 @@ def is_completed_execution(page_provenance_closed: bool, order: Order) -> bool:
 
 
 def to_completed_execution(
-    order: Order, *, account_scope: str, classified_market: Market | None,
+    order: Order,
+    *,
+    account_scope: str,
+    classified_market: Market | None,
     page_provenance_closed: bool,
 ) -> CompletedExecutionFact | ExecutionCompletenessViolation:
     execution = order.execution
@@ -63,37 +66,61 @@ def to_completed_execution(
     if execution.filled_at.tzinfo is None or execution.filled_at.utcoffset() is None:
         return ExecutionCompletenessViolation("filled_at_invalid")
     return CompletedExecutionFact(
-        account_scope, order.order_id, order.symbol, order.side, order.currency,
-        execution.filled_quantity, execution.average_filled_price,
-        execution.filled_amount, execution.filled_at, execution.commission,
-        execution.tax, execution.settlement_date, classified_market,
+        account_scope,
+        order.order_id,
+        order.symbol,
+        order.side,
+        order.currency,
+        execution.filled_quantity,
+        execution.average_filled_price,
+        execution.filled_amount,
+        execution.filled_at,
+        execution.commission,
+        execution.tax,
+        execution.settlement_date,
+        classified_market,
     )
 
 
 def to_trade_ledger_event(
-    fact: CompletedExecutionFact, *, source: str = "toss-orders-v1",
+    fact: CompletedExecutionFact,
+    *,
+    source: str = "toss-orders-v1",
 ) -> TradeLedgerEvent:
     values = [
-        canonicalize_decimal30(value) for value in (
-            fact.filled_quantity, fact.average_filled_price, fact.filled_amount,
+        canonicalize_decimal30(value)
+        for value in (
+            fact.filled_quantity,
+            fact.average_filled_price,
+            fact.filled_amount,
         )
     ]
     nullable = [
         None if value is None else canonicalize_decimal30(value)
         for value in (fact.commission, fact.tax)
     ]
-    if any(isinstance(value, Decimal30CanonicalizationViolation)
-           for value in (*values, *nullable)):
+    if any(
+        isinstance(value, Decimal30CanonicalizationViolation)
+        for value in (*values, *nullable)
+    ):
         raise ValueError("invalid_execution_decimal")
     return TradeLedgerEvent(
-        source=source, account_scope=fact.account_scope,
-        source_record_key=fact.order_id, event_kind="EXECUTION",
+        source=source,
+        account_scope=fact.account_scope,
+        source_record_key=fact.order_id,
+        event_kind="EXECUTION",
         supersedes_source_record_key=None,
         trade_date=fact.filled_at.astimezone(
             ZoneInfo(MARKET_TIMEZONE[fact.classified_market])
         ).date(),
-        transaction_type_raw=fact.side, instrument_raw=fact.symbol,
-        quantity=values[0], unit_price=values[1], amount=values[2],
-        medium_raw="toss-orders", currency_raw=fact.currency,
-        settlement_date=fact.settlement_date, fee=nullable[0], tax=nullable[1],
+        transaction_type_raw=fact.side,
+        instrument_raw=fact.symbol,
+        quantity=values[0],
+        unit_price=values[1],
+        amount=values[2],
+        medium_raw="toss-orders",
+        currency_raw=fact.currency,
+        settlement_date=fact.settlement_date,
+        fee=nullable[0],
+        tax=nullable[1],
     )

@@ -8,14 +8,14 @@ membership material bytes plus their sha256 digest; the digest binding is
 validated in application code on every write and read (§9).
 """
 
-from dataclasses import dataclass
-from datetime import datetime, timedelta
-from hashlib import sha256
 import fcntl
 import json
 import os
-from pathlib import Path
 import sqlite3
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from hashlib import sha256
+from pathlib import Path
 from types import SimpleNamespace
 
 from tokmo.records.durability import fsync_directory
@@ -39,7 +39,6 @@ from tokmo.values.quant_profiles import (
     validate_material_binding,
 )
 from tokmo.values.quant_recurring import QuantTerminalStateV1
-
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS quant_profile_due(
@@ -92,12 +91,14 @@ CREATE TABLE IF NOT EXISTS quant_profile_result(
 PRAGMA user_version=1;
 """
 
-_TERMINAL_STATES = frozenset({
-    QuantTerminalStateV1.SUCCEEDED,
-    QuantTerminalStateV1.NO_PACK,
-    QuantTerminalStateV1.FAILED,
-    QuantTerminalStateV1.UNKNOWN,
-})
+_TERMINAL_STATES = frozenset(
+    {
+        QuantTerminalStateV1.SUCCEEDED,
+        QuantTerminalStateV1.NO_PACK,
+        QuantTerminalStateV1.FAILED,
+        QuantTerminalStateV1.UNKNOWN,
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -221,9 +222,7 @@ class QuantProfileReceiptStore:
             with private_creation():
                 connection = connect_private(self.path)
         else:
-            connection = connect_private(
-                self.path, mode="ro" if readonly else "rwc"
-            )
+            connection = connect_private(self.path, mode="ro" if readonly else "rwc")
         connection.row_factory = sqlite3.Row
         return connection, created
 
@@ -251,7 +250,8 @@ class QuantProfileReceiptStore:
             reference.close()
 
     def acquire_identity_lease(
-        self, identity_digest: str,
+        self,
+        identity_digest: str,
     ) -> QuantProfileIdentityLeaseV1 | None:
         if not _valid_digest(identity_digest):
             raise ValueError("identity_digest")
@@ -324,10 +324,16 @@ class QuantProfileReceiptStore:
                     identity.completed_session_date.isoformat(),
                     identity.universe_policy_version,
                 )
-                actual = tuple(row[key] for key in (
-                    "profile_id", "policy_version", "market",
-                    "completed_session_date", "universe_policy_version",
-                ))
+                actual = tuple(
+                    row[key]
+                    for key in (
+                        "profile_id",
+                        "policy_version",
+                        "market",
+                        "completed_session_date",
+                        "universe_policy_version",
+                    )
+                )
                 if actual != expected:
                     connection.execute("ROLLBACK")
                     raise ValueError("identity_conflict")
@@ -374,8 +380,10 @@ class QuantProfileReceiptStore:
                     "FROM quant_profile_due WHERE identity_digest=?",
                     (identity_digest,),
                 ).fetchone()
-                profile = None if due_row is None else (
-                    QUANT_PROFILE_REGISTRY.get(due_row["profile_id"])
+                profile = (
+                    None
+                    if due_row is None
+                    else (QUANT_PROFILE_REGISTRY.get(due_row["profile_id"]))
                 )
                 if profile is None:
                     connection.execute("ROLLBACK")
@@ -390,7 +398,8 @@ class QuantProfileReceiptStore:
                 # this due row before the result row may exist.
                 try:
                     validate_material_binding(
-                        due=_due_binding_view(due_row), result=result,
+                        due=_due_binding_view(due_row),
+                        result=result,
                     )
                 except ValueError:
                     connection.execute("ROLLBACK")
@@ -526,6 +535,7 @@ class QuantProfileReceiptStore:
         # B2: re-bind the typed projection on every read so a semantically
         # tampered persisted row (even with a consistent hash) refuses.
         validate_material_binding(
-            due=_due_binding_view(due_row), result=result,
+            due=_due_binding_view(due_row),
+            result=result,
         )
         return result

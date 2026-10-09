@@ -18,34 +18,32 @@ and one-shot CLI script.  Covers:
 import ast
 import json
 import os
-import stat
 import textwrap
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
-from tokmo.facts.sec import _SecTransportSuccess
 from tokmo.composition import (
-    SEC_TARGETED_DB_NAME,
-    LiveRunError,
     SecTargetedRunResult,
+    _sec_scheduled_slot_kst,
     run_sec_targeted,
     run_sec_targeted_operation,
     setup_sec_targeted,
-    _sec_scheduled_slot_kst,
 )
+from tokmo.facts.sec import _SecTransportSuccess
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = PROJECT_ROOT / "src" / "tokmo"
 
-NOW = datetime(2026, 8, 3, 12, 10, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 3, 12, 10, 0, tzinfo=UTC)
 UA_SECRET = "TokmoTest/0.0 (fixture-contact@example.invalid)"
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_env(home: Path, user_agent: str = UA_SECRET) -> Path:
     config_dir = home / ".config" / "tokmo-v3"
@@ -60,20 +58,37 @@ def _make_env(home: Path, user_agent: str = UA_SECRET) -> Path:
 def _make_snapshot(home: Path) -> Path:
     """Write a minimal COMPLETE holdings snapshot with one US holding."""
     from tokmo.records.holdings_snapshots import HoldingsSnapshotStore
-    from tokmo.values import CompleteHoldingsSnapshot, HoldingsSnapshotAccount
-    from tokmo.values import TossHoldingFact, TOSS_SOURCE
+    from tokmo.values import (
+        TOSS_SOURCE,
+        CompleteHoldingsSnapshot,
+        HoldingsSnapshotAccount,
+        TossHoldingFact,
+    )
 
-    snap_path = Path(home) / ".local" / "share" / "tokmo-v3" / "toss" / "holdings_snapshots.sqlite3"
+    snap_path = (
+        Path(home)
+        / ".local"
+        / "share"
+        / "tokmo-v3"
+        / "toss"
+        / "holdings_snapshots.sqlite3"
+    )
     snap_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(snap_path.parent, 0o700)
 
     holding = TossHoldingFact(
-        symbol="AAA", quantity="1", avg_price="1",
-        avg_price_field="avgPrice", currency="USD",
-        market_raw="US", market_field="market_raw",
-        name=None, asset_type=None,
+        symbol="AAA",
+        quantity="1",
+        avg_price="1",
+        avg_price_field="avgPrice",
+        currency="USD",
+        market_raw="US",
+        market_field="market_raw",
+        name=None,
+        asset_type=None,
     )
     from tokmo.records.holdings_snapshots import snapshot_content_hash
+
     snap = CompleteHoldingsSnapshot(
         snapshot_id="16fd27068baf433b82eb8c7fada847da",
         source=TOSS_SOURCE,
@@ -91,8 +106,10 @@ def _make_snapshot(home: Path) -> Path:
         content_hash=snapshot_content_hash(snap),
     )
     from tokmo.records.holdings_persistence import authorize_user_request
+
     permit = authorize_user_request(
-        snapshot_id="16fd27068baf433b82eb8c7fada847da", clock=lambda: NOW,
+        snapshot_id="16fd27068baf433b82eb8c7fada847da",
+        clock=lambda: NOW,
     )
     store = HoldingsSnapshotStore(snap_path, clock=lambda: NOW)
     store.append(snap, permit)
@@ -108,8 +125,12 @@ def _tickers_body(entries):
 
 def _submissions_body(cik, filings):
     recent = {
-        "accessionNumber": [], "filingDate": [], "reportDate": [],
-        "form": [], "primaryDocument": [], "isXBRL": [],
+        "accessionNumber": [],
+        "filingDate": [],
+        "reportDate": [],
+        "form": [],
+        "primaryDocument": [],
+        "isXBRL": [],
     }
     for acc, fdate, rdate, form, doc, xbrl in filings:
         recent["accessionNumber"].append(acc)
@@ -124,9 +145,12 @@ def _submissions_body(cik, filings):
 def _ok_transport():
     """Transport returning one mapping + one filing."""
     tb = _tickers_body([(320193, "AAA", "Company A")])
-    sb = _submissions_body("0000320193", [
-        ("0000320193-26-000077", "2026-08-03", "2026-07-01", "10-Q", "d.htm", 1),
-    ])
+    sb = _submissions_body(
+        "0000320193",
+        [
+            ("0000320193-26-000077", "2026-08-03", "2026-07-01", "10-Q", "d.htm", 1),
+        ],
+    )
 
     def transport(request):
         if request.endpoint_id == "sec_company_tickers":
@@ -140,53 +164,57 @@ def _ok_transport():
 # Slot derivation: _sec_scheduled_slot_kst
 # ---------------------------------------------------------------------------
 
+
 class TestScheduledSlotKst:
     def test_10_past_hour_maps_to_10(self):
         slot = _sec_scheduled_slot_kst(
-            datetime(2026, 8, 3, 3, 10, 0, tzinfo=timezone.utc))  # 12:10 KST
+            datetime(2026, 8, 3, 3, 10, 0, tzinfo=UTC)
+        )  # 12:10 KST
         assert slot == "20260803T1210"
 
     def test_11_past_hour_still_10(self):
         slot = _sec_scheduled_slot_kst(
-            datetime(2026, 8, 3, 3, 39, 0, tzinfo=timezone.utc))  # 12:39 KST
+            datetime(2026, 8, 3, 3, 39, 0, tzinfo=UTC)
+        )  # 12:39 KST
         assert slot == "20260803T1210"
 
     def test_40_past_hour_maps_to_40(self):
         slot = _sec_scheduled_slot_kst(
-            datetime(2026, 8, 3, 3, 40, 0, tzinfo=timezone.utc))  # 12:40 KST
+            datetime(2026, 8, 3, 3, 40, 0, tzinfo=UTC)
+        )  # 12:40 KST
         assert slot == "20260803T1240"
 
     def test_41_past_still_40(self):
         slot = _sec_scheduled_slot_kst(
-            datetime(2026, 8, 3, 3, 41, 0, tzinfo=timezone.utc))  # 12:41 KST
+            datetime(2026, 8, 3, 3, 41, 0, tzinfo=UTC)
+        )  # 12:41 KST
         assert slot == "20260803T1240"
 
     def test_09_past_maps_to_previous_hour_40(self):
         slot = _sec_scheduled_slot_kst(
-            datetime(2026, 8, 3, 3, 9, 0, tzinfo=timezone.utc))  # 12:09 KST
+            datetime(2026, 8, 3, 3, 9, 0, tzinfo=UTC)
+        )  # 12:09 KST
         assert slot == "20260803T1140"
 
     def test_00_past_maps_to_previous_hour_40(self):
         slot = _sec_scheduled_slot_kst(
-            datetime(2026, 8, 3, 3, 0, 0, tzinfo=timezone.utc))  # 12:00 KST
+            datetime(2026, 8, 3, 3, 0, 0, tzinfo=UTC)
+        )  # 12:00 KST
         assert slot == "20260803T1140"
 
     def test_midnight_boundary(self):
         """00:00 KST maps to previous day 23:40."""
         # 2026-08-03 15:00 UTC = 2026-08-04 00:00 KST
-        slot = _sec_scheduled_slot_kst(
-            datetime(2026, 8, 3, 15, 0, 0, tzinfo=timezone.utc))
+        slot = _sec_scheduled_slot_kst(datetime(2026, 8, 3, 15, 0, 0, tzinfo=UTC))
         assert slot == "20260803T2340"
 
     def test_midnight_10_past(self):
         """00:10 KST maps to 00:10 same day."""
-        slot = _sec_scheduled_slot_kst(
-            datetime(2026, 8, 3, 15, 10, 0, tzinfo=timezone.utc))
+        slot = _sec_scheduled_slot_kst(datetime(2026, 8, 3, 15, 10, 0, tzinfo=UTC))
         assert slot == "20260804T0010"
 
     def test_run_id_has_no_symbols_or_account(self):
-        slot = _sec_scheduled_slot_kst(
-            datetime(2026, 8, 3, 3, 10, 0, tzinfo=timezone.utc))
+        slot = _sec_scheduled_slot_kst(datetime(2026, 8, 3, 3, 10, 0, tzinfo=UTC))
         assert "$" not in slot
         assert "@" not in slot
         assert "/" not in slot
@@ -204,12 +232,14 @@ class TestScheduledSlotKst:
 # Tests that explicitly exercise watchlist coverage have their own patch.
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _isolate_watchlist(monkeypatch):
     """Every test in this module defaults to empty watchlists so the AAA-only
     fake transport is sufficient.  Tests that need watchlist symbols override
     the patch themselves."""
     from tokmo.values.session_gate import Market
+
     monkeypatch.setattr(
         "tokmo.composition.load_watchlists",
         lambda _dir: {Market.KR: frozenset(), Market.US: frozenset()},
@@ -218,13 +248,16 @@ def _isolate_watchlist(monkeypatch):
 
 # ---------------------------------------------------------------------------
 
+
 class TestOperationCredentials:
     def test_missing_env_fails_closed(self, tmp_path):
         setup_sec_targeted(home=tmp_path)
         # No sec.env written
         result = run_sec_targeted_operation(
-            home=tmp_path, clock=lambda: NOW,
-            sleeper=lambda _: None, transport=_ok_transport(),
+            home=tmp_path,
+            clock=lambda: NOW,
+            sleeper=lambda _: None,
+            transport=_ok_transport(),
         )
         assert result.code == "failed_config"
 
@@ -237,8 +270,10 @@ class TestOperationCredentials:
         link = config_dir / "sec.env"
         link.symlink_to(target)
         result = run_sec_targeted_operation(
-            home=tmp_path, clock=lambda: NOW,
-            sleeper=lambda _: None, transport=_ok_transport(),
+            home=tmp_path,
+            clock=lambda: NOW,
+            sleeper=lambda _: None,
+            transport=_ok_transport(),
         )
         assert result.code == "failed_config"
 
@@ -249,8 +284,10 @@ class TestOperationCredentials:
         env_path.write_text(f"SEC_USER_AGENT={UA_SECRET}\n")
         os.chmod(env_path, 0o644)  # too open
         result = run_sec_targeted_operation(
-            home=tmp_path, clock=lambda: NOW,
-            sleeper=lambda _: None, transport=_ok_transport(),
+            home=tmp_path,
+            clock=lambda: NOW,
+            sleeper=lambda _: None,
+            transport=_ok_transport(),
         )
         assert result.code == "failed_config"
 
@@ -258,6 +295,7 @@ class TestOperationCredentials:
 # ---------------------------------------------------------------------------
 # Operation: canonical path injection (no arbitrary CLI path)
 # ---------------------------------------------------------------------------
+
 
 class TestOperationCanonicalPath:
     def test_uses_holdings_snapshot_store_path(self, tmp_path, monkeypatch):
@@ -273,17 +311,19 @@ class TestOperationCanonicalPath:
             calls.append(kwargs)
             return original(**kwargs)
 
-        monkeypatch.setattr(
-            "tokmo.composition.run_sec_targeted", spy)
+        monkeypatch.setattr("tokmo.composition.run_sec_targeted", spy)
 
         result = run_sec_targeted_operation(
-            home=tmp_path, clock=lambda: NOW,
-            sleeper=lambda _: None, transport=_ok_transport(),
+            home=tmp_path,
+            clock=lambda: NOW,
+            sleeper=lambda _: None,
+            transport=_ok_transport(),
         )
         assert result.code == "complete"
         assert len(calls) == 1
         # snapshot_store_path must come from _holdings_snapshot_store_path
         from tokmo.composition import _holdings_snapshot_store_path
+
         expected = _holdings_snapshot_store_path(tmp_path)
         assert calls[0]["snapshot_store_path"] == expected
 
@@ -291,6 +331,7 @@ class TestOperationCanonicalPath:
 # ---------------------------------------------------------------------------
 # Operation: default transport monkeypatched / no network
 # ---------------------------------------------------------------------------
+
 
 class TestOperationDefaultTransport:
     def test_default_transport_no_network(self, tmp_path, monkeypatch):
@@ -306,12 +347,13 @@ class TestOperationDefaultTransport:
             def __call__(self, request):
                 return fake(request)
 
-        monkeypatch.setattr(
-            "tokmo.composition.SecLiveTransport", lambda: FakeLive())
+        monkeypatch.setattr("tokmo.composition.SecLiveTransport", lambda: FakeLive())
 
         result = run_sec_targeted_operation(
-            home=tmp_path, clock=lambda: NOW,
-            sleeper=lambda _: None, transport=None,
+            home=tmp_path,
+            clock=lambda: NOW,
+            sleeper=lambda _: None,
+            transport=None,
         )
         assert result.code == "complete"
 
@@ -319,6 +361,7 @@ class TestOperationDefaultTransport:
 # ---------------------------------------------------------------------------
 # Operation: same-slot duplicate overlap
 # ---------------------------------------------------------------------------
+
 
 class TestOperationOverlap:
     def test_same_slot_duplicate_gets_overlap(self, tmp_path):
@@ -331,18 +374,21 @@ class TestOperationOverlap:
         transport = _ok_transport()
 
         r1 = run_sec_targeted_operation(
-            home=tmp_path, clock=clock, sleeper=sleeper, transport=transport)
+            home=tmp_path, clock=clock, sleeper=sleeper, transport=transport
+        )
         assert r1.code == "complete"
 
         # Same slot -> overlap
         r2 = run_sec_targeted_operation(
-            home=tmp_path, clock=clock, sleeper=sleeper, transport=transport)
+            home=tmp_path, clock=clock, sleeper=sleeper, transport=transport
+        )
         assert r2.code == "overlap"
 
 
 # ---------------------------------------------------------------------------
 # Operation: success silence
 # ---------------------------------------------------------------------------
+
 
 class TestOperationSuccess:
     def test_success_returns_complete_result(self, tmp_path):
@@ -351,8 +397,10 @@ class TestOperationSuccess:
         _make_snapshot(tmp_path)
 
         result = run_sec_targeted_operation(
-            home=tmp_path, clock=lambda: NOW,
-            sleeper=lambda _: None, transport=_ok_transport(),
+            home=tmp_path,
+            clock=lambda: NOW,
+            sleeper=lambda _: None,
+            transport=_ok_transport(),
         )
         assert isinstance(result, SecTargetedRunResult)
         assert result.code == "complete"
@@ -365,8 +413,10 @@ class TestOperationSuccess:
 
         sleeps = []
         result = run_sec_targeted_operation(
-            home=tmp_path, clock=lambda: NOW,
-            sleeper=sleeps.append, transport=_ok_transport(),
+            home=tmp_path,
+            clock=lambda: NOW,
+            sleeper=sleeps.append,
+            transport=_ok_transport(),
         )
         assert result.code == "complete"
         assert len(sleeps) == 1  # 1 pacing between registry + submissions
@@ -375,6 +425,7 @@ class TestOperationSuccess:
 # ---------------------------------------------------------------------------
 # Operation: unresolved / failure sanitized
 # ---------------------------------------------------------------------------
+
 
 class TestOperationSanitized:
     def test_unmapped_ticker_code(self, tmp_path):
@@ -391,8 +442,10 @@ class TestOperationSanitized:
             raise RuntimeError("must not reach submissions")
 
         result = run_sec_targeted_operation(
-            home=tmp_path, clock=lambda: NOW,
-            sleeper=lambda _: None, transport=transport,
+            home=tmp_path,
+            clock=lambda: NOW,
+            sleeper=lambda _: None,
+            transport=transport,
         )
         assert result.code == "complete_with_unresolved"
         assert result.unresolved == ("AAA",)
@@ -401,8 +454,10 @@ class TestOperationSanitized:
         setup_sec_targeted(home=tmp_path)
         # No env file -> failed_config, no exception
         result = run_sec_targeted_operation(
-            home=tmp_path, clock=lambda: NOW,
-            sleeper=lambda _: None, transport=_ok_transport(),
+            home=tmp_path,
+            clock=lambda: NOW,
+            sleeper=lambda _: None,
+            transport=_ok_transport(),
         )
         assert result.code == "failed_config"
 
@@ -412,8 +467,10 @@ class TestOperationSanitized:
         _make_snapshot(tmp_path)
 
         result = run_sec_targeted_operation(
-            home=tmp_path, clock=lambda: NOW,
-            sleeper=lambda _: None, transport=_ok_transport(),
+            home=tmp_path,
+            clock=lambda: NOW,
+            sleeper=lambda _: None,
+            transport=_ok_transport(),
         )
         assert result.code == "complete"
         # The result dataclass must not carry the user agent
@@ -425,6 +482,7 @@ class TestOperationSanitized:
 # Operation: architecture
 # ---------------------------------------------------------------------------
 
+
 class TestOperationArchitecture:
     def test_no_order_ai_telegram_opendart_imports(self):
         source = (SRC_ROOT / "composition.py").read_text()
@@ -432,11 +490,20 @@ class TestOperationArchitecture:
         idx = source.index("def run_sec_targeted_operation(")
         next_def = source.index("\ndef ", idx + 10)
         func_body = source[idx:next_def]
-        for forbidden in ("telegram", "openai", "anthropic", "aiogram",
-                          "ccxt", "alpaca_trade_api", "boto3",
-                          "opendart", "OpenDART"):
+        for forbidden in (
+            "telegram",
+            "openai",
+            "anthropic",
+            "aiogram",
+            "ccxt",
+            "alpaca_trade_api",
+            "boto3",
+            "opendart",
+            "OpenDART",
+        ):
             assert forbidden not in func_body, (
-                f"run_sec_targeted_operation imports {forbidden}")
+                f"run_sec_targeted_operation imports {forbidden}"
+            )
 
     def test_no_arbitrary_snapshot_path_cli(self):
         """The operation function takes no snapshot_store_path parameter."""
@@ -458,7 +525,8 @@ class TestOperationArchitecture:
                 params += [a.arg for a in node.args.posonlyargs]
                 params += [a.arg for a in node.args.kwonlyargs]
                 assert "snapshot_store_path" not in params, (
-                    "snapshot_store_path must not be a parameter")
+                    "snapshot_store_path must not be a parameter"
+                )
 
     def test_no_custom_run_id_cli(self):
         source = (SRC_ROOT / "composition.py").read_text()
@@ -499,6 +567,7 @@ class TestOperationArchitecture:
 # CLI script: tools/run_sec_targeted_operation.py
 # ---------------------------------------------------------------------------
 
+
 class TestCliScript:
     def _setup_home(self, tmp_path):
         setup_sec_targeted(home=tmp_path)
@@ -511,10 +580,17 @@ class TestCliScript:
         monkeypatch.setattr(
             "tools.run_sec_targeted_operation.run_sec_targeted_operation",
             lambda **kw: SecTargetedRunResult(
-                "complete", 2, 1, 1, 0, 0, (),
+                "complete",
+                2,
+                1,
+                1,
+                0,
+                0,
+                (),
             ),
         )
         from tools.run_sec_targeted_operation import main
+
         assert main(["--home", str(tmp_path)]) == 0
         captured = capsys.readouterr()
         assert captured.out == ""
@@ -526,10 +602,17 @@ class TestCliScript:
         monkeypatch.setattr(
             "tools.run_sec_targeted_operation.run_sec_targeted_operation",
             lambda **kw: SecTargetedRunResult(
-                "complete_with_unresolved", 2, 1, 1, 0, 0, ("SECRET_TICKER",),
+                "complete_with_unresolved",
+                2,
+                1,
+                1,
+                0,
+                0,
+                ("SECRET_TICKER",),
             ),
         )
         from tools.run_sec_targeted_operation import main
+
         assert main(["--home", str(tmp_path)]) != 0
         captured = capsys.readouterr()
         assert captured.out == ""
@@ -542,10 +625,17 @@ class TestCliScript:
         monkeypatch.setattr(
             "tools.run_sec_targeted_operation.run_sec_targeted_operation",
             lambda **kw: SecTargetedRunResult(
-                "failed_registry", 1, 5, 0, 0, 0, (),
+                "failed_registry",
+                1,
+                5,
+                0,
+                0,
+                0,
+                (),
             ),
         )
         from tools.run_sec_targeted_operation import main
+
         assert main(["--home", str(tmp_path)]) != 0
         captured = capsys.readouterr()
         assert captured.out == ""
@@ -562,6 +652,7 @@ class TestCliScript:
             boom,
         )
         from tools.run_sec_targeted_operation import main
+
         assert main(["--home", str(tmp_path)]) != 0
         captured = capsys.readouterr()
         assert captured.out == ""
@@ -576,10 +667,17 @@ class TestCliScript:
         monkeypatch.setattr(
             "tools.run_sec_targeted_operation.run_sec_targeted_operation",
             lambda **kw: SecTargetedRunResult(
-                "overlap", 0, 0, 0, 0, 0, (),
+                "overlap",
+                0,
+                0,
+                0,
+                0,
+                0,
+                (),
             ),
         )
         from tools.run_sec_targeted_operation import main
+
         assert main(["--home", str(tmp_path)]) != 0
         captured = capsys.readouterr()
         assert "overlap" in captured.err
@@ -591,23 +689,28 @@ class TestCliScript:
         monkeypatch.setattr(
             "tools.run_sec_targeted_operation.run_sec_targeted_operation",
             lambda **kw: SecTargetedRunResult(
-                "complete_with_unresolved", 1, 1, 0, 0, 0,
+                "complete_with_unresolved",
+                1,
+                1,
+                0,
+                0,
+                0,
                 ("AAPL",),
             ),
         )
         from tools.run_sec_targeted_operation import main
+
         assert main(["--home", str(tmp_path)]) != 0
         captured = capsys.readouterr()
         for forbidden in ("AAPL", "0000320193", "Company A", UA_SECRET):
-            assert forbidden not in captured.err, (
-                f"stderr leaked: {forbidden}")
-            assert forbidden not in captured.out, (
-                f"stdout leaked: {forbidden}")
+            assert forbidden not in captured.err, f"stderr leaked: {forbidden}"
+            assert forbidden not in captured.out, f"stdout leaked: {forbidden}"
 
 
 # ---------------------------------------------------------------------------
 # Canonical V watchlist operation: loader returns V, transport covers V
 # ---------------------------------------------------------------------------
+
 
 def _v_tickers_body():
     payload = {"0": {"cik_str": 1403161, "ticker": "V", "title": "Visa Inc."}}
@@ -654,14 +757,17 @@ class TestOperationWatchlistCanonicalV:
         # No snapshot: the operation falls through to watchlist-only path
 
         from tokmo.values.session_gate import Market
+
         monkeypatch.setattr(
             "tokmo.composition.load_watchlists",
             lambda _dir: {Market.KR: frozenset(), Market.US: frozenset({"V"})},
         )
 
         result = run_sec_targeted_operation(
-            home=tmp_path, clock=lambda: NOW,
-            sleeper=lambda _: None, transport=_v_transport(),
+            home=tmp_path,
+            clock=lambda: NOW,
+            sleeper=lambda _: None,
+            transport=_v_transport(),
         )
         assert result.code == "complete"
         assert result.filings_saved == 1
@@ -677,6 +783,7 @@ class TestOperationMalformedWatchlist:
         _make_snapshot(tmp_path)
 
         from tokmo.watchlists import WatchlistError
+
         monkeypatch.setattr(
             "tokmo.composition.load_watchlists",
             lambda _dir: (_ for _ in ()).throw(WatchlistError("registry_unavailable")),
@@ -689,24 +796,30 @@ class TestOperationMalformedWatchlist:
             return _SecTransportSuccess(b"{}")
 
         result = run_sec_targeted_operation(
-            home=tmp_path, clock=lambda: NOW,
-            sleeper=lambda _: None, transport=transport,
+            home=tmp_path,
+            clock=lambda: NOW,
+            sleeper=lambda _: None,
+            transport=transport,
         )
         assert result.code == "failed_watchlist"
         assert len(calls) == 0
 
-    def test_missing_watchlist_dir_returns_failed_watchlist(self, tmp_path, monkeypatch):
+    def test_missing_watchlist_dir_returns_failed_watchlist(
+        self, tmp_path, monkeypatch
+    ):
         setup_sec_targeted(home=tmp_path)
         _make_env(tmp_path)
         _make_snapshot(tmp_path)
 
         from tokmo.watchlists import WatchlistError
+
         # Simulate missing directory → WatchlistError
         def raise_unavailable(_dir):
             raise WatchlistError("registry_unavailable")
 
         monkeypatch.setattr(
-            "tokmo.composition.load_watchlists", raise_unavailable,
+            "tokmo.composition.load_watchlists",
+            raise_unavailable,
         )
 
         calls = []
@@ -716,8 +829,10 @@ class TestOperationMalformedWatchlist:
             return _SecTransportSuccess(b"{}")
 
         result = run_sec_targeted_operation(
-            home=tmp_path, clock=lambda: NOW,
-            sleeper=lambda _: None, transport=transport,
+            home=tmp_path,
+            clock=lambda: NOW,
+            sleeper=lambda _: None,
+            transport=transport,
         )
         assert result.code == "failed_watchlist"
         assert len(calls) == 0
@@ -727,6 +842,7 @@ class TestOperationMalformedWatchlist:
 # Production watchlist path: canonical dir only, no CLI override
 # ---------------------------------------------------------------------------
 
+
 class TestOperationCanonicalWatchlistPath:
     def test_operation_loads_project_root_watchlists_dir(self, tmp_path, monkeypatch):
         """The operation resolves watchlists from PROJECT_ROOT/watchlists
@@ -734,8 +850,8 @@ class TestOperationCanonicalWatchlistPath:
         setup_sec_targeted(home=tmp_path)
         _make_env(tmp_path)
 
+        from tokmo import composition
         from tokmo.values.session_gate import Market
-        import tokmo.composition as composition
 
         seen_dirs = []
 
@@ -746,14 +862,17 @@ class TestOperationCanonicalWatchlistPath:
         monkeypatch.setattr("tokmo.composition.load_watchlists", capture)
 
         result = run_sec_targeted_operation(
-            home=tmp_path, clock=lambda: NOW,
-            sleeper=lambda _: None, transport=_v_transport(),
+            home=tmp_path,
+            clock=lambda: NOW,
+            sleeper=lambda _: None,
+            transport=_v_transport(),
         )
         assert result.code == "complete"
         assert seen_dirs == [composition.PROJECT_ROOT / "watchlists"]
 
     def test_operation_function_has_no_watchlist_parameter(self):
         import inspect
+
         from tokmo.composition import run_sec_targeted_operation as op
 
         params = set(inspect.signature(op).parameters)
@@ -765,9 +884,11 @@ class TestOperationCanonicalWatchlistPath:
         tree = ast.parse(source)
         arguments = []
         for node in ast.walk(tree):
-            if (isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Attribute)
-                    and node.func.attr == "add_argument"):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "add_argument"
+            ):
                 for arg in node.args:
                     if isinstance(arg, ast.Constant):
                         arguments.append(arg.value)

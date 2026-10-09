@@ -60,17 +60,18 @@ class TossAuthLiveTransport:
         self.opener = build_live_opener(https_handler)
 
     def __call__(
-            self,
-            request: TossAuthRequest) -> _TossTransportSuccess | _TossTransportFailure:
+        self, request: TossAuthRequest
+    ) -> _TossTransportSuccess | _TossTransportFailure:
         try:
             url = _wire_url(request)
             form = _wire_form(request)
             if url is None or form is None:
                 return _TossTransportFailure(code="protocol_failure")
             wire = urllib.request.Request(
-                url, data=form, method=TOKEN_METHOD,
-                headers={"Content-Type": CONTENT_TYPE,
-                         "Accept-Encoding": "identity"},
+                url,
+                data=form,
+                method=TOKEN_METHOD,
+                headers={"Content-Type": CONTENT_TYPE, "Accept-Encoding": "identity"},
             )
             with self.opener.open(wire, timeout=request.timeout_seconds) as response:
                 return _read_success(response)
@@ -99,7 +100,12 @@ def _wire_url(request: TossAuthRequest) -> str | None:
     url = f"https://{TOSS_HOST}{TOKEN_PATH}"
     parts = urllib.parse.urlsplit(url)
     if (parts.scheme, parts.hostname, parts.path, parts.port, parts.query) != (
-            "https", TOSS_HOST, TOKEN_PATH, None, ""):
+        "https",
+        TOSS_HOST,
+        TOKEN_PATH,
+        None,
+        "",
+    ):
         return None
     return url
 
@@ -145,7 +151,8 @@ def _map_http_error(err: urllib.error.HTTPError) -> _TossTransportFailure:
         return _TossTransportFailure(code="redirect")
     if code == 429:
         return _TossTransportFailure(
-            code="http_429", retry_after=_bounded_retry_after(err.headers))
+            code="http_429", retry_after=_bounded_retry_after(err.headers)
+        )
     if code == 401:
         return _TossTransportFailure(code="auth_rejection")
     if code == 403:

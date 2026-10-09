@@ -39,14 +39,20 @@ class KstIsoWeekV1:
         if not 1 <= self.iso_week <= 53:
             raise ValueError("invalid ISO week number")
         parts = self.identity.split("-W")
-        if (len(parts) != 2 or parts[0] != f"{self.iso_year:04d}"
-                or parts[1] != f"{self.iso_week:02d}"
-                or len(self.identity) != 8):
+        if (
+            len(parts) != 2
+            or parts[0] != f"{self.iso_year:04d}"
+            or parts[1] != f"{self.iso_week:02d}"
+            or len(self.identity) != 8
+        ):
             raise ValueError("week identity does not match fields")
         start, end = self.range
         for value in (start, end):
-            if (not isinstance(value, datetime) or value.tzinfo is None
-                    or value.utcoffset() is None):
+            if (
+                not isinstance(value, datetime)
+                or value.tzinfo is None
+                or value.utcoffset() is None
+            ):
                 raise ValueError("week range must be timezone-aware")
         if end <= start or (end - start) > timedelta(days=7):
             raise ValueError("invalid week range")
@@ -59,17 +65,27 @@ def kst_iso_week(instant: datetime) -> KstIsoWeekV1:
     fixed offset — so DST/historical offset changes and week/year boundaries
     follow the canonical IANA zone, not the host clock or naive UTC.
     """
-    if (not isinstance(instant, datetime) or instant.tzinfo is None
-            or instant.utcoffset() is None):
+    if (
+        not isinstance(instant, datetime)
+        or instant.tzinfo is None
+        or instant.utcoffset() is None
+    ):
         raise ValueError("instant must be timezone-aware")
     local = instant.astimezone(KST)
     iso_year, iso_week, iso_day = local.isocalendar()
     # Monday 00:00 KST of this ISO week: subtract (iso_day - 1) days.
     start = (local - timedelta(days=iso_day - 1)).replace(
-        hour=0, minute=0, second=0, microsecond=0, tzinfo=None,
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+        tzinfo=None,
     )
     start = datetime(
-        start.year, start.month, start.day, tzinfo=ZoneInfo("Asia/Seoul"),
+        start.year,
+        start.month,
+        start.day,
+        tzinfo=ZoneInfo("Asia/Seoul"),
     )
     end = start + timedelta(days=7) - timedelta(microseconds=1)
     return KstIsoWeekV1(
@@ -103,7 +119,8 @@ def _profile_for(store, hypothesis_id):
 
     row = store.read_hypothesis(hypothesis_id)
     return row, SemanticProfileV1.from_hypothesis(
-        row, index_keys=store.read_hypothesis_index(hypothesis_id),
+        row,
+        index_keys=store.read_hypothesis_index(hypothesis_id),
     )
 
 
@@ -120,12 +137,16 @@ def run_weekly_review(store, *, now: datetime) -> WeeklyReviewOutcomeV1:
     """
     from tokmo.programs.youtube_semantic import classify_semantic_profiles
     from tokmo.values.ops_kernel import (
-        HypothesisState, ProducerRole, SemanticClassification,
+        HypothesisState,
+        ProducerRole,
+        SemanticClassification,
     )
 
     week = kst_iso_week(now)
     reservation = store.reserve_weekly_review(
-        ProducerRole.ANALYSIS, week, now=now,
+        ProducerRole.ANALYSIS,
+        week,
+        now=now,
     )
     if reservation["status"] == "DUPLICATE":
         summary = store.read_weekly_review_summary(week.identity)
@@ -142,11 +163,13 @@ def run_weekly_review(store, *, now: datetime) -> WeeklyReviewOutcomeV1:
             new_merge_reviews=0,
             same_hypothesis_findings=0,
             hypothesis_ids=tuple(
-                sorted({
-                    identifier
-                    for row in summary["pairs"]
-                    for identifier in (row.hypothesis_a, row.hypothesis_b)
-                })
+                sorted(
+                    {
+                        identifier
+                        for row in summary["pairs"]
+                        for identifier in (row.hypothesis_a, row.hypothesis_b)
+                    }
+                )
             ),
             pair_keys=tuple(
                 (row.hypothesis_a, row.hypothesis_b) for row in summary["pairs"]
@@ -158,7 +181,8 @@ def run_weekly_review(store, *, now: datetime) -> WeeklyReviewOutcomeV1:
         )
     # RESUME or CREATED: (re)derive the open set and scan every pair once
     open_rows = [
-        row for row in store.read_open_hypotheses()
+        row
+        for row in store.read_open_hypotheses()
         if row.state in (HypothesisState.CANDIDATE, HypothesisState.WATCHING)
     ]
     hypothesis_ids = [row.hypothesis_id for row in open_rows]
@@ -178,7 +202,11 @@ def run_weekly_review(store, *, now: datetime) -> WeeklyReviewOutcomeV1:
         right_row, right_profile = profiles[pair[1]]
         decision = classify_semantic_profiles(left_profile, right_profile)
         adjudicated = store.record_weekly_pair_adjudication(
-            ProducerRole.ANALYSIS, week.identity, pair, decision, now=now,
+            ProducerRole.ANALYSIS,
+            week.identity,
+            pair,
+            decision,
+            now=now,
         )
         if adjudicated == "created":
             findings.append((pair, decision.classification.value))
@@ -189,19 +217,31 @@ def run_weekly_review(store, *, now: datetime) -> WeeklyReviewOutcomeV1:
         # relation/review creation is idempotent under its own durable
         # identity, so it runs even for a pair adjudicated before a crash —
         # a resume cannot lose the finding.
-        if decision.classification is (
-            SemanticClassification.RELATED_BUT_DISTINCT
-        ):
-            if store.record_hypothesis_relation(
-                ProducerRole.ANALYSIS, pair[0], pair[1], decision,
-                now=now, origin="WEEKLY_REVIEW",
-            ) == "created":
+        if decision.classification is (SemanticClassification.RELATED_BUT_DISTINCT):
+            if (
+                store.record_hypothesis_relation(
+                    ProducerRole.ANALYSIS,
+                    pair[0],
+                    pair[1],
+                    decision,
+                    now=now,
+                    origin="WEEKLY_REVIEW",
+                )
+                == "created"
+            ):
                 new_edges += 1
         elif decision.classification is SemanticClassification.MERGE_REVIEW:
-            if store.queue_merge_review(
-                ProducerRole.ANALYSIS, pair[0], pair[1], decision,
-                now=now, origin="WEEKLY_REVIEW",
-            ) == "created":
+            if (
+                store.queue_merge_review(
+                    ProducerRole.ANALYSIS,
+                    pair[0],
+                    pair[1],
+                    decision,
+                    now=now,
+                    origin="WEEKLY_REVIEW",
+                )
+                == "created"
+            ):
                 new_reviews += 1
     # minor 1: the COMPLETE receipt summarizes the WHOLE durable week —
     # findings persisted before an interruption (pair adjudications,
@@ -214,19 +254,22 @@ def run_weekly_review(store, *, now: datetime) -> WeeklyReviewOutcomeV1:
     # never from store-wide relation/review tables, which also contain
     # pre-existing admission-time rows that would inflate the counters.
     store.complete_weekly_review(
-        ProducerRole.ANALYSIS, week, now=now,
+        ProducerRole.ANALYSIS,
+        week,
+        now=now,
         open_count=len(hypothesis_ids),
         pairs_scanned=len(durable["pairs"]),
         new_related_edges=sum(
-            1 for row in durable["pairs"]
+            1
+            for row in durable["pairs"]
             if row.classification == "RELATED_BUT_DISTINCT"
         ),
         new_merge_reviews=sum(
-            1 for row in durable["pairs"]
-            if row.classification == "MERGE_REVIEW"
+            1 for row in durable["pairs"] if row.classification == "MERGE_REVIEW"
         ),
         same_hypothesis_findings=sum(
-            1 for row in durable["pairs"]
+            1
+            for row in durable["pairs"]
             if row.classification == "SAME_HYPOTHESIS_NEW_SIGHTING"
         ),
     )
@@ -268,10 +311,13 @@ def main(argv=None) -> int:
         description="Weekly YouTube duplicate review (no-network seam)",
     )
     parser.add_argument("store", help="path to the ops kernel sqlite store")
-    parser.add_argument("--now", default=None,
-                        help="aware ISO-8601 run instant (required in "
-                             "practice; the CLI refuses rather than reading "
-                             "an ambient clock)")
+    parser.add_argument(
+        "--now",
+        default=None,
+        help="aware ISO-8601 run instant (required in "
+        "practice; the CLI refuses rather than reading "
+        "an ambient clock)",
+    )
     args = parser.parse_args(argv)
     # The repository forbids direct ambient clock reads in program source:
     # the run instant arrives as an explicit aware ISO-8601 argument. Without

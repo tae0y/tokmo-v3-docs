@@ -38,8 +38,7 @@ def open_send_message(url: str, body: bytes, timeout: float) -> bytes:
     context = ssl.create_default_context()
     request = urllib.request.Request(url, data=body, method="POST")
     request.add_header("Content-Type", "application/x-www-form-urlencoded")
-    with urllib.request.urlopen(
-            request, timeout=timeout, context=context) as response:
+    with urllib.request.urlopen(request, timeout=timeout, context=context) as response:
         return response.read()
 
 
@@ -47,14 +46,19 @@ def open_get_updates(url: str, timeout: float) -> bytes:
     """Default HTTPS opener: one non-long-polling getUpdates request."""
     context = ssl.create_default_context()
     request = urllib.request.Request(url, method="GET")
-    with urllib.request.urlopen(
-            request, timeout=timeout, context=context) as response:
+    with urllib.request.urlopen(request, timeout=timeout, context=context) as response:
         return response.read()
 
 
-def fetch_dialogue_updates(*, offset: int, bot_token: str, chat_id: str,
-                           opener=None, limit: int = UPDATES_LIMIT,
-                           timeout: float = UPDATES_TIMEOUT_SECONDS) -> tuple:
+def fetch_dialogue_updates(
+    *,
+    offset: int,
+    bot_token: str,
+    chat_id: str,
+    opener=None,
+    limit: int = UPDATES_LIMIT,
+    timeout: float = UPDATES_TIMEOUT_SECONDS,
+) -> tuple:
     """Fetch once; retain text only from the configured private chat AND
     the configured sender identity (message.from.id), exactly like the
     callback path — a private chat match alone never authorizes.
@@ -66,21 +70,27 @@ def fetch_dialogue_updates(*, offset: int, bot_token: str, chat_id: str,
         raise ValueError("missing or invalid required parameters")
     if type(limit) is not int or not 1 <= limit <= UPDATES_LIMIT:
         raise ValueError("invalid update limit")
-    query = urllib.parse.urlencode({
-        "offset": offset,
-        "limit": limit,
-        "timeout": 0,
-        "allowed_updates": json.dumps(["message", "callback_query"],
-                                      separators=(",", ":")),
-    })
+    query = urllib.parse.urlencode(
+        {
+            "offset": offset,
+            "limit": limit,
+            "timeout": 0,
+            "allowed_updates": json.dumps(
+                ["message", "callback_query"], separators=(",", ":")
+            ),
+        }
+    )
     url = f"https://api.telegram.org/bot{bot_token}/getUpdates?{query}"
     raw = (open_get_updates if opener is None else opener)(url, timeout)
     try:
         payload = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise DialogueUpdatesRejected("telegram updates malformed") from exc
-    if type(payload) is not dict or payload.get("ok") is not True \
-            or type(payload.get("result")) is not list:
+    if (
+        type(payload) is not dict
+        or payload.get("ok") is not True
+        or type(payload.get("result")) is not list
+    ):
         raise DialogueUpdatesRejected("telegram updates rejected")
     normalized = []
     for item in payload["result"]:
@@ -89,8 +99,7 @@ def fetch_dialogue_updates(*, offset: int, bot_token: str, chat_id: str,
         update_id = item["update_id"]
         callback = item.get("callback_query")
         if type(callback) is dict:
-            normalized.append(
-                _normalize_callback(callback, update_id, chat_id))
+            normalized.append(_normalize_callback(callback, update_id, chat_id))
             continue
         message = item.get("message")
         sender = message.get("from") if type(message) is dict else None
@@ -108,16 +117,18 @@ def fetch_dialogue_updates(*, offset: int, bot_token: str, chat_id: str,
             normalized.append({"update_id": update_id, "ignored": True})
             continue
         reply = message.get("reply_to_message")
-        reply_id = (reply.get("message_id") if type(reply) is dict else None)
+        reply_id = reply.get("message_id") if type(reply) is dict else None
         if reply_id is not None and type(reply_id) is not int:
             normalized.append({"update_id": update_id, "ignored": True})
             continue
-        normalized.append({
-            "update_id": update_id,
-            "message_id": message["message_id"],
-            "reply_to_message_id": reply_id,
-            "text": message["text"],
-        })
+        normalized.append(
+            {
+                "update_id": update_id,
+                "message_id": message["message_id"],
+                "reply_to_message_id": reply_id,
+                "text": message["text"],
+            }
+        )
     return tuple(normalized)
 
 
@@ -128,7 +139,8 @@ def _normalize_callback(callback: dict, update_id: int, chat_id: str) -> dict:
     message = callback.get("message")
     sender = callback.get("from")
     authorized = (
-        type(callback.get("id")) is str and callback["id"]
+        type(callback.get("id")) is str
+        and callback["id"]
         and type(sender) is dict
         and str(sender.get("id")) == str(chat_id)
         and type(message) is dict
@@ -136,7 +148,8 @@ def _normalize_callback(callback: dict, update_id: int, chat_id: str) -> dict:
         and message["chat"].get("type") == "private"
         and str(message["chat"].get("id")) == str(chat_id)
         and type(message.get("message_id")) is int
-        and type(callback.get("data")) is str and callback["data"]
+        and type(callback.get("data")) is str
+        and callback["data"]
     )
     if not authorized:
         return {"update_id": update_id, "ignored": True}
@@ -149,10 +162,17 @@ def _normalize_callback(callback: dict, update_id: int, chat_id: str) -> dict:
     }
 
 
-def send_dialogue_message(*, body_text: str, bot_token: str, chat_id: str,
-                          reply_markup: "dict | None" = None, entities=None, protect_content: bool | None = None,
-                          opener=None,
-                          timeout: float = SEND_TIMEOUT_SECONDS) -> int:
+def send_dialogue_message(
+    *,
+    body_text: str,
+    bot_token: str,
+    chat_id: str,
+    reply_markup: dict | None = None,
+    entities=None,
+    protect_content: bool | None = None,
+    opener=None,
+    timeout: float = SEND_TIMEOUT_SECONDS,
+) -> int:
     """Send one dialogue message; return the provider message_id.
 
     ``reply_markup`` (an inline keyboard mapping) and ``entities`` (a
@@ -168,24 +188,29 @@ def send_dialogue_message(*, body_text: str, bot_token: str, chat_id: str,
     fields = {"chat_id": chat_id, "text": body_text}
     if reply_markup is not None:
         fields["reply_markup"] = json.dumps(
-            reply_markup, ensure_ascii=False, separators=(",", ":"))
+            reply_markup, ensure_ascii=False, separators=(",", ":")
+        )
     if entities is not None:
         fields["entities"] = json.dumps(
-            list(entities), ensure_ascii=False, separators=(",", ":"))
+            list(entities), ensure_ascii=False, separators=(",", ":")
+        )
     if protect_content is not None:
         fields["protect_content"] = json.dumps(protect_content)
     body = urllib.parse.urlencode(fields).encode("utf-8")
-    raw = (open_send_message if opener is None else opener)(
-        url, body, timeout)
+    raw = (open_send_message if opener is None else opener)(url, body, timeout)
     result = json.loads(raw.decode("utf-8"))
     if result.get("ok") is not True:
         raise DialogueSendRejected("telegram send rejected")
     return int(result["result"]["message_id"])
 
 
-def answer_dialogue_callback(*, callback_query_id: str, bot_token: str,
-                             opener=None,
-                             timeout: float = ANSWER_TIMEOUT_SECONDS) -> bool:
+def answer_dialogue_callback(
+    *,
+    callback_query_id: str,
+    bot_token: str,
+    opener=None,
+    timeout: float = ANSWER_TIMEOUT_SECONDS,
+) -> bool:
     """Bounded answerCallbackQuery ack so the Telegram spinner clears.
 
     Deliberately the opposite failure contract of the senders above:
@@ -193,15 +218,14 @@ def answer_dialogue_callback(*, callback_query_id: str, bot_token: str,
     inbound processing, trigger a canonical append, or surface a raw
     provider error/token to any caller.
     """
-    if type(callback_query_id) is not str or not callback_query_id \
-            or not bot_token:
+    if type(callback_query_id) is not str or not callback_query_id or not bot_token:
         return False
     url = f"https://api.telegram.org/bot{bot_token}/answerCallbackQuery"
-    body = urllib.parse.urlencode(
-        {"callback_query_id": callback_query_id}).encode("utf-8")
+    body = urllib.parse.urlencode({"callback_query_id": callback_query_id}).encode(
+        "utf-8"
+    )
     try:
-        raw = (open_send_message if opener is None else opener)(
-            url, body, timeout)
+        raw = (open_send_message if opener is None else opener)(url, body, timeout)
         return json.loads(raw.decode("utf-8")).get("ok") is True
     except Exception:
         return False

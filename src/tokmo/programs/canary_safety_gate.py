@@ -38,11 +38,9 @@ only relative paths and hex digest hashes.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from pathlib import Path
 import hashlib
-import os
-
+from dataclasses import dataclass
+from pathlib import Path
 
 # ── Predeclared paths for tokmo-v3 canonical root ─────────────────────
 # These are the stores the canary must NEVER mutate. The canary is
@@ -60,9 +58,9 @@ DEFAULT_PROTECTED_PATHS: tuple[str, ...] = (
 # Directory entries (trailing /) match any new file under that directory.
 
 DEFAULT_EXPECTED_MUTABLE_PATHS: tuple[str, ...] = (
-    "ops/",                          # covers ops_kernel, cadence_ticks, etc.
-    "ops/ops_kernel.sqlite3",        # explicit for evidence clarity
-    "ops/cadence_ticks.sqlite3",     # explicit for evidence clarity
+    "ops/",  # covers ops_kernel, cadence_ticks, etc.
+    "ops/ops_kernel.sqlite3",  # explicit for evidence clarity
+    "ops/cadence_ticks.sqlite3",  # explicit for evidence clarity
     "news/",
     "opendart-bulk.sqlite3",
     "events.jsonl",
@@ -118,6 +116,7 @@ class SafetyGateResult:
 @dataclass
 class _FileSnapshot:
     """Lightweight metadata snapshot of a single file."""
+
     rel_path: str
     exists: bool
     size: int
@@ -137,11 +136,16 @@ def _snapshot_file(root: Path, rel: str) -> _FileSnapshot:
     full = root / rel
     if not full.exists() or not full.is_file():
         return _FileSnapshot(
-            rel_path=rel, exists=False, size=0, mtime_ns=0, content_hash="")
+            rel_path=rel, exists=False, size=0, mtime_ns=0, content_hash=""
+        )
     st = full.stat()
     return _FileSnapshot(
-        rel_path=rel, exists=True, size=st.st_size,
-        mtime_ns=st.st_mtime_ns, content_hash=_hash_file_content(full))
+        rel_path=rel,
+        exists=True,
+        size=st.st_size,
+        mtime_ns=st.st_mtime_ns,
+        content_hash=_hash_file_content(full),
+    )
 
 
 def _is_under_dir(rel: str, dir_prefix: str) -> bool:
@@ -198,15 +202,21 @@ class CanarySafetyGate:
             # STOP: canary mutated protected material or unattributed change
     """
 
-    def __init__(self, root: Path,
-                 protected_paths: "tuple[str, ...] | None" = None,
-                 expected_mutable_paths: "tuple[str, ...] | None" = None):
+    def __init__(
+        self,
+        root: Path,
+        protected_paths: tuple[str, ...] | None = None,
+        expected_mutable_paths: tuple[str, ...] | None = None,
+    ):
         self.root = Path(root)
-        self.protected_paths = protected_paths if protected_paths is not None \
-            else DEFAULT_PROTECTED_PATHS
+        self.protected_paths = (
+            protected_paths if protected_paths is not None else DEFAULT_PROTECTED_PATHS
+        )
         self.expected_mutable_paths = (
-            expected_mutable_paths if expected_mutable_paths is not None
-            else DEFAULT_EXPECTED_MUTABLE_PATHS)
+            expected_mutable_paths
+            if expected_mutable_paths is not None
+            else DEFAULT_EXPECTED_MUTABLE_PATHS
+        )
 
         self._pre_protected: dict[str, _FileSnapshot] = {}
         self._pre_all: dict[str, _FileSnapshot] = {}
@@ -216,9 +226,7 @@ class CanarySafetyGate:
         """Take the pre-run snapshot of protected paths and full root."""
         # Snapshot all files for unattributed-change detection
         all_files = _scan_all_files(self.root)
-        self._pre_all = {
-            rel: _snapshot_file(self.root, rel) for rel in all_files
-        }
+        self._pre_all = {rel: _snapshot_file(self.root, rel) for rel in all_files}
 
         # Snapshot protected paths specifically (content hash)
         self._pre_protected = {}
@@ -241,7 +249,7 @@ class CanarySafetyGate:
             )
 
         post_root_hash = _diagnostic_root_hash(self.root)
-        full_root_changed = (post_root_hash != self._pre_root_hash)
+        full_root_changed = post_root_hash != self._pre_root_hash
 
         # 1. Check protected paths for content mutation
         protected_mutations = []
@@ -298,8 +306,10 @@ class CanarySafetyGate:
                 # Deleted file
                 changed = True
             elif pre_snap is not None and post_snap.exists:
-                if pre_snap.size != post_snap.size or \
-                        pre_snap.mtime_ns != post_snap.mtime_ns:
+                if (
+                    pre_snap.size != post_snap.size
+                    or pre_snap.mtime_ns != post_snap.mtime_ns
+                ):
                     changed = True
 
             if not changed:

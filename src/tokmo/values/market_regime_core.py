@@ -7,8 +7,15 @@ import json
 import re
 from contextlib import contextmanager
 from dataclasses import dataclass, fields, is_dataclass
-from datetime import date, datetime, timezone
-from decimal import DivisionByZero, Decimal, InvalidOperation, Overflow, ROUND_HALF_EVEN, localcontext
+from datetime import UTC, date, datetime
+from decimal import (
+    ROUND_HALF_EVEN,
+    Decimal,
+    DivisionByZero,
+    InvalidOperation,
+    Overflow,
+    localcontext,
+)
 from enum import Enum
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -81,9 +88,15 @@ class NormalizedDailyBarV1:
     volume: Decimal
 
     def __post_init__(self) -> None:
-        if not isinstance(self.session_date, date) or isinstance(self.session_date, datetime):
+        if not isinstance(self.session_date, date) or isinstance(
+            self.session_date, datetime
+        ):
             raise ValueError("session_date")
-        if not isinstance(self.timestamp, datetime) or self.timestamp.tzinfo is None or self.timestamp.utcoffset() is None:
+        if (
+            not isinstance(self.timestamp, datetime)
+            or self.timestamp.tzinfo is None
+            or self.timestamp.utcoffset() is None
+        ):
             raise ValueError("timestamp must be timezone-aware")
         for name in ("open", "high", "low", "close"):
             _decimal_valid(getattr(self, name), name, positive=True)
@@ -110,13 +123,19 @@ class NormalizedDailySeriesV1:
     def __post_init__(self) -> None:
         if not isinstance(self.symbol, str) or _SYMBOL.fullmatch(self.symbol) is None:
             raise ValueError("symbol")
-        if not isinstance(self.currency, str) or _CURRENCY.fullmatch(self.currency) is None:
+        if (
+            not isinstance(self.currency, str)
+            or _CURRENCY.fullmatch(self.currency) is None
+        ):
             raise ValueError("currency")
         if not isinstance(self.adjustment_mode, AdjustmentMode):
             raise ValueError("adjustment_mode")
         if not isinstance(self.as_of, date) or isinstance(self.as_of, datetime):
             raise ValueError("as_of")
-        if not isinstance(self.bars, tuple) or not 1 <= len(self.bars) <= REQUIRED_SESSIONS:
+        if (
+            not isinstance(self.bars, tuple)
+            or not 1 <= len(self.bars) <= REQUIRED_SESSIONS
+        ):
             raise ValueError("bars length must be 1..200")
         try:
             zone = ZoneInfo(self.session_timezone)
@@ -138,7 +157,10 @@ class NormalizedDailySeriesV1:
                 raise ValueError(f"session_date mismatch at bar[{index}]")
             if bar.session_date > self.as_of:
                 raise ValueError(f"session_date after as_of at bar[{index}]")
-            if previous is not None and (bar.session_date, bar.timestamp) <= (previous.session_date, previous.timestamp):
+            if previous is not None and (bar.session_date, bar.timestamp) <= (
+                previous.session_date,
+                previous.timestamp,
+            ):
                 raise ValueError(f"bar order at bar[{index}]")
             dates.add(bar.session_date)
             stamps.add(bar.timestamp)
@@ -201,9 +223,17 @@ class MarketRegimePackV1:
     limitations: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        if len(self.components) > 6 or sum(len(item.metrics) for item in self.components) > 48:
+        if (
+            len(self.components) > 6
+            or sum(len(item.metrics) for item in self.components) > 48
+        ):
             raise ValueError("component or metric cap")
-        for name, cap in (("reasons", 32), ("counter_signals", 32), ("conflicts", 16), ("limitations", 16)):
+        for name, cap in (
+            ("reasons", 32),
+            ("counter_signals", 32),
+            ("conflicts", 16),
+            ("limitations", 16),
+        ):
             values = getattr(self, name)
             if len(values) > cap:
                 raise ValueError(f"{name} cap")
@@ -217,7 +247,7 @@ class MarketRegimePackV1:
 
 
 def _timestamp(value: datetime) -> str:
-    utc = value.astimezone(timezone.utc)
+    utc = value.astimezone(UTC)
     return f"{utc:%Y-%m-%dT%H:%M:%S}.{utc.microsecond:06d}Z"
 
 
@@ -236,17 +266,29 @@ def _to_primitive(value: Any, *, omit_pack_digest: bool = False) -> Any:
     if isinstance(value, date):
         return value.isoformat()
     if is_dataclass(value) and not isinstance(value, type):
-        return {field.name: _to_primitive(getattr(value, field.name), omit_pack_digest=omit_pack_digest)
-                for field in fields(value) if not (omit_pack_digest and field.name == "pack_digest")}
+        return {
+            field.name: _to_primitive(
+                getattr(value, field.name), omit_pack_digest=omit_pack_digest
+            )
+            for field in fields(value)
+            if not (omit_pack_digest and field.name == "pack_digest")
+        }
     if isinstance(value, dict):
-        return {key: _to_primitive(item, omit_pack_digest=omit_pack_digest) for key, item in value.items()}
+        return {
+            key: _to_primitive(item, omit_pack_digest=omit_pack_digest)
+            for key, item in value.items()
+        }
     if isinstance(value, (tuple, list)):
-        return [_to_primitive(item, omit_pack_digest=omit_pack_digest) for item in value]
+        return [
+            _to_primitive(item, omit_pack_digest=omit_pack_digest) for item in value
+        ]
     raise TypeError(f"unsupported canonical type: {type(value).__name__}")
 
 
 def canonical_json_bytes(value: Any) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode("utf-8")
 
 
 def digest_object(value: Any) -> str:
@@ -254,4 +296,9 @@ def digest_object(value: Any) -> str:
 
 
 def compute_pack_digest(pack: MarketRegimePackV1) -> str:
-    return digest_object({"domain": "market-regime-pack-v1", **_to_primitive(pack, omit_pack_digest=True)})
+    return digest_object(
+        {
+            "domain": "market-regime-pack-v1",
+            **_to_primitive(pack, omit_pack_digest=True),
+        }
+    )

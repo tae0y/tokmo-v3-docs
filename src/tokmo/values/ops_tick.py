@@ -1,7 +1,7 @@
 """Five-minute operations tick identity."""
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 TICK_SECONDS = 300  # One-minute operation requires a separate scheduler gate.
 
@@ -27,5 +27,5 @@ def tick_id_from_utc(now: datetime) -> TickId:
     return TickId(
         epoch=epoch,
         tick_id=tick_id,
-        start_utc=datetime.fromtimestamp(tick_id * TICK_SECONDS, tz=timezone.utc),
+        start_utc=datetime.fromtimestamp(tick_id * TICK_SECONDS, tz=UTC),
     )

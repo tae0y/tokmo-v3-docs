@@ -6,16 +6,16 @@ tokens, the UUID4 snapshot-id grammar, and snapshot binding. All values are
 synthetic; no account, symbol, quantity, or price appears anywhere.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
 from tokmo.records.holdings_persistence import (
     CRITERIA_VERSION_V1,
+    MIGRATION_CRITERIA_VERSION,
+    NAMED_PROGRAM_ALLOWLIST_V1,
     DenialToken,
     HoldingsPersistencePermitV1,
-    NAMED_PROGRAM_ALLOWLIST_V1,
-    MIGRATION_CRITERIA_VERSION,
     PurposeKind,
     authorize_named_program,
     authorize_user_request,
@@ -28,7 +28,7 @@ UUID4_HEX = "16fd27068baf433b82eb8c7fada847da"
 OTHER_UUID4_HEX = "a6e4c9a06b1743188cb2dd8e5a06a3d4"
 LEGACY_DIGEST = "5cafa5c45986675183f3185088e415f6995b34ae68fbece140ed80ba9b351ccc"
 
-AUTHORIZED_AT = datetime(2026, 7, 29, 12, 0, 0, tzinfo=timezone.utc)
+AUTHORIZED_AT = datetime(2026, 7, 29, 12, 0, 0, tzinfo=UTC)
 
 
 def fixed_clock():
@@ -46,7 +46,9 @@ def test_user_request_permit_valid():
 
 def test_unknown_program_denied():
     denial = authorize_named_program(
-        snapshot_id=UUID4_HEX, program_name="nonexistent", clock=fixed_clock,
+        snapshot_id=UUID4_HEX,
+        program_name="nonexistent",
+        clock=fixed_clock,
     )
     assert isinstance(denial, DenialToken)
     assert denial.reason == "unknown_program"
@@ -58,14 +60,15 @@ def test_probe_cannot_obtain_permit():
     assert NAMED_PROGRAM_ALLOWLIST_V1 == frozenset()
     for probe in ("development-probe", "diagnostic", "incidental-read"):
         result = authorize_named_program(
-            snapshot_id=UUID4_HEX, program_name=probe, clock=fixed_clock,
+            snapshot_id=UUID4_HEX,
+            program_name=probe,
+            clock=fixed_clock,
         )
         assert isinstance(result, DenialToken)
 
     import tokmo.records.holdings_persistence as module
 
-    minting = [name for name in vars(module)
-               if name.startswith("authorize_")]
+    minting = [name for name in vars(module) if name.startswith("authorize_")]
     # The closed minting set: the two runtime factories plus the
     # migration-only factory and the pension-import factory.
     assert sorted(minting) == [
@@ -200,11 +203,11 @@ def test_invalid_snapshot_id_denied():
     not_uuid4 = [
         "",
         "short",
-        UUID4_HEX.upper(),                        # uppercase hex
-        UUID4_HEX + "00",                         # wrong length
-        "16fd27068baf133b82eb8c7fada847da",       # version 1, not 4
-        "16fd27068baf433bc2eb8c7fada847da",       # non-RFC-4122 variant
-        "16fd27068baf433b82eb8c7fada847dg",       # non-hex
+        UUID4_HEX.upper(),  # uppercase hex
+        UUID4_HEX + "00",  # wrong length
+        "16fd27068baf133b82eb8c7fada847da",  # version 1, not 4
+        "16fd27068baf433bc2eb8c7fada847da",  # non-RFC-4122 variant
+        "16fd27068baf433b82eb8c7fada847dg",  # non-hex
         "5cafa5c45986675183f3185088e415f6995b34ae68fbece140ed80ba9b351ccc",
     ]
     for value in not_uuid4:
@@ -212,7 +215,9 @@ def test_invalid_snapshot_id_denied():
         assert isinstance(denial, DenialToken), value
         assert denial.reason == "invalid_snapshot_id"
         denial = authorize_named_program(
-            snapshot_id=value, program_name="nonexistent", clock=fixed_clock,
+            snapshot_id=value,
+            program_name="nonexistent",
+            clock=fixed_clock,
         )
         assert isinstance(denial, DenialToken), value
         assert denial.reason == "invalid_snapshot_id"

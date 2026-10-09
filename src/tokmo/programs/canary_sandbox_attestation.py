@@ -49,14 +49,13 @@ No secret, credential, symbol or raw exception text appears in the result —
 only fixed probe names and verdict tokens.
 """
 
-from dataclasses import dataclass
-from pathlib import Path
 import errno
 import os
 import stat
 import sys
 import time
-
+from dataclasses import dataclass
+from pathlib import Path
 
 # Mechanism token recorded in evidence when the attestation holds.
 SANDBOX_MECHANISM = "macos_sandbox_exec_file_write_deny"
@@ -90,15 +89,19 @@ class CanonicalWriteDenyAttestation:
             "reason": self.reason,
             "mechanism": self.mechanism,
             "canonical_root": self.canonical_root,
-            "probes": [{"probe": name, "verdict": verdict}
-                       for name, verdict in self.probes],
+            "probes": [
+                {"probe": name, "verdict": verdict} for name, verdict in self.probes
+            ],
         }
 
 
 def _refused(root: Path, reason: str, probes: tuple) -> CanonicalWriteDenyAttestation:
     return CanonicalWriteDenyAttestation(
-        denied=False, reason=reason, mechanism="",
-        canonical_root=str(root), probes=probes,
+        denied=False,
+        reason=reason,
+        mechanism="",
+        canonical_root=str(root),
+        probes=probes,
     )
 
 
@@ -111,8 +114,9 @@ def _eperm_or_none(action) -> "int | None":
     return None
 
 
-def _nested_probe_target(root: Path,
-                         nested_relatives: "tuple[str, ...]") -> "Path | None":
+def _nested_probe_target(
+    root: Path, nested_relatives: "tuple[str, ...]"
+) -> "Path | None":
     """First existing nested path from the fixed relative allowlist.
 
     Falling back to any existing entry directly under the root keeps the
@@ -134,7 +138,8 @@ def _probe_id() -> str:
 
 
 def attest_canonical_write_denied(
-    canonical_root: Path, *,
+    canonical_root: Path,
+    *,
     nested_relatives: "tuple[str, ...]" = (),
     probe_id: "str | None" = None,
 ) -> CanonicalWriteDenyAttestation:

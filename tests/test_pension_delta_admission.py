@@ -3,22 +3,23 @@
 M11: behavioral tests for freshness classification, reminder text privacy,
 scope identity, and the pension materialization entrypoint.
 """
+
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
-import pytest
-
+from tokmo.programs.pension_materialization import (
+    materialize_pension_holdings,
+    reminder_text,
+)
+from tokmo.values.current_holdings import HoldingItemV1
 from tokmo.values.pension_holdings import (
     PensionFreshnessV1,
+    PensionHoldingsRevisionV1,
     classify_pension_freshness,
     pension_account_scope,
 )
-from tokmo.programs.pension_materialization import reminder_text, materialize_pension_holdings
-from tokmo.values.pension_holdings import PensionHoldingsRevisionV1
-from tokmo.values.current_holdings import HoldingItemV1
-
 
 _KST = ZoneInfo("Asia/Seoul")
 
@@ -84,8 +85,12 @@ class TestMaterializePensionHoldingsM11:
     def test_materialize_produces_correct_account_data(self):
         holdings = (
             HoldingItemV1(
-                symbol="069500", quantity="10", avg_price="45000",
-                currency="KRW", market_raw="KR", market_field="market",
+                symbol="069500",
+                quantity="10",
+                avg_price="45000",
+                currency="KRW",
+                market_raw="KR",
+                market_field="market",
             ),
         )
         revision = PensionHoldingsRevisionV1(

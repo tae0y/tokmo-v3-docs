@@ -42,20 +42,22 @@ from pathlib import Path
 from uuid import uuid4
 
 from tokmo.facts.pension_excel import (
-    PensionExcelParseError,
     WORKBOOK_MAX_CELL_STRING_LENGTH,
+    PensionExcelParseError,
+)
+from tokmo.facts.pension_excel import (
     _check_landing_file as check_landing_file,
+)
+from tokmo.facts.pension_excel import (
     _load_workbook_from_bytes as load_workbook_from_bytes,
+)
+from tokmo.facts.pension_excel import (
     _parse_cell_decimal as parse_cell_decimal,
+)
+from tokmo.facts.pension_excel import (
     _zip_entry_pass as zip_entry_pass,
 )
 from tokmo.values.current_holdings import HoldingItemV1
-from tokmo.values.pension_holdings import (
-    PENSION_HOLDINGS_SCHEMA_VERSION,
-    PENSION_PARSER_VERSION,
-    PensionHoldingsRevisionV1,
-    pension_semantic_digest,
-)
 from tokmo.values.pension_account_status import (
     COVERAGE_ETF_ONLY_PARTIAL,
     COVERAGE_ETF_ONLY_WHOLE,
@@ -72,6 +74,12 @@ from tokmo.values.pension_account_status import (
     classification_plan_digest,
     derive_average_cost,
     period_summary_semantic_digest,
+)
+from tokmo.values.pension_holdings import (
+    PENSION_HOLDINGS_SCHEMA_VERSION,
+    PENSION_PARSER_VERSION,
+    PensionHoldingsRevisionV1,
+    pension_semantic_digest,
 )
 
 # --- account status contract -----------------------------------------------
@@ -159,7 +167,9 @@ def _normalize_header(value: str) -> str:
 
 
 def _parse_header_row(
-    sheet, row_index: int, expected_fields: tuple[str, ...],
+    sheet,
+    row_index: int,
+    expected_fields: tuple[str, ...],
     aliases: dict[str, frozenset[str]],
 ) -> None:
     """Positionally exact header validation. Fails closed on anything else."""
@@ -178,8 +188,11 @@ def _parse_header_row(
 
 
 def _map_header_row(
-    sheet, row_index: int, required_fields: tuple[str, ...],
-    optional_fields: tuple[str, ...], aliases: dict[str, frozenset[str]],
+    sheet,
+    row_index: int,
+    required_fields: tuple[str, ...],
+    optional_fields: tuple[str, ...],
+    aliases: dict[str, frozenset[str]],
 ) -> dict[str, int]:
     """Name-based header mapping: canonical field -> 1-based column.
 
@@ -224,7 +237,8 @@ def _validate_content(sheet, *, data_start_row: int, max_rows: int) -> int:
         raise PensionExcelParseError("too_many_rows")
     max_col = sheet.max_column or 0
     for row in sheet.iter_rows(
-            min_row=data_start_row, max_row=max_row, max_col=max_col):
+        min_row=data_start_row, max_row=max_row, max_col=max_col
+    ):
         for cell in row:
             if cell.data_type == "f":
                 raise PensionExcelParseError("formula_detected")
@@ -288,7 +302,8 @@ def _require_aware(value, label: str) -> None:
 
 
 def parse_pension_account_status(
-    path: Path, *,
+    path: Path,
+    *,
     now: datetime,
     source_as_of: datetime,
     plan: PensionClassificationPlanV1,
@@ -323,8 +338,10 @@ def parse_pension_account_status(
             max_rows=MAX_ACCOUNT_STATUS_ROWS,
         )
         columns = _map_header_row(
-            sheet, ACCOUNT_STATUS_HEADER_ROW,
-            ACCOUNT_STATUS_REQUIRED_FIELDS, ACCOUNT_STATUS_OPTIONAL_FIELDS,
+            sheet,
+            ACCOUNT_STATUS_HEADER_ROW,
+            ACCOUNT_STATUS_REQUIRED_FIELDS,
+            ACCOUNT_STATUS_OPTIONAL_FIELDS,
             ACCOUNT_STATUS_HEADER_ALIASES,
         )
 
@@ -338,7 +355,8 @@ def parse_pension_account_status(
         source_rows: list[PensionSourceRowV1] = []
         seen_names: set[str] = set()
         for ordinal, row_index in enumerate(
-                range(ACCOUNT_STATUS_DATA_START_ROW, max_row + 1), 1):
+            range(ACCOUNT_STATUS_DATA_START_ROW, max_row + 1), 1
+        ):
             name = _cell_text(sheet, row_index, columns["instrument_repr"])
             if name in seen_names:
                 raise PensionExcelParseError("duplicate_instrument_repr")
@@ -346,18 +364,22 @@ def parse_pension_account_status(
             optional = {
                 field_name: (
                     _optional_cell_decimal(sheet, row_index, columns[field_name])
-                    if field_name in columns else None
+                    if field_name in columns
+                    else None
                 )
                 for field_name in ACCOUNT_STATUS_OPTIONAL_FIELDS
             }
-            source_rows.append(PensionSourceRowV1(
-                ordinal=ordinal,
-                instrument_repr=name,
-                quantity=_cell_decimal(sheet, row_index, columns["quantity"]),
-                purchase_amount=_cell_decimal(
-                    sheet, row_index, columns["purchase_amount"]),
-                **optional,
-            ))
+            source_rows.append(
+                PensionSourceRowV1(
+                    ordinal=ordinal,
+                    instrument_repr=name,
+                    quantity=_cell_decimal(sheet, row_index, columns["quantity"]),
+                    purchase_amount=_cell_decimal(
+                        sheet, row_index, columns["purchase_amount"]
+                    ),
+                    **optional,
+                )
+            )
 
         holdings: list[HoldingItemV1] = []
         average_costs: dict[int, str | None] = {}
@@ -376,14 +398,16 @@ def parse_pension_account_status(
                 # A verified ETF with a non-positive quantity cannot be priced,
                 # and a placeholder price would be fabrication.
                 raise PensionExcelParseError("non_positive_etf_quantity")
-            holdings.append(HoldingItemV1(
-                symbol=decision.symbol,
-                quantity=row.quantity,
-                avg_price=average_cost,
-                currency=ADMITTED_CURRENCY,
-                market_raw=ADMITTED_MARKET_RAW,
-                market_field=ADMITTED_MARKET_FIELD,
-            ))
+            holdings.append(
+                HoldingItemV1(
+                    symbol=decision.symbol,
+                    quantity=row.quantity,
+                    avg_price=average_cost,
+                    currency=ADMITTED_CURRENCY,
+                    market_raw=ADMITTED_MARKET_RAW,
+                    market_field=ADMITTED_MARKET_FIELD,
+                )
+            )
 
         if len(holdings) != plan.expected_etf_count:
             raise PensionExcelParseError("etf_count_contract_mismatch")
@@ -407,7 +431,8 @@ def parse_pension_account_status(
             validated_at=now,
             semantic_digest=pension_semantic_digest(frozen_holdings),
             reconciliation_digest=account_status_reconciliation_digest(
-                frozen_rows, plan, average_costs),
+                frozen_rows, plan, average_costs
+            ),
             holding_count=len(frozen_holdings),
             # An ETF-only revision with no ETFs is NOT a liquidation: the
             # account may still hold excluded non-ETF assets.
@@ -421,7 +446,8 @@ def parse_pension_account_status(
             excluded_kind_counts=plan.excluded_kind_counts(),
             plan_digest=classification_plan_digest(plan),
             coverage_statement=(
-                COVERAGE_ETF_ONLY_WHOLE if excluded_count == 0
+                COVERAGE_ETF_ONLY_WHOLE
+                if excluded_count == 0
                 else COVERAGE_ETF_ONLY_PARTIAL
             ),
         )
@@ -435,7 +461,9 @@ def parse_pension_account_status(
 
 
 def parse_pension_period_summary(
-    path: Path, *, now: datetime,
+    path: Path,
+    *,
+    now: datetime,
 ) -> PensionPeriodSummaryEvidenceV1:
     """Read the broker period summary as aggregate evidence only.
 
@@ -458,39 +486,44 @@ def parse_pension_period_summary(
         )
         # Row 1 carries broker group labels; it is bounded-validated only.
         for column in range(1, PERIOD_SUMMARY_COLUMN_COUNT + 1):
-            value = sheet.cell(
-                row=PERIOD_SUMMARY_GROUP_HEADER_ROW, column=column).value
+            value = sheet.cell(row=PERIOD_SUMMARY_GROUP_HEADER_ROW, column=column).value
             if value is not None and not isinstance(value, str):
                 raise PensionExcelParseError("invalid_group_header")
             if isinstance(value, str) and (
-                    len(value) > WORKBOOK_MAX_CELL_STRING_LENGTH):
+                len(value) > WORKBOOK_MAX_CELL_STRING_LENGTH
+            ):
                 raise PensionExcelParseError("oversized_cell_string")
         _parse_header_row(
-            sheet, PERIOD_SUMMARY_LEAF_HEADER_ROW,
-            PERIOD_SUMMARY_FIELDS, PERIOD_SUMMARY_HEADER_ALIASES,
+            sheet,
+            PERIOD_SUMMARY_LEAF_HEADER_ROW,
+            PERIOD_SUMMARY_FIELDS,
+            PERIOD_SUMMARY_HEADER_ALIASES,
         )
 
         rows: list[PensionPeriodSummaryRowV1] = []
         seen_names: set[str] = set()
         for ordinal, row_index in enumerate(
-                range(PERIOD_SUMMARY_DATA_START_ROW, max_row + 1), 1):
+            range(PERIOD_SUMMARY_DATA_START_ROW, max_row + 1), 1
+        ):
             name = _cell_text(sheet, row_index, 1)
             if name in seen_names:
                 raise PensionExcelParseError("duplicate_instrument_repr")
             seen_names.add(name)
-            rows.append(PensionPeriodSummaryRowV1(
-                ordinal=ordinal,
-                instrument_repr=name,
-                buy_quantity=_cell_decimal(sheet, row_index, 2),
-                sell_quantity=_cell_decimal(sheet, row_index, 3),
-                buy_average_price=_cell_decimal(sheet, row_index, 4),
-                sell_average_price=_cell_decimal(sheet, row_index, 5),
-                buy_amount=_cell_decimal(sheet, row_index, 6),
-                sell_amount=_cell_decimal(sheet, row_index, 7),
-                cost_amount=_cell_decimal(sheet, row_index, 8),
-                profit_loss=_cell_decimal(sheet, row_index, 9),
-                return_rate=_cell_decimal(sheet, row_index, 10),
-            ))
+            rows.append(
+                PensionPeriodSummaryRowV1(
+                    ordinal=ordinal,
+                    instrument_repr=name,
+                    buy_quantity=_cell_decimal(sheet, row_index, 2),
+                    sell_quantity=_cell_decimal(sheet, row_index, 3),
+                    buy_average_price=_cell_decimal(sheet, row_index, 4),
+                    sell_average_price=_cell_decimal(sheet, row_index, 5),
+                    buy_amount=_cell_decimal(sheet, row_index, 6),
+                    sell_amount=_cell_decimal(sheet, row_index, 7),
+                    cost_amount=_cell_decimal(sheet, row_index, 8),
+                    profit_loss=_cell_decimal(sheet, row_index, 9),
+                    return_rate=_cell_decimal(sheet, row_index, 10),
+                )
+            )
 
         frozen = tuple(rows)
         return PensionPeriodSummaryEvidenceV1(

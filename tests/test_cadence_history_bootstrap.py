@@ -11,7 +11,7 @@ descending session dates from that durable history alone.
 """
 
 import dataclasses
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 from tokmo.programs.cadence_fixture_deps import build_fixture_cadence_deps
 from tokmo.programs.production_cadence import run_production_cadence_once
@@ -26,8 +26,8 @@ POLICY = "cadence-300s-v1"
 
 # Sunday 2026-08-02, 05:00Z: KR local 14:00 KST Sunday, US local 01:00 EDT
 # Sunday — both markets share the same closed local date for the whole run.
-SUNDAY_BASE = datetime(2026, 8, 2, 5, 0, tzinfo=timezone.utc)
-MONDAY_OPEN = datetime(2026, 8, 3, 5, 0, tzinfo=timezone.utc)  # KR regular open
+SUNDAY_BASE = datetime(2026, 8, 2, 5, 0, tzinfo=UTC)
+MONDAY_OPEN = datetime(2026, 8, 3, 5, 0, tzinfo=UTC)  # KR regular open
 
 # One mid-window holiday per market so the bootstrap walk itself must cross a
 # weekday that is officially no_regular (never inferred from the weekday).
@@ -62,9 +62,7 @@ def bootstrap_fixture():
             day.isoformat(): official_day_entry(market, day)
             for day in (
                 FIXTURE_FIRST_DAY + timedelta(days=offset)
-                for offset in range(
-                    (FIXTURE_LAST_DAY - FIXTURE_FIRST_DAY).days + 1
-                )
+                for offset in range((FIXTURE_LAST_DAY - FIXTURE_FIRST_DAY).days + 1)
             )
         }
         for market in Market
@@ -75,15 +73,28 @@ def bootstrap_fixture():
             "KR": {"days": days[Market.KR]},
             "US": {"days": days[Market.US]},
         },
-        "accounts": [{
-            "seed": "77", "label": "brokerage",
-            "holdings": [
-                {"symbol": "005930", "quantity": "5", "avg_price": "70000",
-                 "currency": "KRW", "market_raw": "KR"},
-                {"symbol": "AAPL", "quantity": "2", "avg_price": "180",
-                 "currency": "USD", "market_raw": "US"},
-            ],
-        }],
+        "accounts": [
+            {
+                "seed": "77",
+                "label": "brokerage",
+                "holdings": [
+                    {
+                        "symbol": "005930",
+                        "quantity": "5",
+                        "avg_price": "70000",
+                        "currency": "KRW",
+                        "market_raw": "KR",
+                    },
+                    {
+                        "symbol": "AAPL",
+                        "quantity": "2",
+                        "avg_price": "180",
+                        "currency": "USD",
+                        "market_raw": "US",
+                    },
+                ],
+            }
+        ],
         "quotes": {
             "005930": {"price": "70100", "currency": "KRW"},
             "AAPL": {"price": "181.25", "currency": "USD"},
@@ -95,13 +106,17 @@ def bootstrap_fixture():
 def run_tick(root, slot, fixture, *, session_dates=None):
     observed = slot + timedelta(seconds=1)
     deps, probe = build_fixture_cadence_deps(
-        fixture=fixture, clock=lambda: observed,
+        fixture=fixture,
+        clock=lambda: observed,
     )
     if session_dates is not None:
         deps = dataclasses.replace(deps, regular_session_dates=session_dates)
     result = run_production_cadence_once(
-        root=root, policy_version=POLICY, scheduled_for_utc=slot,
-        observed_now_utc=observed, deps=deps,
+        root=root,
+        policy_version=POLICY,
+        scheduled_for_utc=slot,
+        observed_now_utc=observed,
+        deps=deps,
     )
     return result, probe
 
@@ -142,8 +157,10 @@ def test_sunday_bootstrap_reaches_twenty_sessions_then_monday_trades_run(tmp_pat
         assert started.get("TOKEN", 0) <= 1
         assert set(started) <= {"TOKEN", "CALENDAR_DAY_KR", "CALENDAR_DAY_US"}
 
-        if (history.next_backfill_target(Market.KR, sunday_anchor) is None
-                and history.next_backfill_target(Market.US, sunday_anchor) is None):
+        if (
+            history.next_backfill_target(Market.KR, sunday_anchor) is None
+            and history.next_backfill_target(Market.US, sunday_anchor) is None
+        ):
             ticks_used = index + 1
             break
 
@@ -182,7 +199,10 @@ def test_sunday_bootstrap_reaches_twenty_sessions_then_monday_trades_run(tmp_pat
     # Monday: the open tick's trades read twenty real dates from history only
     reader = HistorySessionDatesV1(history)
     monday_result, _probe = run_tick(
-        root, MONDAY_OPEN, fixture, session_dates=reader,
+        root,
+        MONDAY_OPEN,
+        fixture,
+        session_dates=reader,
     )
     assert monday_result.outcome.value == "COMPLETE", monday_result.reason
     stages = {status.stage: status for status in monday_result.stages}

@@ -53,15 +53,21 @@ class SecLiveTransport:
     def __init__(self, *, https_handler=None) -> None:
         self.opener = build_live_opener(https_handler)
 
-    def __call__(self, request: SecRequest) -> _SecTransportSuccess | _SecTransportFailure:
+    def __call__(
+        self, request: SecRequest
+    ) -> _SecTransportSuccess | _SecTransportFailure:
         try:
             url = _wire_url(request)
             if url is None:
                 return _SecTransportFailure(code="protocol_failure")
             wire = urllib.request.Request(
-                url, data=None, method=METHOD,
-                headers={"User-Agent": request.user_agent,
-                         "Accept-Encoding": "identity"},
+                url,
+                data=None,
+                method=METHOD,
+                headers={
+                    "User-Agent": request.user_agent,
+                    "Accept-Encoding": "identity",
+                },
             )
             with self.opener.open(wire, timeout=request.timeout_seconds) as response:
                 return _read_success(response)
@@ -92,8 +98,12 @@ def _wire_url(request: SecRequest) -> str | None:
         host, path = TICKERS_HOST, TICKERS_PATH
     elif request.endpoint_id == SUBMISSIONS_ENDPOINT_ID:
         cik = request.cik
-        if (not isinstance(cik, str) or len(cik) != CIK_DIGITS
-                or not cik.isascii() or not cik.isdigit()):
+        if (
+            not isinstance(cik, str)
+            or len(cik) != CIK_DIGITS
+            or not cik.isascii()
+            or not cik.isdigit()
+        ):
             return None
         host, path = SUBMISSIONS_HOST, f"{SUBMISSIONS_PATH_PREFIX}{cik}.json"
     else:
@@ -102,7 +112,12 @@ def _wire_url(request: SecRequest) -> str | None:
     url = f"https://{host}{path}"
     parts = urllib.parse.urlsplit(url)
     if (parts.scheme, parts.hostname, parts.path, parts.port, parts.query) != (
-            "https", host, path, None, ""):
+        "https",
+        host,
+        path,
+        None,
+        "",
+    ):
         return None
     return url
 

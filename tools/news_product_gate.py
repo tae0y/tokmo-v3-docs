@@ -4,18 +4,18 @@ No policy overrides, synthetic identity, approval issuance or transport live her
 An unfinished CALL survives worker restarts and blocks every NEWS model until
 its outcome has been reconciled. The controller owns that reconciliation.
 """
-from contextlib import contextmanager
-from datetime import datetime, timezone
+
 import importlib.util
-from pathlib import Path
 import uuid
+from contextlib import contextmanager
+from datetime import UTC, datetime
+from pathlib import Path
 
 from tokmo.records.quant_decision_reports import atomic_private
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-APPROVAL = PROJECT_ROOT / 'ops/news-product-approval.json'
-GATE_PATH = Path.home() / '.hermes/scripts/product_model_gate.py'
+APPROVAL = PROJECT_ROOT / "ops/news-product-approval.json"
+GATE_PATH = Path.home() / ".hermes/scripts/product_model_gate.py"
 
 
 class NewsProductGateError(RuntimeError):
@@ -23,16 +23,22 @@ class NewsProductGateError(RuntimeError):
 
 
 def installed_gate():
-    spec = importlib.util.spec_from_file_location('news_common_product_gate', GATE_PATH)
+    spec = importlib.util.spec_from_file_location("news_common_product_gate", GATE_PATH)
     gate = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(gate)
     return gate
 
 
 def receipt_root(diagnostic_path):
-    diagnostic = Path(diagnostic_path) if diagnostic_path is not None else (
-        Path.home() / '.local/share/tokmo-v3/news/decision-worker/inference-diagnostics/analyze-last-error.json')
-    return diagnostic.parent / 'admissions'
+    diagnostic = (
+        Path(diagnostic_path)
+        if diagnostic_path is not None
+        else (
+            Path.home()
+            / ".local/share/tokmo-v3/news/decision-worker/inference-diagnostics/analyze-last-error.json"
+        )
+    )
+    return diagnostic.parent / "admissions"
 
 
 def require_complete_receipts(diagnostic_path):
@@ -48,17 +54,21 @@ def require_complete_receipts(diagnostic_path):
         except FileNotFoundError:
             return
         for call in root.iterdir():
-            if call.name.startswith('news-glm-') and call.name.endswith('-CALL.json'):
-                result = call.with_name(call.name.removesuffix('-CALL.json') + '-RESULT.json')
+            if call.name.startswith("news-glm-") and call.name.endswith("-CALL.json"):
+                result = call.with_name(
+                    call.name.removesuffix("-CALL.json") + "-RESULT.json"
+                )
                 if not result.is_file():
-                    raise NewsProductGateError('NEWS_MODEL_RESULT_UNRESOLVED')
+                    raise NewsProductGateError("NEWS_MODEL_RESULT_UNRESOLVED")
     except OSError:
-        raise NewsProductGateError('NEWS_MODEL_RECEIPT_UNREADABLE') from None
+        raise NewsProductGateError("NEWS_MODEL_RECEIPT_UNREADABLE") from None
 
 
 def _admission_error(error):
     # Do not propagate provider-like categories, exception contents or credentials.
-    return NewsProductGateError('NEWS_MODEL_ADMISSION_DENIED:' + getattr(error, 'code', type(error).__name__))
+    return NewsProductGateError(
+        "NEWS_MODEL_ADMISSION_DENIED:" + getattr(error, "code", type(error).__name__)
+    )
 
 
 @contextmanager
@@ -72,27 +82,42 @@ def glm_call(model, stage, diagnostic_path, *, correction=False):
     require_complete_receipts(diagnostic_path)
     try:
         gate = installed_gate()
-        admission = gate.admit(APPROVAL, model, provider='zai')
-        scope, route = admission['scope'], admission['route']
-        if (scope['identity_synthetic'] or scope['product'] != 'tokmo-news'
-                or scope['runtime_root'] != str(PROJECT_ROOT)
-                or route['model'] != model or route['provider'] != 'zai'):
-            raise NewsProductGateError('NEWS_SCOPE_MISMATCH')
+        admission = gate.admit(APPROVAL, model, provider="zai")
+        scope, route = admission["scope"], admission["route"]
+        if (
+            scope["identity_synthetic"]
+            or scope["product"] != "tokmo-news"
+            or scope["runtime_root"] != str(PROJECT_ROOT)
+            or route["model"] != model
+            or route["provider"] != "zai"
+        ):
+            raise NewsProductGateError("NEWS_SCOPE_MISMATCH")
     except Exception as error:
         raise _admission_error(error) from None
-    call_id = 'news-glm-' + uuid.uuid4().hex
+    call_id = "news-glm-" + uuid.uuid4().hex
     root = receipt_root(diagnostic_path)
-    receipt = dict(schema='news-product-call-v1', call_id=call_id, model=model,
-                   provider='zai', stage=stage, correction=bool(correction), admission=admission)
+    receipt = dict(
+        schema="news-product-call-v1",
+        call_id=call_id,
+        model=model,
+        provider="zai",
+        stage=stage,
+        correction=bool(correction),
+        admission=admission,
+    )
 
     def write(kind, **fields):
         try:
-            atomic_private(root / (call_id + '-' + kind + '.json'),
-                           dict(receipt, status=kind, at=datetime.now(timezone.utc).isoformat(), **fields))
+            atomic_private(
+                root / (call_id + "-" + kind + ".json"),
+                dict(receipt, status=kind, at=datetime.now(UTC).isoformat(), **fields),
+            )
         except Exception:
-            raise NewsProductGateError('NEWS_MODEL_' + kind + '_RECEIPT_FAILED') from None
+            raise NewsProductGateError(
+                "NEWS_MODEL_" + kind + "_RECEIPT_FAILED"
+            ) from None
 
-    write('CALL', outcome='INTENT', transport_started=False)
+    write("CALL", outcome="INTENT", transport_started=False)
     started = False
 
     def recheck():
@@ -106,8 +131,12 @@ def glm_call(model, stage, diagnostic_path, *, correction=False):
     try:
         yield recheck
     except BaseException as error:
-        write('RESULT', outcome='ERROR' if started else 'NOT_SENT',
-              transport_started=started, error_type=type(error).__name__)
+        write(
+            "RESULT",
+            outcome="ERROR" if started else "NOT_SENT",
+            transport_started=started,
+            error_type=type(error).__name__,
+        )
         raise
     else:
-        write('RESULT', outcome='SUCCEEDED', transport_started=started)
+        write("RESULT", outcome="SUCCEEDED", transport_started=started)

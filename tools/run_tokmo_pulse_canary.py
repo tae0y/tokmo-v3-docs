@@ -22,9 +22,8 @@ No HTTP/auth implementation is duplicated.
 """
 
 import sys
-from datetime import datetime
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 # Ensure src/ is on the import path when run from the project root.
 project_root = Path(__file__).resolve().parent.parent
@@ -33,8 +32,9 @@ if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
 
-def build_canary_live_deps(*, project_root: Path, clock: Callable,
-                           https_handler_factory=None):
+def build_canary_live_deps(
+    *, project_root: Path, clock: Callable, https_handler_factory=None
+):
     """Compose canary deps from the REAL Toss production adapters.
 
     B1: This directly reuses TossAuthLiveTransport, TossPricesLiveTransport,
@@ -49,26 +49,25 @@ def build_canary_live_deps(*, project_root: Path, clock: Callable,
       + query_current_prices, passing the amortized bearer explicitly (B3).
     - sleep_until: real wall-clock sleep (B2).
     """
-    import time
 
-    from tokmo.facts.toss_auth_live import TossAuthLiveTransport
-    from tokmo.facts.toss_prices_live import TossPricesLiveTransport
-    from tokmo.facts.toss_prices import query_current_prices
-    from tokmo.facts.toss import (
-        build_auth_request, parse_token_response,
-        _TossTransportSuccess,
-    )
-    from tokmo.runtime.config import load_toss_config
     from tokmo.composition import TOSS_ENV_NAME
-    from tokmo.programs.pulse_quotes import PulseQuoteBatchOutcomeV1
+    from tokmo.facts.toss import (
+        _TossTransportSuccess,
+        build_auth_request,
+        parse_token_response,
+    )
+    from tokmo.facts.toss_auth_live import TossAuthLiveTransport
+    from tokmo.facts.toss_prices import query_current_prices
+    from tokmo.facts.toss_prices_live import TossPricesLiveTransport
     from tokmo.programs.pulse_canary import CanaryDepsV1, _real_sleep_until
+    from tokmo.programs.pulse_quotes import PulseQuoteBatchOutcomeV1
+    from tokmo.runtime.config import load_toss_config
 
     project_root = Path(project_root)
     config = load_toss_config(project_root / TOSS_ENV_NAME)
 
     def _handler():
-        return (None if https_handler_factory is None
-                else https_handler_factory())
+        return None if https_handler_factory is None else https_handler_factory()
 
     auth_transport = TossAuthLiveTransport(https_handler=_handler())
     prices_transport = TossPricesLiveTransport(https_handler=_handler())
@@ -89,8 +88,10 @@ def build_canary_live_deps(*, project_root: Path, clock: Callable,
 
     def quotes_fetch(market, symbols, *, bearer):
         outcome = query_current_prices(
-            symbols=tuple(symbols), token=bearer,
-            transport=prices_transport, clock=clock,
+            symbols=tuple(symbols),
+            token=bearer,
+            transport=prices_transport,
+            clock=clock,
         )
         facts = getattr(outcome, "facts", ())
         code = getattr(outcome, "code", "error")
@@ -107,7 +108,9 @@ def build_canary_live_deps(*, project_root: Path, clock: Callable,
 from tokmo.programs.pulse_canary import run_canary_cli
 
 if __name__ == "__main__":
-    sys.exit(run_canary_cli(
-        sys.argv[1:],
-        live_deps_factory=build_canary_live_deps,
-    ))
+    sys.exit(
+        run_canary_cli(
+            sys.argv[1:],
+            live_deps_factory=build_canary_live_deps,
+        )
+    )

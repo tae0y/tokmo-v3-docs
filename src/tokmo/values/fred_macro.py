@@ -1,16 +1,17 @@
 """Pure, closed value vocabulary for the Stage3 FRED source."""
 
-from dataclasses import dataclass
-from datetime import date, datetime, timezone
-from decimal import Decimal
-from enum import Enum
 import hashlib
 import json
 import re
 import unicodedata
+from dataclasses import dataclass
+from datetime import UTC, date, datetime
+from decimal import Decimal
+from enum import Enum
 
 from tokmo.values.decimal_canon import (
-    Decimal30CanonicalizationViolation, canonicalize_decimal30,
+    Decimal30CanonicalizationViolation,
+    canonicalize_decimal30,
 )
 
 SOURCE = "FRED"
@@ -69,7 +70,9 @@ class ReleaseClassification(str, Enum):
     UNKNOWN = "UNKNOWN"
 
 
-def classification_flags(value: ReleaseClassification) -> tuple[bool | None, bool | None]:
+def classification_flags(
+    value: ReleaseClassification,
+) -> tuple[bool | None, bool | None]:
     return {
         ReleaseClassification.INITIAL: (True, False),
         ReleaseClassification.REVISION: (False, True),
@@ -91,7 +94,11 @@ def canonical_json(value: object) -> bytes:
         if type(item) is datetime:
             if item.tzinfo is None or item.utcoffset() is None:
                 raise ValueError("aware_utc_required")
-            return item.astimezone(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+            return (
+                item.astimezone(UTC)
+                .isoformat(timespec="microseconds")
+                .replace("+00:00", "Z")
+            )
         if isinstance(item, Decimal):
             result = canonicalize_decimal30(str(item))
             if isinstance(result, Decimal30CanonicalizationViolation):
@@ -106,8 +113,13 @@ def canonical_json(value: object) -> bytes:
         if item is None or type(item) in (bool, int):
             return item
         raise ValueError("noncanonical_value")
-    return (json.dumps(clean(value), sort_keys=True, separators=(",", ":"),
-                       ensure_ascii=False) + "\n").encode("utf-8")
+
+    return (
+        json.dumps(
+            clean(value), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        )
+        + "\n"
+    ).encode("utf-8")
 
 
 @dataclass(frozen=True)
@@ -128,14 +140,25 @@ class FredRequest:
     def __post_init__(self):
         if not isinstance(self.operation, FredOperation):
             raise ValueError("closed_operation")
-        if self.series_id is not None and not re.fullmatch(r"[A-Za-z0-9._-]{1,120}", self.series_id):
+        if self.series_id is not None and not re.fullmatch(
+            r"[A-Za-z0-9._-]{1,120}", self.series_id
+        ):
             raise ValueError("invalid_series_id")
-        if self.release_id is not None and (type(self.release_id) is not int or self.release_id <= 0):
+        if self.release_id is not None and (
+            type(self.release_id) is not int or self.release_id <= 0
+        ):
             raise ValueError("invalid_release_id")
-        for name in ("realtime_start", "realtime_end", "observation_start", "observation_end"):
+        for name in (
+            "realtime_start",
+            "realtime_end",
+            "observation_start",
+            "observation_end",
+        ):
             _date(getattr(self, name), name)
-        for left, right, name in ((self.realtime_start, self.realtime_end, "realtime"),
-                                  (self.observation_start, self.observation_end, "observation")):
+        for left, right, name in (
+            (self.realtime_start, self.realtime_end, "realtime"),
+            (self.observation_start, self.observation_end, "observation"),
+        ):
             if (left is None) != (right is None):
                 raise ValueError(f"complete_{name}_pair")
             if left is not None and left > right:
@@ -144,7 +167,11 @@ class FredRequest:
             raise ValueError("invalid_offset")
         if self.output_type is not None and self.output_type not in (1, 2, 3, 4):
             raise ValueError("invalid_output_type")
-        if len(self.vintage_dates) > 1000 or len(set(self.vintage_dates)) != len(self.vintage_dates) or tuple(sorted(self.vintage_dates)) != self.vintage_dates:
+        if (
+            len(self.vintage_dates) > 1000
+            or len(set(self.vintage_dates)) != len(self.vintage_dates)
+            or tuple(sorted(self.vintage_dates)) != self.vintage_dates
+        ):
             raise ValueError("invalid_vintage_dates")
         if any(type(value) is not date for value in self.vintage_dates):
             raise ValueError("invalid_vintage_dates")
@@ -152,18 +179,24 @@ class FredRequest:
             raise ValueError("vintage_dates_output_policy")
         if self.vintage_dates and self.realtime_start is not None:
             raise ValueError("realtime_vintage_exclusive")
-        maxima = {FredOperation.SERIES_OBSERVATIONS: 100000,
-                  FredOperation.SERIES_VINTAGE_DATES: 10000,
-                  FredOperation.RELEASE_DATES: 10000}
-        if self.limit is not None and (type(self.limit) is not int or
-                                       not 1 <= self.limit <= maxima.get(self.operation, 10000)):
+        maxima = {
+            FredOperation.SERIES_OBSERVATIONS: 100000,
+            FredOperation.SERIES_VINTAGE_DATES: 10000,
+            FredOperation.RELEASE_DATES: 10000,
+        }
+        if self.limit is not None and (
+            type(self.limit) is not int
+            or not 1 <= self.limit <= maxima.get(self.operation, 10000)
+        ):
             raise ValueError("invalid_limit")
         if type(self.include_release_dates_with_no_data) is not bool:
             raise ValueError("invalid_include_release_dates_with_no_data")
         needs_series = self.operation is not FredOperation.RELEASE_DATES
         if needs_series != (self.series_id is not None):
             raise ValueError("operation_series_identity")
-        if (self.operation is FredOperation.RELEASE_DATES) != (self.release_id is not None):
+        if (self.operation is FredOperation.RELEASE_DATES) != (
+            self.release_id is not None
+        ):
             raise ValueError("operation_release_identity")
 
     @property
@@ -184,13 +217,18 @@ def canonical_fred_value(value: str) -> tuple[Decimal | None, str]:
 def invocation_identity(request: FredRequest, execution_mode: ExecutionMode) -> str:
     if not isinstance(execution_mode, ExecutionMode):
         raise ValueError("execution_mode_required")
-    return hashlib.sha256(canonical_json({
-        "source": SOURCE, "purpose": PURPOSE,
-        "manifest_revision": MANIFEST_REVISION,
-        "execution_mode": execution_mode.value,
-        "operation": request.operation.value,
-        "request_identity": request.request_identity,
-    })).hexdigest()
+    return hashlib.sha256(
+        canonical_json(
+            {
+                "source": SOURCE,
+                "purpose": PURPOSE,
+                "manifest_revision": MANIFEST_REVISION,
+                "execution_mode": execution_mode.value,
+                "operation": request.operation.value,
+                "request_identity": request.request_identity,
+            }
+        )
+    ).hexdigest()
 
 
 def g_live_manifest(*, release_id: int) -> tuple[FredRequest, ...]:
@@ -199,19 +237,39 @@ def g_live_manifest(*, release_id: int) -> tuple[FredRequest, ...]:
         raise ValueError("invalid_release_id")
     realtime = date(2026, 8, 12)
     return (
-        FredRequest(FredOperation.SERIES, series_id=SERIES_ID,
-                    realtime_start=realtime, realtime_end=realtime),
-        FredRequest(FredOperation.SERIES_OBSERVATIONS, series_id=SERIES_ID,
-                    realtime_start=realtime, realtime_end=realtime,
-                    observation_start=date(2026, 7, 1),
-                    observation_end=date(2026, 7, 31), output_type=4,
-                    limit=10, offset=0),
-        FredRequest(FredOperation.SERIES_RELEASE, series_id=SERIES_ID,
-                    realtime_start=realtime, realtime_end=realtime),
-        FredRequest(FredOperation.RELEASE_DATES, release_id=release_id,
-                    include_release_dates_with_no_data=False, limit=10, offset=0),
-        FredRequest(FredOperation.SERIES_VINTAGE_DATES, series_id=SERIES_ID,
-                    limit=10, offset=0),
+        FredRequest(
+            FredOperation.SERIES,
+            series_id=SERIES_ID,
+            realtime_start=realtime,
+            realtime_end=realtime,
+        ),
+        FredRequest(
+            FredOperation.SERIES_OBSERVATIONS,
+            series_id=SERIES_ID,
+            realtime_start=realtime,
+            realtime_end=realtime,
+            observation_start=date(2026, 7, 1),
+            observation_end=date(2026, 7, 31),
+            output_type=4,
+            limit=10,
+            offset=0,
+        ),
+        FredRequest(
+            FredOperation.SERIES_RELEASE,
+            series_id=SERIES_ID,
+            realtime_start=realtime,
+            realtime_end=realtime,
+        ),
+        FredRequest(
+            FredOperation.RELEASE_DATES,
+            release_id=release_id,
+            include_release_dates_with_no_data=False,
+            limit=10,
+            offset=0,
+        ),
+        FredRequest(
+            FredOperation.SERIES_VINTAGE_DATES, series_id=SERIES_ID, limit=10, offset=0
+        ),
     )
 
 
@@ -222,12 +280,16 @@ def g_live_manifest_digest() -> str:
         if index == 4:
             fields["release_id"] = {"type": "operation_3_release_id", "ordinal": 3}
         manifest.append(fields)
-    return hashlib.sha256(canonical_json({
-        "campaign_code": CAMPAIGN_CODE,
-        "manifest_code": MANIFEST_CODE,
-        "manifest_revision": MANIFEST_REVISION,
-        "operations": manifest,
-    })).hexdigest()
+    return hashlib.sha256(
+        canonical_json(
+            {
+                "campaign_code": CAMPAIGN_CODE,
+                "manifest_code": MANIFEST_CODE,
+                "manifest_revision": MANIFEST_REVISION,
+                "operations": manifest,
+            }
+        )
+    ).hexdigest()
 
 
 MANIFEST_DIGEST = g_live_manifest_digest()
@@ -242,15 +304,26 @@ def r3_g_live_manifest(*, release_id: int) -> tuple[FredRequest, ...]:
         raise ValueError("invalid_release_id")
     return (
         FredRequest(FredOperation.SERIES, series_id=SERIES_ID),
-        FredRequest(FredOperation.SERIES_OBSERVATIONS, series_id=SERIES_ID,
-                    observation_start=date(2026, 7, 1),
-                    observation_end=date(2026, 7, 31), output_type=4,
-                    limit=10, offset=0),
+        FredRequest(
+            FredOperation.SERIES_OBSERVATIONS,
+            series_id=SERIES_ID,
+            observation_start=date(2026, 7, 1),
+            observation_end=date(2026, 7, 31),
+            output_type=4,
+            limit=10,
+            offset=0,
+        ),
         FredRequest(FredOperation.SERIES_RELEASE, series_id=SERIES_ID),
-        FredRequest(FredOperation.RELEASE_DATES, release_id=release_id,
-                    include_release_dates_with_no_data=False, limit=10, offset=0),
-        FredRequest(FredOperation.SERIES_VINTAGE_DATES, series_id=SERIES_ID,
-                    limit=10, offset=0),
+        FredRequest(
+            FredOperation.RELEASE_DATES,
+            release_id=release_id,
+            include_release_dates_with_no_data=False,
+            limit=10,
+            offset=0,
+        ),
+        FredRequest(
+            FredOperation.SERIES_VINTAGE_DATES, series_id=SERIES_ID, limit=10, offset=0
+        ),
     )
 
 
@@ -267,16 +340,28 @@ def r4_g_live_manifest(*, release_id: int) -> tuple[FredRequest, ...]:
         raise ValueError("invalid_release_id")
     return (
         FredRequest(FredOperation.SERIES, series_id=SERIES_ID),
-        FredRequest(FredOperation.SERIES_OBSERVATIONS, series_id=SERIES_ID,
-                    realtime_start=date(1776, 7, 4), realtime_end=date(9999, 12, 31),
-                    observation_start=date(2026, 7, 1),
-                    observation_end=date(2026, 7, 31), output_type=4,
-                    limit=10, offset=0),
+        FredRequest(
+            FredOperation.SERIES_OBSERVATIONS,
+            series_id=SERIES_ID,
+            realtime_start=date(1776, 7, 4),
+            realtime_end=date(9999, 12, 31),
+            observation_start=date(2026, 7, 1),
+            observation_end=date(2026, 7, 31),
+            output_type=4,
+            limit=10,
+            offset=0,
+        ),
         FredRequest(FredOperation.SERIES_RELEASE, series_id=SERIES_ID),
-        FredRequest(FredOperation.RELEASE_DATES, release_id=release_id,
-                    include_release_dates_with_no_data=False, limit=10, offset=0),
-        FredRequest(FredOperation.SERIES_VINTAGE_DATES, series_id=SERIES_ID,
-                    limit=10, offset=0),
+        FredRequest(
+            FredOperation.RELEASE_DATES,
+            release_id=release_id,
+            include_release_dates_with_no_data=False,
+            limit=10,
+            offset=0,
+        ),
+        FredRequest(
+            FredOperation.SERIES_VINTAGE_DATES, series_id=SERIES_ID, limit=10, offset=0
+        ),
     )
 
 

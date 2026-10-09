@@ -1,14 +1,13 @@
 """Executor-accounted recurring membership acquisition without campaign writes."""
 
-from datetime import date, datetime, timezone
 import json
+from datetime import UTC, date, datetime
 from types import SimpleNamespace
 
 import pytest
 
-
 SESSION_DATE = date(2026, 8, 13)
-NOW = datetime(2026, 8, 13, 20, 1, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 13, 20, 1, tzinfo=UTC)
 SYMBOLS = ("AAA", "BBB", "CCC", "DDD")
 
 
@@ -50,8 +49,7 @@ def _bodies():
         "Symbol|Security Name|Market Category|Test Issue|Financial Status|"
         "Round Lot Size|ETF|NextShares\n"
         + "\n".join(
-            f"{symbol}|{symbol} Common Stock|Q|N|N|100|N|N"
-            for symbol in SYMBOLS[:2]
+            f"{symbol}|{symbol} Common Stock|Q|N|N|100|N|N" for symbol in SYMBOLS[:2]
         )
         + "\nFile Creation Time: 081320260125|||||||\n"
     ).encode()
@@ -64,13 +62,15 @@ def _bodies():
         )
         + "\nFile Creation Time: 081320260125|||||||\n"
     ).encode()
-    registry = json.dumps({
-        "fields": ["cik", "name", "ticker", "exchange"],
-        "data": [
-            [index + 1, symbol, symbol, "Nasdaq" if index < 2 else "NYSE"]
-            for index, symbol in enumerate(SYMBOLS)
-        ],
-    }).encode()
+    registry = json.dumps(
+        {
+            "fields": ["cik", "name", "ticker", "exchange"],
+            "data": [
+                [index + 1, symbol, symbol, "Nasdaq" if index < 2 else "NYSE"]
+                for index, symbol in enumerate(SYMBOLS)
+            ],
+        }
+    ).encode()
     return {
         EndpointKindV1.NASDAQ_LISTED: listed,
         EndpointKindV1.OTHER_LISTED: other,
@@ -123,12 +123,14 @@ def _deps(*, fail_at=None):
         if identity.endpoint_kind is EndpointKindV1.SEC_SUBMISSIONS:
             index = int(identity.cik)
             symbol = SYMBOLS[index - 1]
-            body = json.dumps({
-                "cik": index,
-                "sic": "3571",
-                "tickers": [symbol],
-                "exchanges": ["Nasdaq" if index < 3 else "NYSE"],
-            }).encode()
+            body = json.dumps(
+                {
+                    "cik": index,
+                    "sic": "3571",
+                    "tickers": [symbol],
+                    "exchanges": ["Nasdaq" if index < 3 else "NYSE"],
+                }
+            ).encode()
         else:
             body = bodies[identity.endpoint_kind]
         return LiveOutcomeV1(True, "OK", body, NOW, 200)
@@ -187,7 +189,8 @@ def test_seam_a_claims_receipt_then_executes_exactly_seven_membership_wires(tmp_
 
 
 def test_seam_a_refuses_a_plan_bound_to_another_date_before_provider_start(
-    monkeypatch, tmp_path,
+    monkeypatch,
+    tmp_path,
 ):
     import tokmo.programs.quant_recurring_shadow as module
     from tokmo.facts.quant_recurring_membership import membership_operation_plan
@@ -195,7 +198,9 @@ def test_seam_a_refuses_a_plan_bound_to_another_date_before_provider_start(
     from tokmo.values.cadence_policy import CADENCE_QUANT_SHADOW_POLICY_V1
 
     original = membership_operation_plan(SYMBOLS, date(2026, 8, 14))
-    monkeypatch.setattr(module, "membership_operation_plan", lambda symbols, session_date: original)
+    monkeypatch.setattr(
+        module, "membership_operation_plan", lambda symbols, session_date: original
+    )
     executor = _Executor()
     with pytest.raises(module.QuantRecurringRefusal, match="session_binding"):
         module.run_quant_membership_acquisition(
@@ -274,11 +279,11 @@ def test_membership_not_ok_response_settles_wire_failed(tmp_path):
     )
 
     assert (outcome.status, outcome.reason, outcome.membership_starts) == (
-        "failed", "source_failure:source_failure", 1,
+        "failed",
+        "source_failure:source_failure",
+        1,
     )
-    assert executor.settlements == [
-        ("membership:nasdaqlisted:2026-08-13", "FAILED")
-    ]
+    assert executor.settlements == [("membership:nasdaqlisted:2026-08-13", "FAILED")]
 
 
 def test_mid_plan_budget_exhaustion_is_truthful_settled_only_and_terminal(tmp_path):
@@ -318,14 +323,17 @@ def test_mid_plan_budget_exhaustion_is_truthful_settled_only_and_terminal(tmp_pa
     )
 
     assert (outcome.status, outcome.reason, outcome.membership_starts) == (
-        "failed", "membership_budget_exhausted", 5,
+        "failed",
+        "membership_budget_exhausted",
+        5,
     )
     assert outcome.reason != "source_failure"
     assert len(deps.calls) == len(executor.rows) == 5
     assert executor.refused_identity not in {identity for identity, _ in executor.rows}
     due = receipts.read_due(context.identity.identity_digest)
     assert (due.state, due.reason_code) == (
-        QuantTerminalStateV1.FAILED, "membership_budget_exhausted",
+        QuantTerminalStateV1.FAILED,
+        "membership_budget_exhausted",
     )
     assert not (tmp_path / "official-membership" / "observations.sqlite3").exists()
 
@@ -340,7 +348,9 @@ def test_mid_plan_budget_exhaustion_is_truthful_settled_only_and_terminal(tmp_pa
         receipts=receipts,
     )
     assert (replay.status, replay.reason, replay.membership_starts) == (
-        "skipped", "already_terminal", 0,
+        "skipped",
+        "already_terminal",
+        0,
     )
     assert replay_executor.starts == []
 

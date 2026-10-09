@@ -1,22 +1,37 @@
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pytest
 
-from tokmo.values._primitives import MISSING
-from tokmo.values.session_gate import Market, judge_sessions
-from tokmo.values.toss_market_calendar import CalendarSession, IntegratedHour, KrMarketDay, UsMarketDay
 from tokmo.programs.session_gate import run_session_gate
 from tokmo.records.calendar_cache import (
-    CalendarCacheSchema2, CalendarDayCacheSchema2, CalendarSessionCacheSchema2,
+    CalendarCacheSchema2,
+    CalendarDayCacheSchema2,
+    CalendarSessionCacheSchema2,
+)
+from tokmo.values._primitives import MISSING
+from tokmo.values.session_gate import Market, judge_sessions
+from tokmo.values.toss_market_calendar import (
+    CalendarSession,
+    IntegratedHour,
+    KrMarketDay,
+    UsMarketDay,
 )
 
 
 def cached_day(trade_date, start, end):
-    sessions = {} if start is None else {
-        "regularMarket": CalendarSessionCacheSchema2(start, end),
-    }
+    sessions = (
+        {}
+        if start is None
+        else {
+            "regularMarket": CalendarSessionCacheSchema2(start, end),
+        }
+    )
     return CalendarDayCacheSchema2(
-        trade_date, sessions, trade_date, "2026-07-30T01:00:00Z", 2,
+        trade_date,
+        sessions,
+        trade_date,
+        "2026-07-30T01:00:00Z",
+        2,
         "toss-market-calendar-v1",
     )
 
@@ -32,17 +47,19 @@ def test_holiday_is_not_a_session_reason_token():
 
 
 def test_session_gate_handles_holiday_short_day_and_us_date():
-    now = datetime(2026, 7, 30, 1, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 30, 1, 0, tzinfo=UTC)
     short = CalendarSession(
-        datetime(2026, 7, 30, 0, 0, tzinfo=timezone.utc),
-        datetime(2026, 7, 30, 1, 0, tzinfo=timezone.utc),
+        datetime(2026, 7, 30, 0, 0, tzinfo=UTC),
+        datetime(2026, 7, 30, 1, 0, tzinfo=UTC),
     )
     us_regular = CalendarSession(
-        datetime(2026, 7, 30, 0, 30, tzinfo=timezone.utc),
-        datetime(2026, 7, 30, 7, 0, tzinfo=timezone.utc),
+        datetime(2026, 7, 30, 0, 30, tzinfo=UTC),
+        datetime(2026, 7, 30, 7, 0, tzinfo=UTC),
     )
     kr = KrMarketDay(date(2026, 7, 30), IntegratedHour(regular_market=short))
-    us = UsMarketDay(date(2026, 7, 29), day_market=us_regular, regular_market=us_regular)
+    us = UsMarketDay(
+        date(2026, 7, 29), day_market=us_regular, regular_market=us_regular
+    )
 
     verdicts = judge_sessions(kr, us, now)
     assert verdicts[0].market is Market.KR
@@ -58,17 +75,19 @@ def test_session_gate_handles_holiday_short_day_and_us_date():
 
 
 def test_session_gate_writer_owner_refreshes_while_read_only_fails_closed():
-    now = datetime(2026, 7, 30, 1, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 30, 1, 0, tzinfo=UTC)
     regular = CalendarSession(
-        datetime(2026, 7, 30, 0, 0, tzinfo=timezone.utc),
-        datetime(2026, 7, 30, 2, 0, tzinfo=timezone.utc),
+        datetime(2026, 7, 30, 0, 0, tzinfo=UTC),
+        datetime(2026, 7, 30, 2, 0, tzinfo=UTC),
     )
     kr = KrMarketDay(date(2026, 7, 30), IntegratedHour(regular_market=regular))
     us = UsMarketDay(date(2026, 7, 29), regular_market=regular)
     writes = []
     owner = run_session_gate(
-        kr_calendar_provider=lambda: kr, us_calendar_provider=lambda: us,
-        cache_read=lambda: None, cache_write=lambda left, right: writes.append((left, right)),
+        kr_calendar_provider=lambda: kr,
+        us_calendar_provider=lambda: us,
+        cache_read=lambda: None,
+        cache_write=lambda left, right: writes.append((left, right)),
         now=now,
     )
     assert owner.any_open is True
@@ -79,7 +98,9 @@ def test_session_gate_writer_owner_refreshes_while_read_only_fails_closed():
     read_only = run_session_gate(
         kr_calendar_provider=lambda: calls.append("kr"),
         us_calendar_provider=lambda: calls.append("us"),
-        cache_read=lambda: None, cache_write=None, now=now,
+        cache_read=lambda: None,
+        cache_write=None,
+        now=now,
     )
     assert read_only.any_open is False
     assert {verdict.reason for verdict in read_only.verdicts} == {"cache_absent"}
@@ -87,7 +108,7 @@ def test_session_gate_writer_owner_refreshes_while_read_only_fails_closed():
 
 
 def test_session_gate_stale_read_only_closes_only_stale_market():
-    now = datetime(2026, 7, 30, 1, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 30, 1, 0, tzinfo=UTC)
     cache = CalendarCacheSchema2(
         2,
         cached_day("2026-07-29", "2026-07-30T00:00:00Z", "2026-07-30T02:00:00Z"),
@@ -98,7 +119,9 @@ def test_session_gate_stale_read_only_closes_only_stale_market():
     result = run_session_gate(
         kr_calendar_provider=lambda: calls.append("kr"),
         us_calendar_provider=lambda: calls.append("us"),
-        cache_read=lambda: cache, cache_write=None, now=now,
+        cache_read=lambda: cache,
+        cache_write=None,
+        now=now,
     )
     assert [(item.market, item.open, item.reason) for item in result.verdicts] == [
         (Market.KR, False, "stale_cache"),
@@ -108,7 +131,7 @@ def test_session_gate_stale_read_only_closes_only_stale_market():
 
 
 def test_session_gate_owner_refetches_only_stale_market_and_writes_combined_cache():
-    now = datetime(2026, 7, 30, 1, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 30, 1, 0, tzinfo=UTC)
     cache = CalendarCacheSchema2(
         2,
         cached_day("2026-07-29", None, None),
@@ -116,8 +139,8 @@ def test_session_gate_owner_refetches_only_stale_market_and_writes_combined_cach
         "2026-07-30T01:00:00Z",
     )
     regular = CalendarSession(
-        datetime(2026, 7, 30, 0, 0, tzinfo=timezone.utc),
-        datetime(2026, 7, 30, 2, 0, tzinfo=timezone.utc),
+        datetime(2026, 7, 30, 0, 0, tzinfo=UTC),
+        datetime(2026, 7, 30, 2, 0, tzinfo=UTC),
     )
     fresh_kr = KrMarketDay(date(2026, 7, 30), IntegratedHour(regular_market=regular))
     calls = []
@@ -137,11 +160,13 @@ def test_session_gate_owner_refetches_only_stale_market_and_writes_combined_cach
 
 
 def test_session_gate_provider_failure_marks_missing_or_stale_market_stale_cache():
-    now = datetime(2026, 7, 30, 1, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 30, 1, 0, tzinfo=UTC)
     result = run_session_gate(
         kr_calendar_provider=lambda: (_ for _ in ()).throw(RuntimeError("down")),
         us_calendar_provider=lambda: None,
-        cache_read=lambda: None, cache_write=lambda _kr, _us: None, now=now,
+        cache_read=lambda: None,
+        cache_write=lambda _kr, _us: None,
+        now=now,
     )
     assert result.any_open is False
     assert {item.reason for item in result.verdicts} == {"stale_cache"}
@@ -154,7 +179,7 @@ def test_session_gate_cache_corrupt_fails_closed_without_provider_or_write():
         us_calendar_provider=lambda: calls.append("us"),
         cache_read=lambda: (_ for _ in ()).throw(ValueError("corrupt")),
         cache_write=lambda _kr, _us: calls.append("write"),
-        now=datetime(2026, 7, 30, 1, 0, tzinfo=timezone.utc),
+        now=datetime(2026, 7, 30, 1, 0, tzinfo=UTC),
     )
     assert result.any_open is False
     assert {item.reason for item in result.verdicts} == {"cache_corrupt"}

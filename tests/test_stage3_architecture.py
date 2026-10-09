@@ -9,7 +9,7 @@ without an executor-issued claim.
 """
 
 import ast
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -37,30 +37,48 @@ STAGE3_MODULES = (
 # transitively: live transports and their composition owner, ambient clock,
 # sealed legacy G2 wrappers, the bounded G2 acceptance runners, and the
 # model-calling analysis pipeline.
-FORBIDDEN_GRAPH_MODULES = frozenset({
-    "tokmo.composition",
-    "tokmo.runtime.wallclock",
-    "tokmo.runtime.config",
-    "tokmo.facts.eia_live", "tokmo.facts.sec_live", "tokmo.facts.opendart_live",
-    "tokmo.facts.krx_live",
-    "tokmo.facts.toss_auth_live", "tokmo.facts.toss_live",
-    "tokmo.facts.toss_prices_live", "tokmo.facts.toss_reads_live",
-    "tokmo.programs.legacy_g2",
-    "tokmo.programs.g2a_shadow_runner", "tokmo.programs.g2b_canary_runner",
-    "tokmo.programs.g2c_analysis_shadow", "tokmo.programs.g2d_full_session_runner",
-    "tokmo.programs.integrated_fake_cadence",
-    "tokmo.programs.analysis_pipeline",
-})
+FORBIDDEN_GRAPH_MODULES = frozenset(
+    {
+        "tokmo.composition",
+        "tokmo.runtime.wallclock",
+        "tokmo.runtime.config",
+        "tokmo.facts.eia_live",
+        "tokmo.facts.sec_live",
+        "tokmo.facts.opendart_live",
+        "tokmo.facts.krx_live",
+        "tokmo.facts.toss_auth_live",
+        "tokmo.facts.toss_live",
+        "tokmo.facts.toss_prices_live",
+        "tokmo.facts.toss_reads_live",
+        "tokmo.programs.legacy_g2",
+        "tokmo.programs.g2a_shadow_runner",
+        "tokmo.programs.g2b_canary_runner",
+        "tokmo.programs.g2c_analysis_shadow",
+        "tokmo.programs.g2d_full_session_runner",
+        "tokmo.programs.integrated_fake_cadence",
+        "tokmo.programs.analysis_pipeline",
+    }
+)
 
-LEGACY_ADMISSION_NAMES = frozenset({
-    "plan_requests", "arm_account_rows", "start_request", "settle_request",
-    "reserve_request",
-})
+LEGACY_ADMISSION_NAMES = frozenset(
+    {
+        "plan_requests",
+        "arm_account_rows",
+        "start_request",
+        "settle_request",
+        "reserve_request",
+    }
+)
 
 DEPS_PROVIDER_FIELDS = (
-    "token_fetch", "calendar_fetch", "accounts_fetch",
-    "account_holdings_fetch", "quotes_fetch", "orders_page_fetch",
-    "order_detail_fetch", "stock_candles_fetch",
+    "token_fetch",
+    "calendar_fetch",
+    "accounts_fetch",
+    "account_holdings_fetch",
+    "quotes_fetch",
+    "orders_page_fetch",
+    "order_detail_fetch",
+    "stock_candles_fetch",
 )
 
 
@@ -79,8 +97,7 @@ def _tokmo_imports(module: str) -> set[str]:
                 names.add(node.module)
         elif isinstance(node, ast.Import):
             names.update(
-                alias.name for alias in node.names
-                if alias.name.startswith("tokmo")
+                alias.name for alias in node.names if alias.name.startswith("tokmo")
             )
     return names
 
@@ -109,15 +126,14 @@ def test_stage3_modules_never_name_the_legacy_admission_surface():
         tree = ast.parse((SRC / relative).read_text())
         used = {
             node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)
-        } | {
-            node.id for node in ast.walk(tree) if isinstance(node, ast.Name)
-        }
+        } | {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
         leaked = used & LEGACY_ADMISSION_NAMES
         assert not leaked, f"{relative} names legacy admission surface {leaked}"
 
 
 def test_stage3_modules_carry_no_order_write_vocabulary():
     import re
+
     for relative in STAGE3_MODULES:
         text = (SRC / relative).read_text()
         for method in ("POST", "PUT", "PATCH", "DELETE"):
@@ -129,12 +145,20 @@ def test_production_cadence_deps_fields_are_exactly_the_read_only_contract():
     from tokmo.programs.production_cadence import ProductionCadenceDepsV1
 
     assert tuple(ProductionCadenceDepsV1.__dataclass_fields__) == (
-        "mode", "clock", *DEPS_PROVIDER_FIELDS,
-        "regular_session_dates", "lifecycle_sink", "watchlist_symbols",
+        "mode",
+        "clock",
+        *DEPS_PROVIDER_FIELDS,
+        "regular_session_dates",
+        "lifecycle_sink",
+        "watchlist_symbols",
         "analysis_execution",
-        "pension_registry_path", "pension_composition_enabled",
-        "pension_reminder_send_enabled", "pension_unquotable_symbols",
-        "membership_fetch", "sec_user_agent", "sic_snapshot_loader",
+        "pension_registry_path",
+        "pension_composition_enabled",
+        "pension_reminder_send_enabled",
+        "pension_unquotable_symbols",
+        "membership_fetch",
+        "sec_user_agent",
+        "sic_snapshot_loader",
         "stocks_membership_fetch",
     )
 
@@ -144,7 +168,7 @@ def test_fixture_providers_reject_claimless_calls_before_any_data():
 
     deps, _probe = build_fixture_cadence_deps(
         fixture={"accounts": [{"seed": "1", "holdings": []}]},
-        clock=lambda: datetime(2026, 8, 3, tzinfo=timezone.utc),
+        clock=lambda: datetime(2026, 8, 3, tzinfo=UTC),
     )
     with pytest.raises(PermissionError):
         deps.token_fetch(None)
@@ -154,19 +178,31 @@ def test_fixture_providers_reject_claimless_calls_before_any_data():
         deps.quotes_fetch(claim=object(), bearer="fixture-bearer", symbols=("A",))
     with pytest.raises(PermissionError):
         deps.orders_page_fetch(
-            claim=None, bearer="fixture-bearer", account_scope="s",
-            native_ref="1", status="CLOSED", from_date="2026-08-01",
-            to_date="2026-08-03", cursor=None, limit=100,
+            claim=None,
+            bearer="fixture-bearer",
+            account_scope="s",
+            native_ref="1",
+            status="CLOSED",
+            from_date="2026-08-01",
+            to_date="2026-08-03",
+            cursor=None,
+            limit=100,
         )
     with pytest.raises(PermissionError):
         deps.order_detail_fetch(
-            claim=None, bearer="fixture-bearer", account_scope="s",
-            native_ref="1", order_id="o",
+            claim=None,
+            bearer="fixture-bearer",
+            account_scope="s",
+            native_ref="1",
+            order_id="o",
         )
     with pytest.raises(PermissionError):
         deps.stock_candles_fetch(
-            claim=None, bearer="fixture-bearer", symbol="005930",
-            before=datetime(2026, 8, 3, tzinfo=timezone.utc), adjusted=True,
+            claim=None,
+            bearer="fixture-bearer",
+            symbol="005930",
+            before=datetime(2026, 8, 3, tzinfo=UTC),
+            adjusted=True,
         )
     assert _probe.calls == {}
 
@@ -180,29 +216,46 @@ def test_every_executed_provider_callback_carried_a_genuine_live_claim(tmp_path)
     from tokmo.programs.production_cadence import run_production_cadence_once
     from tokmo.records.ops_kernel import OpsKernelStore
 
-    slot = datetime(2026, 8, 3, 14, 0, tzinfo=timezone.utc)
+    slot = datetime(2026, 8, 3, 14, 0, tzinfo=UTC)
     observed = slot + timedelta(seconds=1)
     deps, probe = build_fixture_cadence_deps(
         fixture={
             "token": "claim-proof-bearer",
             "calendar": {
-                "KR": {"regular_start": "2026-08-03T00:00:00Z",
-                       "regular_end": "2026-08-03T06:30:00Z"},
-                "US": {"regular_start": "2026-08-03T13:30:00Z",
-                       "regular_end": "2026-08-03T20:00:00Z"},
+                "KR": {
+                    "regular_start": "2026-08-03T00:00:00Z",
+                    "regular_end": "2026-08-03T06:30:00Z",
+                },
+                "US": {
+                    "regular_start": "2026-08-03T13:30:00Z",
+                    "regular_end": "2026-08-03T20:00:00Z",
+                },
             },
-            "accounts": [{"seed": "9", "holdings": [
-                {"symbol": "AAPL", "quantity": "1", "avg_price": "100",
-                 "currency": "USD", "market_raw": "US"},
-            ]}],
+            "accounts": [
+                {
+                    "seed": "9",
+                    "holdings": [
+                        {
+                            "symbol": "AAPL",
+                            "quantity": "1",
+                            "avg_price": "100",
+                            "currency": "USD",
+                            "market_raw": "US",
+                        },
+                    ],
+                }
+            ],
             "quotes": {"AAPL": {"price": "101", "currency": "USD"}},
         },
         clock=lambda: observed,
     )
     root = tmp_path / "shadow"
     result = run_production_cadence_once(
-        root=root, policy_version="cadence-300s-v1", scheduled_for_utc=slot,
-        observed_now_utc=observed, deps=deps,
+        root=root,
+        policy_version="cadence-300s-v1",
+        scheduled_for_utc=slot,
+        observed_now_utc=observed,
+        deps=deps,
     )
     assert result.outcome.value == "COMPLETE"
     assert all(type(claim) is WireClaimV1 for claim in probe.claims)
@@ -210,7 +263,8 @@ def test_every_executed_provider_callback_carried_a_genuine_live_claim(tmp_path)
         root / "ops" / "ops_kernel.sqlite3"
     ).read_cadence_tick_report("cadence-300s-v1", slot)
     non_calendar_started = sum(
-        count for operation, count in report["operation_started"].items()
+        count
+        for operation, count in report["operation_started"].items()
         if not operation.startswith("CALENDAR_DAY_")
     )
     assert len(probe.claims) == non_calendar_started
@@ -233,25 +287,34 @@ def test_cadence_main_exists_and_calls_the_production_entrypoint_once():
             target = node
     assert target is not None, "composition.cadence_main missing"
     calls = [
-        child for child in ast.walk(target)
+        child
+        for child in ast.walk(target)
         if isinstance(child, ast.Call)
         and (
-            (isinstance(child.func, ast.Name)
-             and child.func.id == "run_production_cadence_once")
-            or (isinstance(child.func, ast.Attribute)
-                and child.func.attr == "run_production_cadence_once")
+            (
+                isinstance(child.func, ast.Name)
+                and child.func.id == "run_production_cadence_once"
+            )
+            or (
+                isinstance(child.func, ast.Attribute)
+                and child.func.attr == "run_production_cadence_once"
+            )
         )
     ]
-    assert len(calls) == 1, "cadence_main must call run_production_cadence_once exactly once"
+    assert len(calls) == 1, (
+        "cadence_main must call run_production_cadence_once exactly once"
+    )
     # G2-D imports/calls are forbidden from this path (SDS §9).
     named = {
         child.attr for child in ast.walk(target) if isinstance(child, ast.Attribute)
-    } | {
-        child.id for child in ast.walk(target) if isinstance(child, ast.Name)
-    }
+    } | {child.id for child in ast.walk(target) if isinstance(child, ast.Name)}
     forbidden = {
-        "run_d_full_session", "build_g2d_live_deps", "G2DReport",
-        "run_b_canary", "run_a_one_hour", "run_integrated_fake_day",
+        "run_d_full_session",
+        "build_g2d_live_deps",
+        "G2DReport",
+        "run_b_canary",
+        "run_a_one_hour",
+        "run_integrated_fake_day",
     }
     assert not named & forbidden
 
@@ -279,20 +342,25 @@ def test_real_deps_builder_constructs_without_provider_calls(tmp_path):
     # load_watchlists path succeeds with zero targets (not a fail-closed
     # registry_unavailable from a missing directory).
     import json
+
     watchlists_dir = tmp_path / "watchlists"
     watchlists_dir.mkdir()
     empty_kr = {
-        "schema_version": 1, "market": "KR", "entries": [],
+        "schema_version": 1,
+        "market": "KR",
+        "entries": [],
     }
     empty_us = {
-        "schema_version": 1, "market": "US", "entries": [],
+        "schema_version": 1,
+        "market": "US",
+        "entries": [],
     }
     (watchlists_dir / "KR.json").write_text(json.dumps(empty_kr))
     (watchlists_dir / "US.json").write_text(json.dumps(empty_us))
 
     deps = build_production_cadence_deps(
         project_root=tmp_path,
-        clock=lambda: datetime(2026, 8, 3, tzinfo=timezone.utc),
+        clock=lambda: datetime(2026, 8, 3, tzinfo=UTC),
         shadow_root=tmp_path / "shadow",
         https_handler_factory=None,
     )
@@ -303,6 +371,8 @@ def test_real_deps_builder_constructs_without_provider_calls(tmp_path):
     # empty durable history: truthful failed_calendar, no fabricated weekday
     with pytest.raises(ValueError):
         deps.regular_session_dates.regular_session_dates(
-            Market.KR, datetime(2026, 8, 3, tzinfo=timezone.utc).date(), 20,
+            Market.KR,
+            datetime(2026, 8, 3, tzinfo=UTC).date(),
+            20,
         )
     assert not (tmp_path / "shadow").exists()  # reads never create the store

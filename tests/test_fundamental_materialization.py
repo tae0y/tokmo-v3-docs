@@ -5,9 +5,8 @@ Handles date-only available-at normalization via the next-completed-session
 policy seam.
 """
 
-from datetime import datetime, timezone
-
-import pytest
+from datetime import UTC, datetime
+from pathlib import Path
 
 from tokmo.programs.fundamental_materialization import (
     MaterializationResult,
@@ -21,8 +20,6 @@ from tokmo.values.fundamental_materials import (
     StatementScope,
 )
 
-from pathlib import Path
-
 FIXTURES = Path(__file__).parent / "fixtures" / "sec_companyfacts"
 
 
@@ -30,14 +27,14 @@ def _load_fixture(name: str) -> bytes:
     return (FIXTURES / name).read_bytes()
 
 
-_AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
+_AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
 _MARKET = "US_NASDAQ"
 _SCOPE = StatementScope.CONSOLIDATED
 
 
 def _resolver(filed_raw: str) -> AvailableAtResolution:
     return AvailableAtResolution(
-        available_at=datetime(2025, 11, 3, 21, 0, tzinfo=timezone.utc),
+        available_at=datetime(2025, 11, 3, 21, 0, tzinfo=UTC),
         policy_version=DATE_ONLY_POLICY_VERSION,
         session_history_source=DATE_ONLY_SESSION_HISTORY_SOURCE,
     )
@@ -46,7 +43,7 @@ def _resolver(filed_raw: str) -> AvailableAtResolution:
 class TestMaterializeSecFundamentals:
     def test_produces_current_and_prior_materials(self):
         body = _load_fixture("aapl_minimal.json")
-        observed_at = datetime(2025, 11, 1, 12, 0, tzinfo=timezone.utc)
+        observed_at = datetime(2025, 11, 1, 12, 0, tzinfo=UTC)
 
         result = materialize_sec_fundamentals(
             body,
@@ -68,7 +65,7 @@ class TestMaterializeSecFundamentals:
 
     def test_materials_are_official_fundamental_material(self):
         body = _load_fixture("aapl_minimal.json")
-        observed_at = datetime(2025, 11, 1, 12, 0, tzinfo=timezone.utc)
+        observed_at = datetime(2025, 11, 1, 12, 0, tzinfo=UTC)
 
         result = materialize_sec_fundamentals(
             body,
@@ -89,7 +86,7 @@ class TestMaterializeSecFundamentals:
             b"invalid json",
             cik="0000320193",
             canonical_symbol="AAPL",
-            observed_at=datetime(2025, 11, 1, 12, 0, tzinfo=timezone.utc),
+            observed_at=datetime(2025, 11, 1, 12, 0, tzinfo=UTC),
             available_at_resolver=_resolver,
             market=_MARKET,
             statement_scope=_SCOPE,
@@ -101,13 +98,14 @@ class TestMaterializeSecFundamentals:
     def test_source_refs_preserve_raw_body_sha256(self):
         body = _load_fixture("aapl_minimal.json")
         import hashlib
+
         expected = hashlib.sha256(body).hexdigest()
 
         result = materialize_sec_fundamentals(
             body,
             cik="0000320193",
             canonical_symbol="AAPL",
-            observed_at=datetime(2025, 11, 1, 12, 0, tzinfo=timezone.utc),
+            observed_at=datetime(2025, 11, 1, 12, 0, tzinfo=UTC),
             available_at_resolver=_resolver,
             market=_MARKET,
             statement_scope=_SCOPE,
@@ -123,7 +121,7 @@ class TestMaterializeSecFundamentals:
             body,
             cik="0000320193",
             canonical_symbol="AAPL",
-            observed_at=datetime(2025, 11, 1, 12, 0, tzinfo=timezone.utc),
+            observed_at=datetime(2025, 11, 1, 12, 0, tzinfo=UTC),
             available_at_resolver=_resolver,
             market=_MARKET,
             statement_scope=_SCOPE,
@@ -140,7 +138,7 @@ class TestMaterializeSecFundamentals:
             body,
             cik="0000320193",
             canonical_symbol="AAPL",
-            observed_at=datetime(2025, 11, 1, 12, 0, tzinfo=timezone.utc),
+            observed_at=datetime(2025, 11, 1, 12, 0, tzinfo=UTC),
             available_at_resolver=_resolver,
             market="US_NYSE",
             statement_scope=StatementScope.NON_CONSOLIDATED,

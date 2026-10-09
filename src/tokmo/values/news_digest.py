@@ -32,18 +32,17 @@ def morning_digest_eligible(body) -> bool:
         return False
     return any(
         line.strip().startswith(DIGEST_STATEMENT_PREFIX)
-        and line.strip()[len(DIGEST_STATEMENT_PREFIX):].strip()
-        for line in text.splitlines())
+        and line.strip()[len(DIGEST_STATEMENT_PREFIX) :].strip()
+        for line in text.splitlines()
+    )
 
 
 def _digest_item(body: str) -> str:
     """One bounded item: the held body's heading plus its event statement.
     Evidence counts stay out of the combined digest — the statement is the
     meaningful part; full held bytes remain durable in ``alert_revisions``."""
-    lines = [line.strip() for line in body.strip().splitlines()
-             if line.strip()]
-    statement = next(line for line in lines
-                     if line.startswith(DIGEST_STATEMENT_PREFIX))
+    lines = [line.strip() for line in body.strip().splitlines() if line.strip()]
+    statement = next(line for line in lines if line.startswith(DIGEST_STATEMENT_PREFIX))
     heading = lines[0] if lines and lines[0] != statement else ""
     return f"{heading}\n{statement}" if heading else statement
 
@@ -58,8 +57,7 @@ def compose_morning_digest(bodies) -> "tuple[str, int]":
     else is a caller bug and fails closed with ``ValueError``.
     """
     bodies = list(bodies)
-    if not bodies or any(not morning_digest_eligible(body)
-                         for body in bodies):
+    if not bodies or any(not morning_digest_eligible(body) for body in bodies):
         raise ValueError("compose_morning_digest requires eligible bodies")
     if len(bodies) == 1:
         # A single overnight episode keeps its held bytes untouched.

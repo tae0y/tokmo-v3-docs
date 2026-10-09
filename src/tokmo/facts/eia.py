@@ -1,12 +1,12 @@
 """EIA WTI parser/query. Transport and clock are mandatory injections."""
 
+import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
-import json
 
-from tokmo.values import UnavailableFact, WtiFact, WTI_SERIES, WTI_SOURCE, WTI_UNITS
+from tokmo.values import WTI_SERIES, WTI_SOURCE, WTI_UNITS, UnavailableFact, WtiFact
 
 SOURCE = WTI_SOURCE
 ENDPOINT_ID = "eia_petroleum_data"
@@ -30,13 +30,27 @@ WTI_QUERY_MULTIMAP: tuple[tuple[str, str], ...] = (
 # Live contract §6/D1: closed outcome codes. The transport may only produce
 # the failure subset; "success" and "response_contract_failure" are decided
 # here after parsing.
-LIVE_TRANSPORT_FAILURE_CODES = frozenset({
-    "timeout", "connection_failure", "http_429", "http_5xx",
-    "auth_rejection", "bad_request", "redirect", "body_too_large",
-    "unsupported_content_encoding", "protocol_failure",
-})
-LIVE_ATTEMPT_CODES = LIVE_TRANSPORT_FAILURE_CODES | {"success", "response_contract_failure"}
-RETRY_CANDIDATE_CODES = frozenset({"timeout", "connection_failure", "http_5xx", "http_429"})
+LIVE_TRANSPORT_FAILURE_CODES = frozenset(
+    {
+        "timeout",
+        "connection_failure",
+        "http_429",
+        "http_5xx",
+        "auth_rejection",
+        "bad_request",
+        "redirect",
+        "body_too_large",
+        "unsupported_content_encoding",
+        "protocol_failure",
+    }
+)
+LIVE_ATTEMPT_CODES = LIVE_TRANSPORT_FAILURE_CODES | {
+    "success",
+    "response_contract_failure",
+}
+RETRY_CANDIDATE_CODES = frozenset(
+    {"timeout", "connection_failure", "http_5xx", "http_429"}
+)
 
 # Closed mapping from transport failure codes to typed unavailability reasons.
 _FAILURE_REASONS = {
@@ -137,7 +151,9 @@ def build_wti_request(*, api_key: str) -> EiaRequest:
     )
 
 
-def parse_wti_response(body: bytes, *, observed_at: datetime) -> WtiFact | UnavailableFact:
+def parse_wti_response(
+    body: bytes, *, observed_at: datetime
+) -> WtiFact | UnavailableFact:
     try:
         payload = json.loads(body)
     except (json.JSONDecodeError, UnicodeDecodeError):
@@ -170,7 +186,9 @@ def parse_wti_response(body: bytes, *, observed_at: datetime) -> WtiFact | Unava
     return WtiFact(SOURCE, SERIES, period, value, UNITS, observed_at)
 
 
-def query_wti(*, api_key: str | None, transport: Transport, clock: Clock) -> WtiQueryResult:
+def query_wti(
+    *, api_key: str | None, transport: Transport, clock: Clock
+) -> WtiQueryResult:
     """Fixture-path query: request creation, one transport call, parser.
 
     Keeps the pre-live contract intact: fixture transports return an
@@ -178,24 +196,35 @@ def query_wti(*, api_key: str | None, transport: Transport, clock: Clock) -> Wti
     """
     observed_at = clock()
     if not api_key:
-        return WtiQueryResult(UnavailableFact(SOURCE, "config_missing", observed_at), None)
+        return WtiQueryResult(
+            UnavailableFact(SOURCE, "config_missing", observed_at), None
+        )
 
     request = build_wti_request(api_key=api_key)
     try:
         response = transport(request)
     except (TimeoutError, ConnectionError, OSError):
-        return WtiQueryResult(UnavailableFact(SOURCE, "transport_error", observed_at), None)
+        return WtiQueryResult(
+            UnavailableFact(SOURCE, "transport_error", observed_at), None
+        )
 
     if response.status == 429:
         retry_after = _retry_after_seconds(response.headers)
         return WtiQueryResult(
-            UnavailableFact(SOURCE, "rate_limited", observed_at, retry_after), None)
+            UnavailableFact(SOURCE, "rate_limited", observed_at, retry_after), None
+        )
     if response.status != 200:
-        return WtiQueryResult(UnavailableFact(SOURCE, "transport_error", observed_at), None)
-    return WtiQueryResult(parse_wti_response(response.body, observed_at=observed_at), None)
+        return WtiQueryResult(
+            UnavailableFact(SOURCE, "transport_error", observed_at), None
+        )
+    return WtiQueryResult(
+        parse_wti_response(response.body, observed_at=observed_at), None
+    )
 
 
-def query_wti_live(*, api_key: str, transport: LiveTransport, clock: Clock) -> WtiQueryResult:
+def query_wti_live(
+    *, api_key: str, transport: LiveTransport, clock: Clock
+) -> WtiQueryResult:
     """Live-path query consuming the module-private transport union (D1).
 
     Exactly one transport call; the raw body is consumed by the parser and
@@ -216,13 +245,16 @@ def query_wti_live(*, api_key: str, transport: LiveTransport, clock: Clock) -> W
         del outcome
         if isinstance(parsed, WtiFact):
             return WtiQueryResult(parsed, LiveAttemptOutcome(code="success"))
-        return WtiQueryResult(parsed, LiveAttemptOutcome(code="response_contract_failure"))
+        return WtiQueryResult(
+            parsed, LiveAttemptOutcome(code="response_contract_failure")
+        )
 
     if isinstance(outcome, _LiveTransportFailure):
         reason = _FAILURE_REASONS[outcome.code]
         fact = UnavailableFact(SOURCE, reason, observed_at, outcome.retry_after)
         return WtiQueryResult(
-            fact, LiveAttemptOutcome(code=outcome.code, retry_after=outcome.retry_after))
+            fact, LiveAttemptOutcome(code=outcome.code, retry_after=outcome.retry_after)
+        )
 
     return WtiQueryResult(
         UnavailableFact(SOURCE, "transport_error", observed_at),
@@ -230,7 +262,9 @@ def query_wti_live(*, api_key: str, transport: LiveTransport, clock: Clock) -> W
     )
 
 
-def get_wti(*, api_key: str | None, transport: Transport, clock: Clock) -> WtiFact | UnavailableFact:
+def get_wti(
+    *, api_key: str | None, transport: Transport, clock: Clock
+) -> WtiFact | UnavailableFact:
     """Backward-compatible façade over the fixture-path query (contract §6)."""
     return query_wti(api_key=api_key, transport=transport, clock=clock).fact
 

@@ -12,8 +12,6 @@ is already covered.
 import urllib.error
 from email.message import Message
 
-import pytest
-
 from tokmo.facts.sec_fundamentals import (
     MAX_COMPANYFACTS_BODY_BYTES,
     SECCompanyFactsRequest,
@@ -94,6 +92,7 @@ class TestWireUrlValidation:
 class TestReadSuccess:
     def test_reads_valid_identity_response(self):
         from unittest.mock import MagicMock
+
         resp = MagicMock()
         resp.status = 200
         resp.headers = {"Content-Encoding": "identity"}
@@ -103,6 +102,7 @@ class TestReadSuccess:
 
     def test_rejects_non_identity_encoding(self):
         from unittest.mock import MagicMock
+
         resp = MagicMock()
         resp.status = 200
         resp.headers = {"Content-Encoding": "gzip"}
@@ -113,6 +113,7 @@ class TestReadSuccess:
 
     def test_rejects_oversized_body(self):
         from unittest.mock import MagicMock
+
         resp = MagicMock()
         resp.status = 200
         resp.headers = {}
@@ -123,6 +124,7 @@ class TestReadSuccess:
 
     def test_rejects_non_200_status(self):
         from unittest.mock import MagicMock
+
         resp = MagicMock()
         resp.status = 500
         result = _read_success(resp)
@@ -131,6 +133,7 @@ class TestReadSuccess:
 
     def test_rejects_oversized_declared_content_length(self):
         from unittest.mock import MagicMock
+
         resp = MagicMock()
         resp.status = 200
         resp.headers = {"Content-Length": str(MAX_COMPANYFACTS_BODY_BYTES + 1)}
@@ -208,7 +211,6 @@ class TestNetworkZero:
     def test_socket_is_blocked_at_module_level(self):
         """M8: verify that socket.socket is guarded so no real connection
         can be opened during the test session."""
-        import socket
         # Attempting to create a real socket should be blocked by the
         # guard installed in conftest or at module level. We verify by
         # checking that socket.socket raises or is wrapped.
@@ -219,15 +221,18 @@ class TestNetworkZero:
         # calls outside of guard verification.
         import ast
         import inspect
+
         source = inspect.getsource(__import__("sys").modules[__name__])
         tree = ast.parse(source)
         for node in ast.walk(tree):
             if isinstance(node, ast.Call):
                 func = node.func
-                if (isinstance(func, ast.Attribute)
-                        and isinstance(func.value, ast.Name)
-                        and func.value.id == "socket"
-                        and func.attr == "socket"):
+                if (
+                    isinstance(func, ast.Attribute)
+                    and isinstance(func.value, ast.Name)
+                    and func.value.id == "socket"
+                    and func.attr == "socket"
+                ):
                     # Only allowed inside this very test method
                     if not (isinstance(node.func.ctx, ast.Load)):
                         continue
@@ -240,8 +245,8 @@ class TestNetworkZero:
         """Verify that calling the transport with a mocked opener that records
         invocations never reaches a real socket."""
         from unittest.mock import MagicMock
+
         from tokmo.facts.sec_fundamentals import (
-            SECCompanyFactsRequest,
             build_companyfacts_request,
         )
 

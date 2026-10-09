@@ -12,25 +12,25 @@ These tests are written RED and drive the implementation:
   8. status/receipt revision_count in aggregates and CLI output
 """
 
-import json
 import sqlite3
 import textwrap
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pytest
-
-from tokmo.facts.opendart_bulk import Disclosure
-from tokmo.records.opendart_disclosures import DisclosureStore
-from tokmo.programs.opendart_pilot import PilotError
-
-from test_opendart_bulk import envelope, row
+from test_opendart_bulk import envelope
 from test_opendart_pilot import (
-    Transport, latest_partition_run, migrated_for, operate_tick, seed_baseline,
+    Transport,
+    latest_partition_run,
+    migrated_for,
+    operate_tick,
+    seed_baseline,
     store,
 )
 
+from tokmo.facts.opendart_bulk import Disclosure
+from tokmo.records.opendart_disclosures import DisclosureStore
 
-NOW = datetime(2026, 8, 3, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 3, tzinfo=UTC)
 RCEPT_NO = "20260803000117"
 CORP_CODE = "00126380"
 CORP_NAME = "Samsung"
@@ -42,13 +42,23 @@ RCEPT_DT = "20260701"
 
 
 def disclosure_with_rm(rm):
-    return Disclosure(CORP_CODE, CORP_NAME, STOCK_CODE, CORP_CLS,
-                      REPORT_NM, RCEPT_NO, FLR_NM, RCEPT_DT, rm)
+    return Disclosure(
+        CORP_CODE,
+        CORP_NAME,
+        STOCK_CODE,
+        CORP_CLS,
+        REPORT_NM,
+        RCEPT_NO,
+        FLR_NM,
+        RCEPT_DT,
+        rm,
+    )
 
 
 # ---------------------------------------------------------------------------
 # 1. null→정 REVISION
 # ---------------------------------------------------------------------------
+
 
 def test_null_to_nonnull_rm_is_revision_not_conflict(tmp_path):
     db = store(tmp_path)
@@ -60,12 +70,13 @@ def test_null_to_nonnull_rm_is_revision_not_conflict(tmp_path):
     assert result == "revision"
     # Canonical latest is now updated to observed
     stored_rm = db.connection.execute(
-        "select rm from disclosures where rcept_no=?", (RCEPT_NO,)).fetchone()
+        "select rm from disclosures where rcept_no=?", (RCEPT_NO,)
+    ).fetchone()
     assert stored_rm == ("정",)
     # revision evidence was appended
     count = db.connection.execute(
-        "select count(*) from dart_revisions where rcept_no=?",
-        (RCEPT_NO,)).fetchone()
+        "select count(*) from dart_revisions where rcept_no=?", (RCEPT_NO,)
+    ).fetchone()
     assert count == (1,)
     # run revision_count incremented
     assert db.receipt(run.run_id).revision_count == 1
@@ -76,18 +87,19 @@ def test_null_to_nonnull_rm_is_revision_not_conflict(tmp_path):
 # 2. Exact repeat of same revision is DUPLICATE
 # ---------------------------------------------------------------------------
 
+
 def test_exact_repeat_of_revision_is_duplicate(tmp_path):
     db = store(tmp_path)
     run = db.claim("incremental", "20260803", "20260803", NOW)
-    db.observe(run, disclosure_with_rm(None), NOW)     # new
-    db.observe(run, disclosure_with_rm("정"), NOW)       # revision
+    db.observe(run, disclosure_with_rm(None), NOW)  # new
+    db.observe(run, disclosure_with_rm("정"), NOW)  # revision
     # Now observed "정" again — should be duplicate
     result = db.observe(run, disclosure_with_rm("정"), NOW)
     assert result == "duplicate"
     # No new revision evidence
     count = db.connection.execute(
-        "select count(*) from dart_revisions where rcept_no=?",
-        (RCEPT_NO,)).fetchone()
+        "select count(*) from dart_revisions where rcept_no=?", (RCEPT_NO,)
+    ).fetchone()
     assert count == (1,)
     db.close()
 
@@ -96,20 +108,30 @@ def test_exact_repeat_of_revision_is_duplicate(tmp_path):
 # 3. Immutable field drift remains CONFLICT
 # ---------------------------------------------------------------------------
 
+
 def test_immutable_field_drift_is_still_conflict(tmp_path):
     db = store(tmp_path)
     run = db.claim("incremental", "20260803", "20260803", NOW)
     db.observe(run, disclosure_with_rm(None), NOW)  # new
     # Change a stable provider/company identity field.
-    changed = Disclosure("99999999", CORP_NAME, STOCK_CODE, CORP_CLS,
-                         REPORT_NM, RCEPT_NO, FLR_NM, RCEPT_DT, None)
+    changed = Disclosure(
+        "99999999",
+        CORP_NAME,
+        STOCK_CODE,
+        CORP_CLS,
+        REPORT_NM,
+        RCEPT_NO,
+        FLR_NM,
+        RCEPT_DT,
+        None,
+    )
     result = db.observe(run, changed, NOW)
     assert result == "conflict"
     assert db.receipt(run.run_id).conflict_count == 1
     # No revision evidence for conflict
     rev_count = db.connection.execute(
-        "select count(*) from dart_revisions where rcept_no=?",
-        (RCEPT_NO,)).fetchone()
+        "select count(*) from dart_revisions where rcept_no=?", (RCEPT_NO,)
+    ).fetchone()
     assert rev_count == (0,)
     db.close()
 
@@ -117,6 +139,7 @@ def test_immutable_field_drift_is_still_conflict(tmp_path):
 # ---------------------------------------------------------------------------
 # 4. Existing-schema migration with rows
 # ---------------------------------------------------------------------------
+
 
 def test_existing_schema_migrates_additively(tmp_path):
     """Opening a DB created with the old schema (no dart_revisions table,
@@ -149,16 +172,33 @@ def test_existing_schema_migrates_additively(tmp_path):
     """)
     conn = sqlite3.connect(str(db_path))
     conn.executescript(old_schema)
-    conn.execute("insert into runs(run_id,kind,bgn_de,end_de,status,started_at,new_count,conflict_count) "
-                 "values('oldrun1','backfill','20260701','20260801','complete','2026-08-01T00:00:00+00:00',5,0)")
-    conn.execute("insert into disclosures values(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                 (RCEPT_NO, CORP_CODE, CORP_NAME, STOCK_CODE, CORP_CLS,
-                  REPORT_NM, FLR_NM, RCEPT_DT, None,
-                  '{"rm":null}', "abc123hash",
-                  "2026-08-01T00:00:00+00:00", "oldrun1"))
+    conn.execute(
+        "insert into runs(run_id,kind,bgn_de,end_de,status,started_at,new_count,conflict_count) "
+        "values('oldrun1','backfill','20260701','20260801','complete','2026-08-01T00:00:00+00:00',5,0)"
+    )
+    conn.execute(
+        "insert into disclosures values(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            RCEPT_NO,
+            CORP_CODE,
+            CORP_NAME,
+            STOCK_CODE,
+            CORP_CLS,
+            REPORT_NM,
+            FLR_NM,
+            RCEPT_DT,
+            None,
+            '{"rm":null}',
+            "abc123hash",
+            "2026-08-01T00:00:00+00:00",
+            "oldrun1",
+        ),
+    )
     conn.commit()
     conn.close()
-    import os; os.chmod(db_path, 0o600)
+    import os
+
+    os.chmod(db_path, 0o600)
 
     # Open with DisclosureStore — triggers migration
     db = DisclosureStore.open(db_path)
@@ -173,15 +213,21 @@ def test_existing_schema_migrates_additively(tmp_path):
     ).fetchone()
     assert rev_table == (1,)
     # runs.revision_count column exists
-    cols = [row[1] for row in db.connection.execute("pragma table_info(runs)").fetchall()]
+    cols = [
+        row[1] for row in db.connection.execute("pragma table_info(runs)").fetchall()
+    ]
     assert "revision_count" in cols
     # Old run has revision_count=0 (default)
-    rc = db.connection.execute("select revision_count from runs where run_id='oldrun1'").fetchone()
+    rc = db.connection.execute(
+        "select revision_count from runs where run_id='oldrun1'"
+    ).fetchone()
     assert rc == (0,)
     # Idempotent: re-open should not fail or duplicate
     db.close()
     db2 = DisclosureStore.open(db_path)
-    assert db2.connection.execute("select count(*) from dart_revisions").fetchone() == (0,)
+    assert db2.connection.execute("select count(*) from dart_revisions").fetchone() == (
+        0,
+    )
     assert db2.connection.execute("select count(*) from runs").fetchone() == (1,)
     db2.close()
 
@@ -190,11 +236,12 @@ def test_existing_schema_migrates_additively(tmp_path):
 # 5. Evidence idempotency: same transition appended once
 # ---------------------------------------------------------------------------
 
+
 def test_evidence_idempotency_same_transition_appended_once(tmp_path):
     db = store(tmp_path)
     run1 = db.claim("incremental", "20260803", "20260803", NOW)
-    db.observe(run1, disclosure_with_rm(None), NOW)     # new
-    db.observe(run1, disclosure_with_rm("정"), NOW)       # revision
+    db.observe(run1, disclosure_with_rm(None), NOW)  # new
+    db.observe(run1, disclosure_with_rm("정"), NOW)  # revision
 
     run2 = db.claim("incremental", "20260803", "20260803", NOW)
     db.finish(run2.run_id, "complete", NOW)
@@ -203,8 +250,8 @@ def test_evidence_idempotency_same_transition_appended_once(tmp_path):
     result = db.observe(run2, disclosure_with_rm("정"), NOW)
     assert result == "duplicate"
     count = db.connection.execute(
-        "select count(*) from dart_revisions where rcept_no=?",
-        (RCEPT_NO,)).fetchone()
+        "select count(*) from dart_revisions where rcept_no=?", (RCEPT_NO,)
+    ).fetchone()
     assert count == (1,)
     db.close()
 
@@ -213,20 +260,22 @@ def test_evidence_idempotency_same_transition_appended_once(tmp_path):
 # 6. A→B→C each transition once; stale A does not oscillate
 # ---------------------------------------------------------------------------
 
+
 def test_a_to_b_to_c_each_transition_once(tmp_path):
     db = store(tmp_path)
     run = db.claim("incremental", "20260803", "20260803", NOW)
-    db.observe(run, disclosure_with_rm(None), NOW)   # new (A=null)
-    db.observe(run, disclosure_with_rm("A"), NOW)     # revision null→A
-    db.observe(run, disclosure_with_rm("B"), NOW)     # revision A→B
-    db.observe(run, disclosure_with_rm("C"), NOW)     # revision B→C
+    db.observe(run, disclosure_with_rm(None), NOW)  # new (A=null)
+    db.observe(run, disclosure_with_rm("A"), NOW)  # revision null→A
+    db.observe(run, disclosure_with_rm("B"), NOW)  # revision A→B
+    db.observe(run, disclosure_with_rm("C"), NOW)  # revision B→C
     count = db.connection.execute(
-        "select count(*) from dart_revisions where rcept_no=?",
-        (RCEPT_NO,)).fetchone()
+        "select count(*) from dart_revisions where rcept_no=?", (RCEPT_NO,)
+    ).fetchone()
     assert count == (3,)
     # Canonical latest is C
     stored_rm = db.connection.execute(
-        "select rm from disclosures where rcept_no=?", (RCEPT_NO,)).fetchone()
+        "select rm from disclosures where rcept_no=?", (RCEPT_NO,)
+    ).fetchone()
     assert stored_rm == ("C",)
     db.close()
 
@@ -240,20 +289,21 @@ def test_stale_observation_after_revision_is_safe(tmp_path):
     duplicate — latest-observed semantics."""
     db = store(tmp_path)
     run = db.claim("incremental", "20260803", "20260803", NOW)
-    db.observe(run, disclosure_with_rm(None), NOW)   # new
-    db.observe(run, disclosure_with_rm("A"), NOW)     # revision null→A
-    db.observe(run, disclosure_with_rm("B"), NOW)     # revision A→B
+    db.observe(run, disclosure_with_rm(None), NOW)  # new
+    db.observe(run, disclosure_with_rm("A"), NOW)  # revision null→A
+    db.observe(run, disclosure_with_rm("B"), NOW)  # revision A→B
     # Stale A arrives (e.g., provider cache lag)
     result = db.observe(run, disclosure_with_rm("A"), NOW)
     assert result == "revision"
     # Evidence appended (B→A transition recorded)
     count = db.connection.execute(
-        "select count(*) from dart_revisions where rcept_no=?",
-        (RCEPT_NO,)).fetchone()
+        "select count(*) from dart_revisions where rcept_no=?", (RCEPT_NO,)
+    ).fetchone()
     assert count == (3,)
     # Canonical latest is now A (latest-observed)
     stored_rm = db.connection.execute(
-        "select rm from disclosures where rcept_no=?", (RCEPT_NO,)).fetchone()
+        "select rm from disclosures where rcept_no=?", (RCEPT_NO,)
+    ).fetchone()
     assert stored_rm == ("A",)
     db.close()
 
@@ -287,6 +337,7 @@ def test_repeated_transition_keeps_truthful_evidence_per_run(tmp_path):
 #    together or rollback
 # ---------------------------------------------------------------------------
 
+
 def test_revision_evidence_has_unique_fingerprint(tmp_path):
     db = store(tmp_path)
     run = db.claim("incremental", "20260803", "20260803", NOW)
@@ -296,7 +347,8 @@ def test_revision_evidence_has_unique_fingerprint(tmp_path):
     rows = db.connection.execute(
         "select evidence_fingerprint from dart_revisions where rcept_no=? "
         "order by evidence_fingerprint",
-        (RCEPT_NO,)).fetchall()
+        (RCEPT_NO,),
+    ).fetchall()
     fingerprints = [r[0] for r in rows]
     assert len(fingerprints) == len(set(fingerprints)), "fingerprints must be unique"
     db.close()
@@ -305,6 +357,7 @@ def test_revision_evidence_has_unique_fingerprint(tmp_path):
 # ---------------------------------------------------------------------------
 # 8. Revision evidence contains required fields
 # ---------------------------------------------------------------------------
+
 
 def test_revision_evidence_contains_required_fields(tmp_path):
     db = store(tmp_path)
@@ -315,21 +368,23 @@ def test_revision_evidence_contains_required_fields(tmp_path):
         """select rcept_no, previous_rm, observed_rm, previous_payload_hash,
                   observed_payload_hash, observed_at, run_id, evidence_fingerprint
            from dart_revisions where rcept_no=?""",
-        (RCEPT_NO,)).fetchone()
+        (RCEPT_NO,),
+    ).fetchone()
     assert row[0] == RCEPT_NO
-    assert row[1] is None           # previous_rm was null
-    assert row[2] == "정"            # observed_rm
-    assert row[3] is not None       # previous_payload_hash
-    assert row[4] is not None       # observed_payload_hash
-    assert row[5] is not None       # observed_at
-    assert row[6] == run.run_id     # run_id
-    assert row[7] is not None       # evidence_fingerprint
+    assert row[1] is None  # previous_rm was null
+    assert row[2] == "정"  # observed_rm
+    assert row[3] is not None  # previous_payload_hash
+    assert row[4] is not None  # observed_payload_hash
+    assert row[5] is not None  # observed_at
+    assert row[6] == run.run_id  # run_id
+    assert row[7] is not None  # evidence_fingerprint
     db.close()
 
 
 # ---------------------------------------------------------------------------
 # 9. Receipt and status include revision_count
 # ---------------------------------------------------------------------------
+
 
 def test_receipt_includes_revision_count(tmp_path):
     db = store(tmp_path)
@@ -376,6 +431,7 @@ def test_revision_rolls_back_all_writes_when_counter_update_fails(tmp_path):
 # 11. run_operate does not fail on rm revision (the original bug)
 # ---------------------------------------------------------------------------
 
+
 def test_operate_succeeds_with_rm_revision(tmp_path):
     """The original live failure: a disclosure that was stored with rm=null
     is observed with rm="정". run_operate should succeed, not fail-closed."""
@@ -387,12 +443,21 @@ def test_operate_succeeds_with_rm_revision(tmp_path):
     db.finish(run0.run_id, "complete", NOW)
 
     # Now run operate — the page returns the same disclosure but rm="정"
-    page_body = envelope([
-        {"corp_code": CORP_CODE, "corp_name": CORP_NAME,
-         "stock_code": STOCK_CODE, "corp_cls": CORP_CLS,
-         "report_nm": REPORT_NM, "rcept_no": RCEPT_NO,
-         "flr_nm": FLR_NM, "rcept_dt": RCEPT_DT, "rm": "정"}
-    ])
+    page_body = envelope(
+        [
+            {
+                "corp_code": CORP_CODE,
+                "corp_name": CORP_NAME,
+                "stock_code": STOCK_CODE,
+                "corp_cls": CORP_CLS,
+                "report_nm": REPORT_NM,
+                "rcept_no": RCEPT_NO,
+                "flr_nm": FLR_NM,
+                "rcept_dt": RCEPT_DT,
+                "rm": "정",
+            }
+        ]
+    )
     tx = Transport([page_body])
     migrated_for(db, date(2026, 8, 3))
     operate_tick(db, today=date(2026, 8, 3), transport=tx, now=NOW)
@@ -406,11 +471,12 @@ def test_operate_succeeds_with_rm_revision(tmp_path):
 # 11. Multiple revisions across different runs accumulate correctly
 # ---------------------------------------------------------------------------
 
+
 def test_revisions_across_runs_accumulate(tmp_path):
     db = store(tmp_path)
     run1 = db.claim("incremental", "20260803", "20260803", NOW)
-    db.observe(run1, disclosure_with_rm(None), NOW)   # new
-    db.observe(run1, disclosure_with_rm("A"), NOW)     # revision
+    db.observe(run1, disclosure_with_rm(None), NOW)  # new
+    db.observe(run1, disclosure_with_rm("A"), NOW)  # revision
     db.finish(run1.run_id, "complete", NOW)
 
     run2 = db.claim("incremental", "20260803", "20260803", NOW)
@@ -420,8 +486,8 @@ def test_revisions_across_runs_accumulate(tmp_path):
 
     # Total revision evidence across runs
     total = db.connection.execute(
-        "select count(*) from dart_revisions where rcept_no=?",
-        (RCEPT_NO,)).fetchone()
+        "select count(*) from dart_revisions where rcept_no=?", (RCEPT_NO,)
+    ).fetchone()
     assert total == (2,)
     # Each run has its own revision_count
     assert db.receipt(run1.run_id).revision_count == 1

@@ -21,17 +21,21 @@ Design invariants (owner: G2-C):
   kernel is never opened.
 """
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from types import MappingProxyType
-from typing import Callable, Mapping
 
 from tokmo.programs.g2a_shadow_runner import (
-    _aware_utc, _confine_shadow_root, shadow_root, stable_run_id,
+    _aware_utc,
+    _confine_shadow_root,
+    shadow_root,
+    stable_run_id,
 )
 from tokmo.programs.integrated_fake_cadence import (
-    IntegratedCadenceDepsV1, _production_stage_deps,
+    IntegratedCadenceDepsV1,
+    _production_stage_deps,
 )
 from tokmo.records.ops_kernel import OpsKernelStore
 from tokmo.values.ops_tick import tick_id_from_utc
@@ -43,9 +47,7 @@ class G2CForbiddenLiveCallError(RuntimeError):
 
 
 def _forbidden(*_args, **_kwargs):
-    raise G2CForbiddenLiveCallError(
-        "g2c analysis shadow must not touch live providers"
-    )
+    raise G2CForbiddenLiveCallError("g2c analysis shadow must not touch live providers")
 
 
 @dataclass(frozen=True)
@@ -70,9 +72,7 @@ class _TimedCall:
             return self.call(body)
         finally:
             self.count += 1
-            self.seconds += (
-                _aware_utc(self.clock()) - started
-            ).total_seconds()
+            self.seconds += (_aware_utc(self.clock()) - started).total_seconds()
 
 
 @dataclass(frozen=True)
@@ -91,36 +91,56 @@ class G2CReport:
 
 
 def run_c_analysis_shadow(
-    *, home: Path, utc_day: date, open_markets: frozenset[Market],
-    glm_call: Callable, sol_call: Callable, clock: Callable,
+    *,
+    home: Path,
+    utc_day: date,
+    open_markets: frozenset[Market],
+    glm_call: Callable,
+    sol_call: Callable,
+    clock: Callable,
 ) -> G2CReport:
     """Run one barrier→analysis pass over the stored shadow materials."""
     if type(utc_day) is not date:
         raise ValueError("invalid utc day")
-    if (type(open_markets) is not frozenset or not open_markets
-            or not open_markets <= frozenset(Market)):
+    if (
+        type(open_markets) is not frozenset
+        or not open_markets
+        or not open_markets <= frozenset(Market)
+    ):
         raise ValueError("invalid open markets")
 
     root = _confine_shadow_root(home, shadow_root(home, utc_day))
     glm = _TimedCall(glm_call, clock)
     sol = _TimedCall(sol_call, clock)
-    stages = _production_stage_deps(root, IntegratedCadenceDepsV1(
-        calendar_provider=_forbidden, holdings_provider_factory=_forbidden,
-        quotes_provider_factory=_forbidden, orders_provider_factory=_forbidden,
-        detail_provider_factory=_forbidden, glm_call=glm, sol_call=sol,
-        regular_session_dates=frozenset(), clock=clock,
-    ))
+    stages = _production_stage_deps(
+        root,
+        IntegratedCadenceDepsV1(
+            calendar_provider=_forbidden,
+            holdings_provider_factory=_forbidden,
+            quotes_provider_factory=_forbidden,
+            orders_provider_factory=_forbidden,
+            detail_provider_factory=_forbidden,
+            glm_call=glm,
+            sol_call=sol,
+            regular_session_dates=frozenset(),
+            clock=clock,
+        ),
+    )
     store = OpsKernelStore(root / "ops" / "ops_kernel.sqlite3")
 
     started = _aware_utc(clock())
     tick = tick_id_from_utc(started)
-    session = _ScriptedSessionV1(tuple(
-        SessionVerdict(
-            market, market in open_markets,
-            "open" if market in open_markets else "after_close", None,
+    session = _ScriptedSessionV1(
+        tuple(
+            SessionVerdict(
+                market,
+                market in open_markets,
+                "open" if market in open_markets else "after_close",
+                None,
+            )
+            for market in Market
         )
-        for market in Market
-    ))
+    )
     context = stages.barrier_runner(tick=tick, prior={"session": session})
     outcome = stages.analysis_runner(tick=tick, prior=context, ops_kernel=store)
 
@@ -130,11 +150,15 @@ def run_c_analysis_shadow(
         counts[action] = counts.get(action, 0) + 1
     ended = _aware_utc(clock())
     return G2CReport(
-        run_id=stable_run_id(utc_day), utc_day=utc_day.isoformat(),
-        tick_id=tick.tick_id, run_state=outcome.state.value,
+        run_id=stable_run_id(utc_day),
+        utc_day=utc_day.isoformat(),
+        tick_id=tick.tick_id,
+        run_state=outcome.state.value,
         candidate_count=outcome.candidate_count,
-        glm_calls=glm.count, sol_calls=sol.count,
+        glm_calls=glm.count,
+        sol_calls=sol.count,
         disposition_counts=MappingProxyType(dict(sorted(counts.items()))),
         total_seconds=(ended - started).total_seconds(),
-        glm_seconds=glm.seconds, sol_seconds=sol.seconds,
+        glm_seconds=glm.seconds,
+        sol_seconds=sol.seconds,
     )

@@ -8,9 +8,8 @@ This seam validates: before/after owner gap0/dup0, 300s consumer reads
 latest quote/ledger wire0, active production constant unchanged.
 """
 
-from datetime import datetime, timezone, timedelta
-from decimal import Decimal
 import sqlite3
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
@@ -22,9 +21,8 @@ from tokmo.values.operation_lane_registry import (
     active_owner,
 )
 
-
-CLOCK_NOW = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
-CUTOVER_EPOCH = int(datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc).timestamp())
+CLOCK_NOW = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+CUTOVER_EPOCH = int(datetime(2026, 8, 10, 12, 0, tzinfo=UTC).timestamp())
 # Align to 300s grid
 CUTOVER_EPOCH = CUTOVER_EPOCH - (CUTOVER_EPOCH % 300) + 300
 
@@ -35,7 +33,9 @@ SCOPE = "retirement_pension_1"
 
 def _ledger_event(number):
     from datetime import date
+
     from tokmo.values.trade_ledger import TradeLedgerEvent
+
     return TradeLedgerEvent(
         source=SOURCE,
         account_scope=SCOPE,
@@ -58,8 +58,8 @@ def _ledger_event(number):
 
 def _audit():
     from tokmo.values.trade_ledger import ImportAuditMeta
-    return ImportAuditMeta(
-        file_sha256="ab" * 32, importer_version="fixture-importer-1")
+
+    return ImportAuditMeta(file_sha256="ab" * 32, importer_version="fixture-importer-1")
 
 
 def _make_store(tmp_path, *, clock_times=None):
@@ -67,12 +67,15 @@ def _make_store(tmp_path, *, clock_times=None):
     times. If clock_times is provided, the clock pops from it; otherwise
     uses CLOCK_NOW."""
     from tokmo.records.trade_ledger_store import TradeLedgerStore
+
     times = list(clock_times) if clock_times else [CLOCK_NOW]
     counter = {"i": 0}
+
     def clock():
         idx = min(counter["i"], len(times) - 1)
         counter["i"] += 1
         return times[idx]
+
     ids = iter(f"event-id-{i:04d}" for i in range(10000))
     return TradeLedgerStore(
         tmp_path / "stores" / "trade_ledger.sqlite3",
@@ -97,28 +100,43 @@ def test_before_cutover_300s_owns_quotes_and_trades():
 
 def test_after_cutover_pulse_owns_quotes_and_trades():
     """Post-cutover: Pulse owns PRICE_BATCH/ORDERS_PAGE/ORDER_DETAIL."""
-    post_cutover_registry = OperationLaneRegistryV1(entries={
-        op: (OperationLaneV1(
-            op, OperationLane.PULSE_60S, OperationLane.CADENCE_300S,
-            CUTOVER_EPOCH,
-        ) if op in ("PRICE_BATCH", "ORDERS_PAGE", "ORDER_DETAIL") else
-        OperationLaneV1(op, OperationLane.CADENCE_300S, None, None))
-        for op in sorted(
-            OPERATION_LANE_REGISTRY_V1.entries)
-    })
+    post_cutover_registry = OperationLaneRegistryV1(
+        entries={
+            op: (
+                OperationLaneV1(
+                    op,
+                    OperationLane.PULSE_60S,
+                    OperationLane.CADENCE_300S,
+                    CUTOVER_EPOCH,
+                )
+                if op in ("PRICE_BATCH", "ORDERS_PAGE", "ORDER_DETAIL")
+                else OperationLaneV1(op, OperationLane.CADENCE_300S, None, None)
+            )
+            for op in sorted(OPERATION_LANE_REGISTRY_V1.entries)
+        }
+    )
     post_epoch = CUTOVER_EPOCH + 1
-    assert active_owner(
-        post_cutover_registry.entries["PRICE_BATCH"],
-        epoch=post_epoch,
-    ) is OperationLane.PULSE_60S
-    assert active_owner(
-        post_cutover_registry.entries["ORDERS_PAGE"],
-        epoch=post_epoch,
-    ) is OperationLane.PULSE_60S
-    assert active_owner(
-        post_cutover_registry.entries["ORDER_DETAIL"],
-        epoch=post_epoch,
-    ) is OperationLane.PULSE_60S
+    assert (
+        active_owner(
+            post_cutover_registry.entries["PRICE_BATCH"],
+            epoch=post_epoch,
+        )
+        is OperationLane.PULSE_60S
+    )
+    assert (
+        active_owner(
+            post_cutover_registry.entries["ORDERS_PAGE"],
+            epoch=post_epoch,
+        )
+        is OperationLane.PULSE_60S
+    )
+    assert (
+        active_owner(
+            post_cutover_registry.entries["ORDER_DETAIL"],
+            epoch=post_epoch,
+        )
+        is OperationLane.PULSE_60S
+    )
 
 
 def test_cutover_boundary_no_gap_no_dup():
@@ -126,15 +144,21 @@ def test_cutover_boundary_no_gap_no_dup():
     ownership. The epoch-aligned boundary means the slot starting at
     CUTOVER_EPOCH belongs to Pulse, and the slot ending at CUTOVER_EPOCH
     belongs to 300s."""
-    post_cutover_registry = OperationLaneRegistryV1(entries={
-        op: (OperationLaneV1(
-            op, OperationLane.PULSE_60S, OperationLane.CADENCE_300S,
-            CUTOVER_EPOCH,
-        ) if op in ("PRICE_BATCH", "ORDERS_PAGE", "ORDER_DETAIL") else
-        OperationLaneV1(op, OperationLane.CADENCE_300S, None, None))
-        for op in sorted(
-            OPERATION_LANE_REGISTRY_V1.entries)
-    })
+    post_cutover_registry = OperationLaneRegistryV1(
+        entries={
+            op: (
+                OperationLaneV1(
+                    op,
+                    OperationLane.PULSE_60S,
+                    OperationLane.CADENCE_300S,
+                    CUTOVER_EPOCH,
+                )
+                if op in ("PRICE_BATCH", "ORDERS_PAGE", "ORDER_DETAIL")
+                else OperationLaneV1(op, OperationLane.CADENCE_300S, None, None)
+            )
+            for op in sorted(OPERATION_LANE_REGISTRY_V1.entries)
+        }
+    )
     entry = post_cutover_registry.entries["PRICE_BATCH"]
     # One epoch before: 300s owns it
     assert active_owner(entry, epoch=CUTOVER_EPOCH - 1) is OperationLane.CADENCE_300S
@@ -156,13 +180,17 @@ def test_consumer_reads_latest_quote_wire_zero(tmp_path):
         clock=lambda: CLOCK_NOW,
     )
     fact = TossCurrentPriceFact(
-        source="toss-current-price-v1", symbol="AAPL",
-        last_price="220.5", currency_raw="USD",
-        timestamp=CLOCK_NOW, fetched_at=CLOCK_NOW,
+        source="toss-current-price-v1",
+        symbol="AAPL",
+        last_price="220.5",
+        currency_raw="USD",
+        timestamp=CLOCK_NOW,
+        fetched_at=CLOCK_NOW,
     )
     store.save_batch((fact,))
     rows = read_latest_quotes_for_consumer(
-        store=store, source="toss-current-price-v1",
+        store=store,
+        source="toss-current-price-v1",
         symbols=("AAPL",),
     )
     assert len(rows) == 1
@@ -171,12 +199,14 @@ def test_consumer_reads_latest_quote_wire_zero(tmp_path):
 
 # --- M1/m4: real ledger event boundary tests (RED → GREEN) ---
 
+
 def test_consumer_reads_ledger_window_with_real_event(tmp_path):
     """Post-cutover, a consumer reads a real ledger event that was
     persisted inside the window — not an empty default-returns path."""
     from tokmo.programs.quotes_trades_consumer import (
         read_ledger_delta_for_consumer,
     )
+
     t0 = CLOCK_NOW
     t1 = t0 + timedelta(seconds=1)
     t2 = t0 + timedelta(minutes=5)
@@ -184,8 +214,11 @@ def test_consumer_reads_ledger_window_with_real_event(tmp_path):
     store.append_batch((_ledger_event(1),), import_audit=_audit())
 
     rows = read_ledger_delta_for_consumer(
-        store=store, from_stored_at=t0, to_stored_at=t2,
-        source=SOURCE, account_scope=SCOPE,
+        store=store,
+        from_stored_at=t0,
+        to_stored_at=t2,
+        source=SOURCE,
+        account_scope=SCOPE,
     )
     assert len(rows) == 1
     assert rows[0].event.source_record_key == "row-000001"
@@ -199,6 +232,7 @@ def test_consumer_ledger_half_open_prev_included_current_excluded(tmp_path):
     from tokmo.programs.quotes_trades_consumer import (
         read_ledger_delta_for_consumer,
     )
+
     prev = CLOCK_NOW
     cur = prev + timedelta(minutes=5)
 
@@ -211,15 +245,21 @@ def test_consumer_ledger_half_open_prev_included_current_excluded(tmp_path):
 
     # All events stored at prev → included in [prev, cur)
     rows = read_ledger_delta_for_consumer(
-        store=store, from_stored_at=prev, to_stored_at=cur,
-        source=SOURCE, account_scope=SCOPE,
+        store=store,
+        from_stored_at=prev,
+        to_stored_at=cur,
+        source=SOURCE,
+        account_scope=SCOPE,
     )
     assert len(rows) == 2
 
     # A window [cur, cur+5m) that excludes prev → zero rows
     after = read_ledger_delta_for_consumer(
-        store=store, from_stored_at=cur, to_stored_at=cur + timedelta(minutes=5),
-        source=SOURCE, account_scope=SCOPE,
+        store=store,
+        from_stored_at=cur,
+        to_stored_at=cur + timedelta(minutes=5),
+        source=SOURCE,
+        account_scope=SCOPE,
     )
     assert len(after) == 0
 
@@ -232,6 +272,7 @@ def test_consumer_ledger_adjacent_windows_gap0_dup0(tmp_path):
     from tokmo.programs.quotes_trades_consumer import (
         read_ledger_delta_for_consumer,
     )
+
     t0 = CLOCK_NOW
     # Batch 1: events 1-3, stored at t0+1s
     # Batch 2: events 4-6, stored at t0+3s
@@ -241,7 +282,7 @@ def test_consumer_ledger_adjacent_windows_gap0_dup0(tmp_path):
     # append a prefix (1-3) then cumulative (1-6) to get 4-6 as new.
     mid_t = t0 + timedelta(seconds=2)
     e2_t = t0 + timedelta(seconds=1)  # batch 1 stored_at
-    e2_t2 = t0 + timedelta(seconds=3) # batch 2 stored_at
+    e2_t2 = t0 + timedelta(seconds=3)  # batch 2 stored_at
 
     store = _make_store(tmp_path, clock_times=[e2_t, e2_t2])
 
@@ -255,17 +296,22 @@ def test_consumer_ledger_adjacent_windows_gap0_dup0(tmp_path):
 
     # Window 1: [t0, mid_t) → events from batch 1 only (stored at e2_t)
     w1 = read_ledger_delta_for_consumer(
-        store=store, from_stored_at=t0, to_stored_at=mid_t,
-        source=SOURCE, account_scope=SCOPE,
+        store=store,
+        from_stored_at=t0,
+        to_stored_at=mid_t,
+        source=SOURCE,
+        account_scope=SCOPE,
     )
     w1_keys = {r.event.source_record_key for r in w1}
     assert w1_keys == {"row-000001", "row-000002", "row-000003"}
 
     # Window 2: [mid_t, mid_t+5m) → events from batch 2 (stored at e2_t2)
     w2 = read_ledger_delta_for_consumer(
-        store=store, from_stored_at=mid_t,
+        store=store,
+        from_stored_at=mid_t,
         to_stored_at=mid_t + timedelta(minutes=5),
-        source=SOURCE, account_scope=SCOPE,
+        source=SOURCE,
+        account_scope=SCOPE,
     )
     w2_keys = {r.event.source_record_key for r in w2}
     assert w2_keys == {"row-000004", "row-000005", "row-000006"}
@@ -273,8 +319,12 @@ def test_consumer_ledger_adjacent_windows_gap0_dup0(tmp_path):
     # Gap0/dup0: no overlap
     assert w1_keys & w2_keys == set()
     assert w1_keys | w2_keys == {
-        "row-000001", "row-000002", "row-000003",
-        "row-000004", "row-000005", "row-000006",
+        "row-000001",
+        "row-000002",
+        "row-000003",
+        "row-000004",
+        "row-000005",
+        "row-000006",
     }
 
 
@@ -287,15 +337,19 @@ def test_consumer_ledger_equivalent_timezone_offsets_return_same_rows(tmp_path):
     store.append_batch((_ledger_event(1),), import_audit=_audit())
 
     utc_rows = read_ledger_delta_for_consumer(
-        store=store, from_stored_at=CLOCK_NOW,
+        store=store,
+        from_stored_at=CLOCK_NOW,
         to_stored_at=CLOCK_NOW + timedelta(hours=1),
-        source=SOURCE, account_scope=SCOPE,
+        source=SOURCE,
+        account_scope=SCOPE,
     )
     kst = timezone(timedelta(hours=9))
     kst_rows = read_ledger_delta_for_consumer(
-        store=store, from_stored_at=CLOCK_NOW.astimezone(kst),
+        store=store,
+        from_stored_at=CLOCK_NOW.astimezone(kst),
         to_stored_at=(CLOCK_NOW + timedelta(hours=1)).astimezone(kst),
-        source=SOURCE, account_scope=SCOPE,
+        source=SOURCE,
+        account_scope=SCOPE,
     )
 
     assert kst_rows == utc_rows
@@ -312,13 +366,15 @@ def test_consumer_ledger_normalizes_non_utc_store_clock(tmp_path):
     store.append_batch((_ledger_event(1),), import_audit=_audit())
 
     rows = read_ledger_delta_for_consumer(
-        store=store, from_stored_at=CLOCK_NOW,
+        store=store,
+        from_stored_at=CLOCK_NOW,
         to_stored_at=CLOCK_NOW + timedelta(hours=1),
-        source=SOURCE, account_scope=SCOPE,
+        source=SOURCE,
+        account_scope=SCOPE,
     )
 
     assert len(rows) == 1
-    assert rows[0].stored_at == stored_at.astimezone(timezone.utc)
+    assert rows[0].stored_at == stored_at.astimezone(UTC)
 
 
 def test_consumer_ledger_missing_scope_raises_not_empty(tmp_path):
@@ -327,25 +383,26 @@ def test_consumer_ledger_missing_scope_raises_not_empty(tmp_path):
     from tokmo.programs.quotes_trades_consumer import (
         read_ledger_delta_for_consumer,
     )
+
     store = _make_store(tmp_path)
     with pytest.raises(ValueError):
         read_ledger_delta_for_consumer(
-            store=store, from_stored_at=CLOCK_NOW - timedelta(minutes=5),
+            store=store,
+            from_stored_at=CLOCK_NOW - timedelta(minutes=5),
             to_stored_at=CLOCK_NOW,
-            source="", account_scope="",
+            source="",
+            account_scope="",
         )
 
 
 # --- M2: exception propagation tests ---
 
+
 def test_consumer_ledger_corrupt_store_propagates_exception(tmp_path):
     """A corrupt store must propagate a typed StoreCorruptError, not be
     masked as an empty list."""
-    from tokmo.programs.quotes_trades_consumer import (
-        read_ledger_delta_for_consumer,
-    )
-    from tokmo.records.trade_ledger_store import TradeLedgerStore
     from tokmo.records.trade_ledger_privacy import StoreCorruptError
+    from tokmo.records.trade_ledger_store import TradeLedgerStore
 
     # Write garbage to the DB file so it is not a valid SQLite database
     db_path = tmp_path / "stores" / "trade_ledger.sqlite3"
@@ -354,12 +411,14 @@ def test_consumer_ledger_corrupt_store_propagates_exception(tmp_path):
 
     ids = iter(f"event-id-{i:04d}" for i in range(100))
     store = TradeLedgerStore(
-        db_path, clock=lambda: CLOCK_NOW,
+        db_path,
+        clock=lambda: CLOCK_NOW,
         id_factory=lambda: next(ids),
     )
     with pytest.raises(StoreCorruptError):
         store.read_stored_window(
-            source=SOURCE, account_scope=SCOPE,
+            source=SOURCE,
+            account_scope=SCOPE,
             from_stored_at=CLOCK_NOW - timedelta(minutes=5),
             to_stored_at=CLOCK_NOW,
         )
@@ -380,8 +439,12 @@ def test_window_decoder_rejects_duplicate_source_record_keys(tmp_path):
     try:
         row = connection.execute(
             _SELECT_WINDOW,
-            (SOURCE, SCOPE, CLOCK_NOW.isoformat(),
-             (CLOCK_NOW + timedelta(minutes=1)).isoformat()),
+            (
+                SOURCE,
+                SCOPE,
+                CLOCK_NOW.isoformat(),
+                (CLOCK_NOW + timedelta(minutes=1)).isoformat(),
+            ),
         ).fetchone()
     finally:
         connection.close()
@@ -389,7 +452,9 @@ def test_window_decoder_rejects_duplicate_source_record_keys(tmp_path):
     assert row is not None
     with pytest.raises(StoreCorruptError):
         _stored_rows_from_window_rows(
-            (row, row), source=SOURCE, account_scope=SCOPE,
+            (row, row),
+            source=SOURCE,
+            account_scope=SCOPE,
         )
 
 
@@ -404,17 +469,25 @@ def test_consumer_ledger_empty_store_raises_not_empty(tmp_path):
     # Store does not exist yet — read must fail truthfully
     with pytest.raises(StoreReadError):
         read_ledger_delta_for_consumer(
-            store=store, from_stored_at=CLOCK_NOW - timedelta(minutes=5),
+            store=store,
+            from_stored_at=CLOCK_NOW - timedelta(minutes=5),
             to_stored_at=CLOCK_NOW,
-            source=SOURCE, account_scope=SCOPE,
+            source=SOURCE,
+            account_scope=SCOPE,
         )
 
 
 def test_active_production_constant_schedules_only_pulse_provider_operations():
-    for op in ("PRICE_BATCH", "ORDERS_PAGE", "ORDER_DETAIL",
-               "CALENDAR_DAY_KR", "CALENDAR_DAY_US",
-               "ACCOUNTS", "ACCOUNT_HOLDINGS",
-               "STOCK_CANDLES_DAILY"):
+    for op in (
+        "PRICE_BATCH",
+        "ORDERS_PAGE",
+        "ORDER_DETAIL",
+        "CALENDAR_DAY_KR",
+        "CALENDAR_DAY_US",
+        "ACCOUNTS",
+        "ACCOUNT_HOLDINGS",
+        "STOCK_CANDLES_DAILY",
+    ):
         entry = OPERATION_LANE_REGISTRY_V1.entries[op]
         if op in ("PRICE_BATCH", "ORDERS_PAGE", "ORDER_DETAIL"):
             assert entry.recurring_owner is OperationLane.PULSE_60S

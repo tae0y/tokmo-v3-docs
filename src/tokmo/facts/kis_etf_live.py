@@ -1,14 +1,15 @@
 """Sealed KIS authentication/ETF HTTPS transport and private key-file loader."""
+
 import json
 import os
-from pathlib import Path
 import stat
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
-from tokmo.facts.kis_etf import build_request, valid_secret, TR_IDS
-from tokmo.values.kis_etf import KisCredentials, KisResponse, KisError
+from tokmo.facts.kis_etf import TR_IDS, build_request, valid_secret
+from tokmo.values.kis_etf import KisCredentials, KisError, KisResponse
 
 ORIGIN = "https://openapi.koreainvestment.com:9443"
 
@@ -17,12 +18,22 @@ def load_kis_credentials(path):
     path = Path(path)
     try:
         info = path.lstat()
-        if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600 or info.st_uid != os.getuid() or info.st_size > 20000:
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_uid != os.getuid()
+            or info.st_size > 20000
+        ):
             raise KisError("credential_unsafe")
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
         try:
             opened = os.fstat(fd)
-            if (opened.st_dev, opened.st_ino, opened.st_mode, opened.st_uid) != (info.st_dev, info.st_ino, info.st_mode, info.st_uid):
+            if (opened.st_dev, opened.st_ino, opened.st_mode, opened.st_uid) != (
+                info.st_dev,
+                info.st_ino,
+                info.st_mode,
+                info.st_uid,
+            ):
                 raise KisError("credential_unsafe")
             raw = os.read(fd, 20001)
         finally:
@@ -55,8 +66,13 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def build_kis_opener():
     opener = urllib.request.OpenerDirector()
-    for handler in (urllib.request.ProxyHandler({}), urllib.request.HTTPSHandler(), _NoRedirect(),
-                    urllib.request.HTTPDefaultErrorHandler(), urllib.request.HTTPErrorProcessor()):
+    for handler in (
+        urllib.request.ProxyHandler({}),
+        urllib.request.HTTPSHandler(),
+        _NoRedirect(),
+        urllib.request.HTTPDefaultErrorHandler(),
+        urllib.request.HTTPErrorProcessor(),
+    ):
         opener.add_handler(handler)
     return opener
 
@@ -68,12 +84,27 @@ class KisLiveTransport:
     def __call__(self, request):
         method, path, params, body = build_request(request)
         url = ORIGIN + path + ("?" + urllib.parse.urlencode(params) if params else "")
-        headers = {"Content-Type": "application/json; charset=utf-8", "Accept": "application/json",
-                   "Accept-Encoding": "identity", "User-Agent": "tokmo-kis-etf/1"}
+        headers = {
+            "Content-Type": "application/json; charset=utf-8",
+            "Accept": "application/json",
+            "Accept-Encoding": "identity",
+            "User-Agent": "tokmo-kis-etf/1",
+        }
         if request.operation != "auth":
-            headers.update(authorization="Bearer " + request.token, appkey=request.credentials.app_key,
-                           appsecret=request.credentials.app_secret, tr_id=TR_IDS[request.operation], custtype="P", tr_cont="")
-        wire = urllib.request.Request(url, data=None if body is None else json.dumps(body).encode(), method=method, headers=headers)
+            headers.update(
+                authorization="Bearer " + request.token,
+                appkey=request.credentials.app_key,
+                appsecret=request.credentials.app_secret,
+                tr_id=TR_IDS[request.operation],
+                custtype="P",
+                tr_cont="",
+            )
+        wire = urllib.request.Request(
+            url,
+            data=None if body is None else json.dumps(body).encode(),
+            method=method,
+            headers=headers,
+        )
         try:
             with self.opener.open(wire, timeout=10) as reply:
                 return _read(reply)

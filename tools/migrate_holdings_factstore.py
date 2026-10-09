@@ -32,8 +32,9 @@ import hashlib
 import os
 import stat
 import sys
-from dataclasses import dataclass, field as dataclass_field
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
+from datetime import UTC, datetime
 from pathlib import Path
 
 from tokmo.records.durability import fsync_directory
@@ -41,8 +42,6 @@ from tokmo.records.holdings_cutover import (
     CUTOVER_MARKER_BYTES,
     with_family_lock,
 )
-from tokmo.records.private_sqlite import private_creation
-
 from tokmo.records.holdings_persistence import (
     MIGRATION_CRITERIA_VERSION,
     DenialToken,
@@ -57,22 +56,26 @@ from tokmo.records.legacy_holdings_v1 import (
     LEGACY_REFUSAL_REASONS,
     validate_legacy_json,
 )
+from tokmo.records.private_sqlite import private_creation
 from tokmo.values import CompleteHoldingsSnapshot
 
 SCHEMA_VERSION = 1
 _SIDECAR_SUFFIXES = ("-journal", "-wal", "-shm")
 
-TOOL_REFUSAL_REASONS = frozenset(LEGACY_REFUSAL_REASONS | {
-    "source_missing",
-    "source_unsafe",
-    "candidate_exists",
-    "candidate_unsafe",
-    "rehearsal_copy_exists",
-    "copy_failed",
-    "import_failed",
-    "verify_failed",
-    "source_changed",
-})
+TOOL_REFUSAL_REASONS = frozenset(
+    LEGACY_REFUSAL_REASONS
+    | {
+        "source_missing",
+        "source_unsafe",
+        "candidate_exists",
+        "candidate_unsafe",
+        "rehearsal_copy_exists",
+        "copy_failed",
+        "import_failed",
+        "verify_failed",
+        "source_changed",
+    }
+)
 
 REHEARSAL_SOURCE_SUFFIX = ".rehearsal-source.json"
 PROMOTION_PREFIX = ".holdings_snapshots.staging."
@@ -126,21 +129,28 @@ class CutoverToolReport:
 
 def _refusal(reason: str) -> MigrationToolReport:
     return MigrationToolReport(
-        "refused", reason, 0, 0, 0, SCHEMA_VERSION, MIGRATION_CRITERIA_VERSION)
+        "refused", reason, 0, 0, 0, SCHEMA_VERSION, MIGRATION_CRITERIA_VERSION
+    )
 
 
 def _closed(captures: tuple[CompleteHoldingsSnapshot, ...]) -> MigrationToolReport:
     return MigrationToolReport(
-        "closed", "",
+        "closed",
+        "",
         len(captures),
         sum(len(capture.accounts) for capture in captures),
-        sum(len(account.holdings)
-            for capture in captures for account in capture.accounts),
-        SCHEMA_VERSION, MIGRATION_CRITERIA_VERSION)
+        sum(
+            len(account.holdings)
+            for capture in captures
+            for account in capture.accounts
+        ),
+        SCHEMA_VERSION,
+        MIGRATION_CRITERIA_VERSION,
+    )
 
 
 def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def approve_cutover_build(source: Path) -> CutoverBuildApproval:
@@ -150,8 +160,12 @@ def approve_cutover_build(source: Path) -> CutoverBuildApproval:
         raise ValueError(reason)
     value = os.lstat(source)
     return CutoverBuildApproval(
-        Path(source), hashlib.sha256(data).hexdigest(), mtime_ns,
-        value.st_dev, value.st_ino, len(captures),
+        Path(source),
+        hashlib.sha256(data).hexdigest(),
+        mtime_ns,
+        value.st_dev,
+        value.st_ino,
+        len(captures),
         sum(len(c.accounts) for c in captures),
         sum(len(a.holdings) for c in captures for a in c.accounts),
     )
@@ -169,10 +183,12 @@ def _read_source(source: Path) -> tuple[str, bytes, int]:
         return "source_missing", b"", 0
     except OSError:
         return "source_unsafe", b"", 0
-    if (stat.S_ISLNK(pre.st_mode)
-            or not stat.S_ISREG(pre.st_mode)
-            or pre.st_uid != os.getuid()
-            or stat.S_IMODE(pre.st_mode) & 0o022):
+    if (
+        stat.S_ISLNK(pre.st_mode)
+        or not stat.S_ISREG(pre.st_mode)
+        or pre.st_uid != os.getuid()
+        or stat.S_IMODE(pre.st_mode) & 0o022
+    ):
         return "source_unsafe", b"", 0
     try:
         fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -180,8 +196,10 @@ def _read_source(source: Path) -> tuple[str, bytes, int]:
         return "source_unsafe", b"", 0
     try:
         opened = os.fstat(fd)
-        if ((opened.st_dev, opened.st_ino) != (pre.st_dev, pre.st_ino)
-                or not stat.S_ISREG(opened.st_mode)):
+        if (opened.st_dev, opened.st_ino) != (
+            pre.st_dev,
+            pre.st_ino,
+        ) or not stat.S_ISREG(opened.st_mode):
             return "source_unsafe", b"", 0
         with os.fdopen(os.dup(fd), "rb") as handle:
             data = handle.read()
@@ -216,10 +234,12 @@ def _candidate_path_reason(candidate: Path) -> str:
         parent = os.lstat(candidate.parent)
     except OSError:
         return "candidate_unsafe"
-    if (stat.S_ISLNK(parent.st_mode)
-            or not stat.S_ISDIR(parent.st_mode)
-            or stat.S_IMODE(parent.st_mode) != 0o700
-            or parent.st_uid != os.getuid()):
+    if (
+        stat.S_ISLNK(parent.st_mode)
+        or not stat.S_ISDIR(parent.st_mode)
+        or stat.S_IMODE(parent.st_mode) != 0o700
+        or parent.st_uid != os.getuid()
+    ):
         return "candidate_unsafe"
     return ""
 
@@ -236,16 +256,16 @@ def _create_rehearsal_copy(copy_path: Path, data: bytes) -> str:
     if os.path.lexists(copy_path):
         return "rehearsal_copy_exists"
     try:
-        fd = os.open(copy_path,
-                     os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                     0o600)
+        fd = os.open(
+            copy_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600
+        )
     except OSError:
         return "copy_failed"
     try:
         os.fchmod(fd, 0o600)
         view = memoryview(data)
         while view:
-            view = view[os.write(fd, view):]
+            view = view[os.write(fd, view) :]
         os.fsync(fd)
     except OSError:
         return "copy_failed"
@@ -258,8 +278,9 @@ def _create_rehearsal_copy(copy_path: Path, data: bytes) -> str:
     return ""
 
 
-def _reopen_rehearsal_copy(copy_path: Path, data: bytes,
-                           digest: str) -> tuple[str, bytes]:
+def _reopen_rehearsal_copy(
+    copy_path: Path, data: bytes, digest: str
+) -> tuple[str, bytes]:
     """Reopen the copy read-only with nofollow and prove exact parity.
 
     Verifies regular/mode/uid/size on both lstat and the opened descriptor,
@@ -269,11 +290,13 @@ def _reopen_rehearsal_copy(copy_path: Path, data: bytes,
         pre = os.lstat(copy_path)
     except OSError:
         return "copy_failed", b""
-    if (stat.S_ISLNK(pre.st_mode)
-            or not stat.S_ISREG(pre.st_mode)
-            or stat.S_IMODE(pre.st_mode) != 0o600
-            or pre.st_uid != os.getuid()
-            or pre.st_size != len(data)):
+    if (
+        stat.S_ISLNK(pre.st_mode)
+        or not stat.S_ISREG(pre.st_mode)
+        or stat.S_IMODE(pre.st_mode) != 0o600
+        or pre.st_uid != os.getuid()
+        or pre.st_size != len(data)
+    ):
         return "copy_failed", b""
     try:
         fd = os.open(copy_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -281,8 +304,10 @@ def _reopen_rehearsal_copy(copy_path: Path, data: bytes,
         return "copy_failed", b""
     try:
         opened = os.fstat(fd)
-        if ((opened.st_dev, opened.st_ino) != (pre.st_dev, pre.st_ino)
-                or not stat.S_ISREG(opened.st_mode)):
+        if (opened.st_dev, opened.st_ino) != (
+            pre.st_dev,
+            pre.st_ino,
+        ) or not stat.S_ISREG(opened.st_mode):
             return "copy_failed", b""
         with os.fdopen(os.dup(fd), "rb") as handle:
             copy_bytes = handle.read()
@@ -290,14 +315,14 @@ def _reopen_rehearsal_copy(copy_path: Path, data: bytes,
         return "copy_failed", b""
     finally:
         os.close(fd)
-    if (copy_bytes != data
-            or hashlib.sha256(copy_bytes).hexdigest() != digest):
+    if copy_bytes != data or hashlib.sha256(copy_bytes).hexdigest() != digest:
         return "copy_failed", b""
     return "", copy_bytes
 
 
 def _verify_candidate(
-    candidate: Path, captures: tuple[CompleteHoldingsSnapshot, ...],
+    candidate: Path,
+    captures: tuple[CompleteHoldingsSnapshot, ...],
 ) -> str:
     """Read-only reopen: exact modes, zero sidecars, and full row/hash parity."""
     try:
@@ -305,13 +330,14 @@ def _verify_candidate(
         parent = os.lstat(candidate.parent)
     except OSError:
         return "verify_failed"
-    if (not stat.S_ISREG(value.st_mode)
-            or stat.S_IMODE(value.st_mode) != 0o600
-            or value.st_uid != os.getuid()
-            or stat.S_IMODE(parent.st_mode) != 0o700):
+    if (
+        not stat.S_ISREG(value.st_mode)
+        or stat.S_IMODE(value.st_mode) != 0o600
+        or value.st_uid != os.getuid()
+        or stat.S_IMODE(parent.st_mode) != 0o700
+    ):
         return "verify_failed"
-    if any(os.path.lexists(f"{candidate}{suffix}")
-           for suffix in _SIDECAR_SUFFIXES):
+    if any(os.path.lexists(f"{candidate}{suffix}") for suffix in _SIDECAR_SUFFIXES):
         return "verify_failed"
     store = HoldingsSnapshotStore(candidate, clock=_utc_now)
     try:
@@ -320,9 +346,10 @@ def _verify_candidate(
             return "verify_failed"
         for capture in captures:
             read_back = store.read_snapshot(capture.snapshot_id)
-            if (canonical_snapshot_bytes(read_back)
-                    != canonical_snapshot_bytes(capture)
-                    or read_back.content_hash != capture.content_hash):
+            if (
+                canonical_snapshot_bytes(read_back) != canonical_snapshot_bytes(capture)
+                or read_back.content_hash != capture.content_hash
+            ):
                 return "verify_failed"
     except (HoldingsSnapshotReadError, ValueError, OSError):
         return "verify_failed"
@@ -364,8 +391,7 @@ def run_clone(source: Path, candidate: Path) -> MigrationToolReport:
     reason = _create_rehearsal_copy(copy_path, data)
     if reason:
         return _refusal(reason)
-    reason, copy_bytes = _reopen_rehearsal_copy(
-        copy_path, data, source_digest)
+    reason, copy_bytes = _reopen_rehearsal_copy(copy_path, data, source_digest)
     if reason:
         return _refusal(reason)
     if not _source_unchanged(source, data, mtime_ns):
@@ -432,9 +458,11 @@ def _new_staging(
         parent = os.lstat(canonical.parent)
     except OSError:
         return "candidate_unsafe", None, None, None
-    if (not stat.S_ISDIR(parent.st_mode)
-            or stat.S_IMODE(parent.st_mode) != 0o700
-            or parent.st_uid != os.getuid()):
+    if (
+        not stat.S_ISDIR(parent.st_mode)
+        or stat.S_IMODE(parent.st_mode) != 0o700
+        or parent.st_uid != os.getuid()
+    ):
         return "candidate_unsafe", None, None, None
     try:
         parent_fd = os.open(canonical.parent, os.O_RDONLY | os.O_NOFOLLOW)
@@ -457,9 +485,11 @@ def _new_staging(
             try:
                 os.fchmod(fd, 0o600)
                 value = os.fstat(fd)
-                if (not stat.S_ISREG(value.st_mode)
-                        or stat.S_IMODE(value.st_mode) != 0o600
-                        or value.st_uid != os.getuid()):
+                if (
+                    not stat.S_ISREG(value.st_mode)
+                    or stat.S_IMODE(value.st_mode) != 0o600
+                    or value.st_uid != os.getuid()
+                ):
                     return "candidate_unsafe", None, None, None
             finally:
                 os.close(fd)
@@ -474,21 +504,24 @@ def _staging_identity(path: Path, device: int, inode: int) -> str:
         value = os.lstat(path)
     except OSError:
         return "unsafe_path_swap"
-    if (stat.S_ISLNK(value.st_mode)
-            or not stat.S_ISREG(value.st_mode)
-            or (value.st_dev, value.st_ino) != (device, inode)):
+    if (
+        stat.S_ISLNK(value.st_mode)
+        or not stat.S_ISREG(value.st_mode)
+        or (value.st_dev, value.st_ino) != (device, inode)
+    ):
         return "unsafe_path_swap"
     return ""
 
 
 def _build_promotion(
-    staging: Path, captures: tuple[CompleteHoldingsSnapshot, ...],
-    device: int, inode: int,
+    staging: Path,
+    captures: tuple[CompleteHoldingsSnapshot, ...],
+    device: int,
+    inode: int,
 ) -> str:
     if _staging_identity(staging, device, inode):
         return "unsafe_path_swap"
-    store = HoldingsSnapshotStore(
-        staging, clock=_utc_now, initialize_precreated=True)
+    store = HoldingsSnapshotStore(staging, clock=_utc_now, initialize_precreated=True)
     for capture in captures:
         permit = authorize_legacy_migration(
             snapshot_id=capture.snapshot_id,
@@ -507,14 +540,13 @@ def _build_promotion(
 
 def _commit_marker(marker: Path) -> str:
     """Offline-tool-owned atomic marker writer; callers hold exclusive lock."""
-    temp = marker.parent / (
-        ".holdings_cutover_v1." + os.urandom(16).hex() + ".tmp")
+    temp = marker.parent / (".holdings_cutover_v1." + os.urandom(16).hex() + ".tmp")
     replaced = False
     try:
         with private_creation():
             fd = os.open(
-                temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                0o600)
+                temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600
+            )
         try:
             os.fchmod(fd, 0o600)
             os.write(fd, CUTOVER_MARKER_BYTES)
@@ -525,14 +557,17 @@ def _commit_marker(marker: Path) -> str:
         replaced = True
         fsync_directory(marker.parent)
     except OSError:
-        return ("marker_durability_uncertain" if replaced
-                else "marker_commit_failed")
+        return "marker_durability_uncertain" if replaced else "marker_commit_failed"
     return ""
 
 
 def execute_cutover(
-    *, approval: CutoverBuildApproval, canonical: Path, marker: Path,
-    lock_path: Path, stop_after: str | None = None,
+    *,
+    approval: CutoverBuildApproval,
+    canonical: Path,
+    marker: Path,
+    lock_path: Path,
+    stop_after: str | None = None,
 ) -> CutoverToolReport:
     """Build, no-replace promote, and commit the exact marker under one lock.
 
@@ -567,16 +602,17 @@ def execute_cutover(
             finally:
                 os.close(fd)
             os.link(staging, canonical)
-            if (_staging_identity(staging, device, inode)
-                    or _staging_identity(canonical, device, inode)):
+            if _staging_identity(staging, device, inode) or _staging_identity(
+                canonical, device, inode
+            ):
                 return CutoverToolReport("refused", "cutover_incomplete")
             fsync_directory(canonical.parent)
         except FileExistsError:
             return CutoverToolReport("refused", "canonical_exists")
         except OSError as error:
             reason = (
-                "cross_device" if error.errno == errno.EXDEV
-                else "promotion_failed")
+                "cross_device" if error.errno == errno.EXDEV else "promotion_failed"
+            )
             return CutoverToolReport("refused", reason)
         if stop_after == "promotion":
             return CutoverToolReport("interrupted", "before_marker")
@@ -587,16 +623,18 @@ def execute_cutover(
             return CutoverToolReport("refused", reason or "verify_failed")
         reason = _commit_marker(marker)
         if reason:
-            status = ("recovery_required"
-                      if reason == "marker_durability_uncertain"
-                      else "refused")
+            status = (
+                "recovery_required"
+                if reason == "marker_durability_uncertain"
+                else "refused"
+            )
             return CutoverToolReport(status, reason)
         return CutoverToolReport(
-            "closed", "", approval.captures, approval.accounts, approval.items)
+            "closed", "", approval.captures, approval.accounts, approval.items
+        )
 
     try:
-        return with_family_lock(
-            lock_path, exclusive=True, fn=operation)
+        return with_family_lock(lock_path, exclusive=True, fn=operation)
     except OSError:
         return CutoverToolReport("refused", "cutover_incomplete")
     except Exception as error:
@@ -606,7 +644,10 @@ def execute_cutover(
 
 
 def simulate_whole_file_quarantine(
-    *, source: Path, canonical: Path, marker: Path,
+    *,
+    source: Path,
+    canonical: Path,
+    marker: Path,
 ) -> CutoverToolReport:
     """Non-mutating plan only; retirement needs a later explicit approval."""
     del source, canonical, marker
@@ -614,7 +655,9 @@ def simulate_whole_file_quarantine(
 
 
 def simulate_rollback_before_promotion(
-    *, source: Path, staging: Path,
+    *,
+    source: Path,
+    staging: Path,
 ) -> CutoverToolReport:
     """Describe the pre-promotion stop without deleting its retained artifact."""
     del source, staging
@@ -622,7 +665,11 @@ def simulate_rollback_before_promotion(
 
 
 def simulate_rollback_after_promotion_before_marker(
-    *, source: Path, staging: Path, canonical: Path, marker: Path,
+    *,
+    source: Path,
+    staging: Path,
+    canonical: Path,
+    marker: Path,
 ) -> CutoverToolReport:
     """Fail-closed simulation; reversal/quarantine requires new authority."""
     del source, staging, canonical, marker
@@ -646,20 +693,30 @@ def main(argv: list[str] | None = None) -> int:
         prog="migrate_holdings_factstore",
         description="Offline legacy holdings migration: dry-run/clone only.",
     )
-    parser.add_argument("--source", required=True, type=Path,
-                        help="explicit legacy source JSON path")
-    parser.add_argument("--candidate", required=True, type=Path,
-                        help="explicit candidate SQLite path inside a "
-                             "private 0700 parent")
+    parser.add_argument(
+        "--source", required=True, type=Path, help="explicit legacy source JSON path"
+    )
+    parser.add_argument(
+        "--candidate",
+        required=True,
+        type=Path,
+        help="explicit candidate SQLite path inside a private 0700 parent",
+    )
     mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--dry-run", action="store_true",
-                      help="preflight only: validate the source in place "
-                           "and report counts; creates and mutates nothing")
-    mode.add_argument("--clone", action="store_true",
-                      help="SDS full rehearsal protocol: privately copy the "
-                           "source beside the candidate, decode the copy, "
-                           "build and verify the candidate; artifacts are "
-                           "never deleted (deletion needs separate approval)")
+    mode.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="preflight only: validate the source in place "
+        "and report counts; creates and mutates nothing",
+    )
+    mode.add_argument(
+        "--clone",
+        action="store_true",
+        help="SDS full rehearsal protocol: privately copy the "
+        "source beside the candidate, decode the copy, "
+        "build and verify the candidate; artifacts are "
+        "never deleted (deletion needs separate approval)",
+    )
     args = parser.parse_args(argv)
 
     if args.dry_run:

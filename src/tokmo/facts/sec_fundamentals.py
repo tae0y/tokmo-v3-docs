@@ -34,14 +34,12 @@ from decimal import Decimal
 from tokmo.facts.eia import LIVE_TRANSPORT_FAILURE_CODES, LiveAttemptOutcome
 from tokmo.facts.sec import REQUEST_TIMEOUT_SECONDS as SEC_TIMEOUT
 from tokmo.values.fundamental_materials import (
+    SEC_FUNDAMENTAL_SOURCE,
     AccountingRegime,
-    DATE_ONLY_POLICY_VERSION,
-    DATE_ONLY_SESSION_HISTORY_SOURCE,
     AvailableAtResolution,
     MetricEvidence,
     MetricSelection,
     OfficialFundamentalMaterialV1,
-    SEC_FUNDAMENTAL_SOURCE,
     StatementScope,
 )
 
@@ -69,16 +67,12 @@ MAPPING_VERSION = "v1"
 
 # Exact versioned concept registry: metric -> ordered candidate concepts.
 CONCEPT_REGISTRY: dict[str, tuple[str, ...]] = {
-    "revenue_ttm": (
-        "RevenueFromContractWithCustomerExcludingAssessedTax",
-    ),
+    "revenue_ttm": ("RevenueFromContractWithCustomerExcludingAssessedTax",),
     "net_income_ttm": ("NetIncomeLoss",),
     "gross_profit_ttm": ("GrossProfit",),
     "total_equity": ("StockholdersEquity",),
     "total_assets": ("Assets",),
-    "diluted_shares_outstanding": (
-        "WeightedAverageNumberOfDilutedSharesOutstanding",
-    ),
+    "diluted_shares_outstanding": ("WeightedAverageNumberOfDilutedSharesOutstanding",),
 }
 
 # Alternative concepts that may co-occur with primary -> ambiguity check.
@@ -144,7 +138,8 @@ class SECCompanyFactsResult:
 
 
 SecTransport = Callable[
-    [SECCompanyFactsRequest], "SECCompanyFactsTransportSuccess | SECCompanyFactsTransportFailure"
+    [SECCompanyFactsRequest],
+    "SECCompanyFactsTransportSuccess | SECCompanyFactsTransportFailure",
 ]
 Clock = Callable[[], datetime]
 AvailableAtResolver = Callable[[str], "AvailableAtResolution"]
@@ -307,10 +302,7 @@ def parse_companyfacts_response(
 
     if current_end_date is not None:
         # Find candidate priors: period ends that come before current_end.
-        prior_candidates = [
-            e for e in sorted_ends
-            if e < current_end
-        ]
+        prior_candidates = [e for e in sorted_ends if e < current_end]
         for prior_end in prior_candidates:
             try:
                 prior_end_date = date.fromisoformat(prior_end)
@@ -532,8 +524,7 @@ def _resolve_revision(
 
     # Check for ambiguity: same filed date + same form + different values.
     latest_group = [
-        f for f in sorted_facts
-        if f.filed == latest.filed and f.form == latest.form
+        f for f in sorted_facts if f.filed == latest.filed and f.form == latest.form
     ]
     if len(latest_group) > 1:
         values = {f.value for f in latest_group}
@@ -544,8 +535,7 @@ def _resolve_revision(
     if latest.form == "10-K/A":
         # Find the predecessor: the earliest 10-K (non-amendment) for this period.
         predecessors = [
-            f for f in sorted_facts
-            if f.form == "10-K" and f.accn != latest.accn
+            f for f in sorted_facts if f.form == "10-K" and f.accn != latest.accn
         ]
         if predecessors:
             predecessor = min(predecessors, key=lambda f: f.filed)
@@ -710,10 +700,15 @@ def _build_material_from_accn(
         alt_evidence: list[_AnnualFactData] = []
 
         if prim_matching:
-            fact = prim_matching[0] if len(prim_matching) == 1 else _resolve_revision(prim_matching)
+            fact = (
+                prim_matching[0]
+                if len(prim_matching) == 1
+                else _resolve_revision(prim_matching)
+            )
             if fact is None:
                 metric_evidence[metric_name] = MetricEvidence(
-                    value=None, source_concept_id=None,
+                    value=None,
+                    source_concept_id=None,
                     unit=METRIC_UNITS[metric_name],
                     selection=MetricSelection.UNAVAILABLE,
                 )
@@ -722,7 +717,8 @@ def _build_material_from_accn(
             # M1 accession-scoped ambiguity: check if the SAME accession has
             # an alternative concept for the exact same (start, end).
             alt_evidence = [
-                alt_f for alt_f in alt_matching
+                alt_f
+                for alt_f in alt_matching
                 if alt_f.start == fact.start and alt_f.end == fact.end
             ]
             if alt_evidence:
@@ -731,7 +727,8 @@ def _build_material_from_accn(
         else:
             # No primary fact from this accession.
             metric_evidence[metric_name] = MetricEvidence(
-                value=None, source_concept_id=None,
+                value=None,
+                source_concept_id=None,
                 unit=METRIC_UNITS[metric_name],
                 selection=MetricSelection.UNAVAILABLE,
             )
@@ -801,7 +798,8 @@ def _build_material_from_accn(
 
         if is_ambiguous:
             metric_evidence[metric_name] = MetricEvidence(
-                value=None, source_concept_id=None,
+                value=None,
+                source_concept_id=None,
                 unit=METRIC_UNITS[metric_name],
                 selection=MetricSelection.AMBIGUOUS,
             )

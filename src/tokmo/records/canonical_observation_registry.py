@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-
 OFFICIAL_MEMBERSHIP_OBSERVATION_FAMILY = "OfficialMembershipObservationV1"
-OFFICIAL_MEMBERSHIP_DOCUMENTATION_CAPTURE_FAMILY = "OfficialMembershipDocumentationCaptureV1"
+OFFICIAL_MEMBERSHIP_DOCUMENTATION_CAPTURE_FAMILY = (
+    "OfficialMembershipDocumentationCaptureV1"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,7 +45,9 @@ def registered_family(name: str) -> CanonicalObservationFamilyV1 | None:
 
 
 def require_registered_family(
-    name: str, *, adapter_type: str,
+    name: str,
+    *,
+    adapter_type: str,
 ) -> CanonicalObservationFamilyV1:
     family = registered_family(name)
     if family is None or family.adapter_type != adapter_type:

@@ -24,9 +24,10 @@ import hashlib
 import os
 import sqlite3
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
+from tokmo.records.durability import fsync_directory
 from tokmo.records.private_sqlite import (
     MIN_SQLITE_VERSION,
     acquire_immediate_transaction,
@@ -36,14 +37,11 @@ from tokmo.records.private_sqlite import (
     private_creation,
     table_is_strict,
 )
-from tokmo.records.durability import fsync_directory
+from tokmo.values.current_holdings import HoldingItemV1
+from tokmo.values.material_pack import canonical_decode, canonical_encode
 from tokmo.values.pension_holdings import (
-    PENSION_HOLDINGS_SCHEMA_VERSION,
-    PENSION_PARSER_VERSION,
     PensionHoldingsRevisionV1,
 )
-from tokmo.values.current_holdings import HoldingItemV1
-from tokmo.values.material_pack import canonical_encode, canonical_decode
 
 Clock = Callable[[], datetime]
 
@@ -75,7 +73,6 @@ _DDL_STATEMENTS: list[str] = [
     holdings_json            TEXT NOT NULL,
     previous_active_revision_id TEXT REFERENCES pension_revisions(revision_id)
 ) STRICT""",
-
     """CREATE TABLE pension_activation_events (
     seq                      INTEGER PRIMARY KEY AUTOINCREMENT,
     revision_id              TEXT NOT NULL REFERENCES pension_revisions(revision_id),
@@ -86,17 +83,14 @@ _DDL_STATEMENTS: list[str] = [
     approval_reason          TEXT,
     recorded_at              TEXT NOT NULL
 ) STRICT""",
-
     """CREATE TABLE pension_active_pointer (
     singleton                INTEGER PRIMARY KEY CHECK(singleton = 1),
     active_revision_id       TEXT NOT NULL CHECK(length(active_revision_id) = 32 AND active_revision_id NOT GLOB '*[^0-9a-f]*') REFERENCES pension_revisions(revision_id),
     activation_generation    INTEGER NOT NULL CHECK(activation_generation >= 1),
     set_at                   TEXT NOT NULL
 ) STRICT""",
-
     """CREATE UNIQUE INDEX pension_one_active
     ON pension_revisions(state) WHERE state = 'ACTIVE'""",
-
     """CREATE TABLE pension_reminder_events (
     reminder_id              TEXT PRIMARY KEY CHECK(length(reminder_id) = 64),
     revision_id              TEXT NOT NULL CHECK(length(revision_id) = 32) REFERENCES pension_revisions(revision_id),
@@ -105,13 +99,10 @@ _DDL_STATEMENTS: list[str] = [
     reserved_at              TEXT NOT NULL,
     alert_id                 TEXT NOT NULL
 ) STRICT""",
-
     """CREATE UNIQUE INDEX pension_reminder_unique_revision_kind
     ON pension_reminder_events(revision_id, reminder_kind)""",
-
     """CREATE INDEX pension_activation_events_revision
     ON pension_activation_events(revision_id)""",
-
     """CREATE INDEX pension_revisions_state_lookup
     ON pension_revisions(state)""",
 ]
@@ -145,7 +136,9 @@ def _ddl_sha256() -> str:
         conn.close()
 
 
-PENSION_REGISTRY_DDL_SHA256 = "41fc7e728f2e9aff8520ce0e7bd62956e453695be7bea5b8e5542da584faa29f"
+PENSION_REGISTRY_DDL_SHA256 = (
+    "41fc7e728f2e9aff8520ce0e7bd62956e453695be7bea5b8e5542da584faa29f"
+)
 
 # ---------------------------------------------------------------------------
 # Second schema generation: the registry as a CURRENT READ MODEL.
@@ -204,7 +197,6 @@ _DDL_STATEMENTS_GEN2: list[str] = [
     _DDL_STATEMENTS[5],
     _DDL_STATEMENTS[6],
     _DDL_STATEMENTS[7],
-
     """CREATE TABLE pension_batch_pre_snapshots (
     batch_identity           TEXT PRIMARY KEY CHECK(length(batch_identity) = 64 AND batch_identity NOT GLOB '*[^0-9a-f]*'),
     snapshot_id              TEXT NOT NULL UNIQUE CHECK(length(snapshot_id) = 32 AND snapshot_id NOT GLOB '*[^0-9a-f]*'),
@@ -273,7 +265,7 @@ class PensionRegistryCorruptError(ValueError):
 
 
 def _canonical_utc(dt: datetime) -> str:
-    return dt.astimezone(timezone.utc).isoformat(timespec="microseconds")
+    return dt.astimezone(UTC).isoformat(timespec="microseconds")
 
 
 def _holdings_to_json(holdings: tuple[HoldingItemV1, ...]) -> str:
@@ -300,14 +292,16 @@ def _holdings_from_json(raw: str) -> tuple[HoldingItemV1, ...]:
         if not isinstance(item, dict):
             raise PensionRegistryCorruptError("holdings_json_item_not_dict")
         try:
-            result.append(HoldingItemV1(
-                symbol=item["symbol"],
-                quantity=item["quantity"],
-                avg_price=item["avg_price"],
-                currency=item["currency"],
-                market_raw=item["market_raw"],
-                market_field=item["market_field"],
-            ))
+            result.append(
+                HoldingItemV1(
+                    symbol=item["symbol"],
+                    quantity=item["quantity"],
+                    avg_price=item["avg_price"],
+                    currency=item["currency"],
+                    market_raw=item["market_raw"],
+                    market_field=item["market_field"],
+                )
+            )
         except (KeyError, ValueError, TypeError) as exc:
             raise PensionRegistryCorruptError("holdings_json_item_invalid") from exc
     return tuple(result)
@@ -434,6 +428,7 @@ class PensionRegistryStore:
             if self._path.exists():
                 mode = os.stat(self._path).st_mode
                 import stat as _stat
+
                 if not _stat.S_ISREG(mode):
                     raise PensionRegistryCorruptError("not_regular_file")
                 if _stat.S_IMODE(mode) != 0o600:
@@ -459,7 +454,9 @@ class PensionRegistryStore:
         raise PensionRegistryCorruptError("ddl_checksum_mismatch")
 
     def _erase_non_current_payloads(
-        self, connection: sqlite3.Connection, current_revision_id: str,
+        self,
+        connection: sqlite3.Connection,
+        current_revision_id: str,
     ) -> None:
         """Generation 2: the registry keeps exactly one holdings payload.
 
@@ -472,8 +469,7 @@ class PensionRegistryStore:
         connection.execute(
             "UPDATE pension_revisions SET holdings_json = ? "
             "WHERE revision_id <> ? AND holdings_json <> ?",
-            (EMPTY_HOLDINGS_PAYLOAD, current_revision_id,
-             EMPTY_HOLDINGS_PAYLOAD),
+            (EMPTY_HOLDINGS_PAYLOAD, current_revision_id, EMPTY_HOLDINGS_PAYLOAD),
         )
 
     def _compute_ddl_sha256(self, connection: sqlite3.Connection) -> str:
@@ -497,7 +493,9 @@ class PensionRegistryStore:
         acquire_immediate_transaction(connection)
         return connection, identity
 
-    def _commit(self, connection: sqlite3.Connection, identity: tuple[int, int]) -> None:
+    def _commit(
+        self, connection: sqlite3.Connection, identity: tuple[int, int]
+    ) -> None:
         """COMMIT, fsync parent dir, verify path identity."""
         if path_identity(self._path) != identity:
             connection.execute("ROLLBACK")
@@ -599,9 +597,7 @@ class PensionRegistryStore:
                 raise PensionRegistryCorruptError("revision_not_found")
             if row[0] != "CANDIDATE_VALID":
                 connection.execute("ROLLBACK")
-                raise PensionRegistryCorruptError(
-                    f"illegal_state_transition:{row[0]}"
-                )
+                raise PensionRegistryCorruptError(f"illegal_state_transition:{row[0]}")
             connection.execute(
                 "UPDATE pension_revisions SET state = 'PENDING_REVIEW' "
                 "WHERE revision_id = ?",
@@ -659,9 +655,7 @@ class PensionRegistryStore:
                 raise PensionRegistryCorruptError("already_active")
             if row[0] not in ("CANDIDATE_VALID", "PENDING_REVIEW", "SUPERSEDED"):
                 connection.execute("ROLLBACK")
-                raise PensionRegistryCorruptError(
-                    f"illegal_state_transition:{row[0]}"
-                )
+                raise PensionRegistryCorruptError(f"illegal_state_transition:{row[0]}")
 
             # Find current ACTIVE (if any).
             active_row = connection.execute(
@@ -685,7 +679,8 @@ class PensionRegistryStore:
                 # verified against the candidate snapshot.
                 connection.execute("ROLLBACK")
                 raise PensionRegistryCorruptError(
-                    "activation_requires_verified_snapshot")
+                    "activation_requires_verified_snapshot"
+                )
 
             # 1. Supersede current ACTIVE. On generation 2 the state change
             # and the payload erasure are one statement: a SUPERSEDED row is
@@ -790,7 +785,8 @@ class PensionRegistryStore:
             if self._generation(connection) == SCHEMA_GENERATION_TWO:
                 connection.execute("ROLLBACK")
                 raise PensionRegistryCorruptError(
-                    "rollback_by_historical_payload_forbidden")
+                    "rollback_by_historical_payload_forbidden"
+                )
             row = connection.execute(
                 "SELECT state FROM pension_revisions WHERE revision_id = ?",
                 (target_revision_id,),
@@ -829,8 +825,7 @@ class PensionRegistryStore:
             # preserved in the revision row and the ROLLED_BACK event carries
             # the rollback reason.
             connection.execute(
-                "UPDATE pension_revisions SET state = 'ACTIVE' "
-                "WHERE revision_id = ?",
+                "UPDATE pension_revisions SET state = 'ACTIVE' WHERE revision_id = ?",
                 (target_revision_id,),
             )
 
@@ -888,7 +883,10 @@ class PensionRegistryStore:
     # ------------------------------------------------------------------
 
     def replace_current_from_snapshot(
-        self, revision: PensionHoldingsRevisionV1, *, approval_reason: str,
+        self,
+        revision: PensionHoldingsRevisionV1,
+        *,
+        approval_reason: str,
     ) -> None:
         """Atomically make *revision* the one current holdings payload.
 
@@ -927,15 +925,20 @@ class PensionRegistryStore:
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL,
                               'CANDIDATE_VALID', ?, ?, NULL)""",
                     (
-                        revision.revision_id, revision.schema_version,
-                        revision.source_content_sha256, revision.parser_version,
-                        revision.sheet_schema_version, revision.semantic_digest,
-                        revision.reconciliation_digest, revision.holding_count,
+                        revision.revision_id,
+                        revision.schema_version,
+                        revision.source_content_sha256,
+                        revision.parser_version,
+                        revision.sheet_schema_version,
+                        revision.semantic_digest,
+                        revision.reconciliation_digest,
+                        revision.holding_count,
                         revision.liquidation_flag,
                         _canonical_utc(revision.source_as_of),
                         _canonical_utc(revision.uploaded_at),
                         _canonical_utc(revision.validated_at),
-                        now_str, EMPTY_HOLDINGS_PAYLOAD,
+                        now_str,
+                        EMPTY_HOLDINGS_PAYLOAD,
                     ),
                 )
                 connection.execute(
@@ -957,7 +960,8 @@ class PensionRegistryStore:
                 connection.execute(
                     "UPDATE pension_revisions SET state = 'SUPERSEDED', "
                     "holdings_json = ? WHERE revision_id = ?",
-                    (EMPTY_HOLDINGS_PAYLOAD, previous_active_id))
+                    (EMPTY_HOLDINGS_PAYLOAD, previous_active_id),
+                )
 
             # Install the target as the one current revision. State and payload
             # move together: a historical row is never allowed to hold content,
@@ -968,9 +972,14 @@ class PensionRegistryStore:
                 "UPDATE pension_revisions SET state = 'ACTIVE', "
                 "holdings_json = ?, holding_count = ?, semantic_digest = ?, "
                 "approved_at = ?, approval_reason = ? WHERE revision_id = ?",
-                (holdings_json, revision.holding_count,
-                 revision.semantic_digest, now_str, approval_reason,
-                 revision.revision_id),
+                (
+                    holdings_json,
+                    revision.holding_count,
+                    revision.semantic_digest,
+                    now_str,
+                    approval_reason,
+                    revision.revision_id,
+                ),
             )
 
             pointer_row = connection.execute(
@@ -984,8 +993,14 @@ class PensionRegistryStore:
                     previous_active_revision_id, approved_at, approval_reason,
                     recorded_at
                 ) VALUES (?, 'ROLLED_BACK', ?, ?, ?, ?, ?)""",
-                (revision.revision_id, next_generation, previous_active_id,
-                 now_str, approval_reason, now_str),
+                (
+                    revision.revision_id,
+                    next_generation,
+                    previous_active_id,
+                    now_str,
+                    approval_reason,
+                    now_str,
+                ),
             )
             connection.execute(
                 """INSERT INTO pension_active_pointer(
@@ -1031,7 +1046,10 @@ class PensionRegistryStore:
     # ------------------------------------------------------------------
 
     def reserve_batch_pre_snapshot(
-        self, batch_identity: str, snapshot_id: str, holdings_digest: str,
+        self,
+        batch_identity: str,
+        snapshot_id: str,
+        holdings_digest: str,
         source_as_of: datetime,
     ) -> dict:
         """Reserve, or return the existing reservation for, a batch.
@@ -1060,23 +1078,33 @@ class PensionRegistryStore:
             ).fetchone()
             if row is not None:
                 connection.execute("ROLLBACK")
-                if (row[0] != snapshot_id or row[1] != holdings_digest
-                        or row[3] != source_as_of_str):
-                    raise PensionRegistryCorruptError(
-                        "batch_pre_snapshot_conflict")
-                return {"batch_identity": batch_identity,
-                        "snapshot_id": row[0],
-                        "holdings_semantic_digest": row[1],
-                        "reservation_source_as_of": row[3],
-                        "link_state": row[2], "created": False}
+                if (
+                    row[0] != snapshot_id
+                    or row[1] != holdings_digest
+                    or row[3] != source_as_of_str
+                ):
+                    raise PensionRegistryCorruptError("batch_pre_snapshot_conflict")
+                return {
+                    "batch_identity": batch_identity,
+                    "snapshot_id": row[0],
+                    "holdings_semantic_digest": row[1],
+                    "reservation_source_as_of": row[3],
+                    "link_state": row[2],
+                    "created": False,
+                }
             connection.execute(
                 """INSERT INTO pension_batch_pre_snapshots(
                     batch_identity, snapshot_id, holdings_semantic_digest,
                     reservation_source_as_of,
                     link_state, reserved_at, captured_at, appended_at
                 ) VALUES (?, ?, ?, ?, 'RESERVED', ?, NULL, NULL)""",
-                (batch_identity, snapshot_id, holdings_digest,
-                 source_as_of_str, now_str),
+                (
+                    batch_identity,
+                    snapshot_id,
+                    holdings_digest,
+                    source_as_of_str,
+                    now_str,
+                ),
             )
             self._commit(connection, identity)
         except PensionRegistryCorruptError:
@@ -1092,8 +1120,7 @@ class PensionRegistryStore:
                     connection.execute("ROLLBACK")
             except (sqlite3.Error, OSError):
                 pass
-            raise PensionRegistryCorruptError(
-                "batch_pre_snapshot_conflict") from error
+            raise PensionRegistryCorruptError("batch_pre_snapshot_conflict") from error
         except (sqlite3.Error, OSError) as error:
             try:
                 if connection.in_transaction:
@@ -1103,10 +1130,14 @@ class PensionRegistryStore:
             raise PensionRegistryCorruptError("store_write_failed") from error
         finally:
             connection.close()
-        return {"batch_identity": batch_identity, "snapshot_id": snapshot_id,
-                "holdings_semantic_digest": holdings_digest,
-                "reservation_source_as_of": source_as_of_str,
-                "link_state": "RESERVED", "created": True}
+        return {
+            "batch_identity": batch_identity,
+            "snapshot_id": snapshot_id,
+            "holdings_semantic_digest": holdings_digest,
+            "reservation_source_as_of": source_as_of_str,
+            "link_state": "RESERVED",
+            "created": True,
+        }
 
     def advance_batch_pre_snapshot(self, batch_identity: str, state: str) -> None:
         """Move a reservation to CAPTURED or APPENDED. Idempotent."""
@@ -1117,7 +1148,9 @@ class PensionRegistryStore:
         try:
             row = connection.execute(
                 "SELECT link_state, captured_at FROM pension_batch_pre_snapshots "
-                "WHERE batch_identity = ?", (batch_identity,)).fetchone()
+                "WHERE batch_identity = ?",
+                (batch_identity,),
+            ).fetchone()
             if row is None:
                 connection.execute("ROLLBACK")
                 raise PensionRegistryCorruptError("batch_pre_snapshot_missing")
@@ -1128,13 +1161,15 @@ class PensionRegistryStore:
                 connection.execute(
                     "UPDATE pension_batch_pre_snapshots SET link_state = ?, "
                     "captured_at = ? WHERE batch_identity = ?",
-                    (state, now_str, batch_identity))
+                    (state, now_str, batch_identity),
+                )
             else:
                 connection.execute(
                     "UPDATE pension_batch_pre_snapshots SET link_state = ?, "
                     "captured_at = COALESCE(captured_at, ?), appended_at = ? "
                     "WHERE batch_identity = ?",
-                    (state, now_str, now_str, batch_identity))
+                    (state, now_str, now_str, batch_identity),
+                )
             self._commit(connection, identity)
         except PensionRegistryCorruptError:
             try:
@@ -1164,9 +1199,13 @@ class PensionRegistryStore:
             ).fetchone()
             if row is None:
                 return None
-            return {"batch_identity": batch_identity, "snapshot_id": row[0],
-                    "holdings_semantic_digest": row[1], "link_state": row[2],
-                    "reservation_source_as_of": row[3]}
+            return {
+                "batch_identity": batch_identity,
+                "snapshot_id": row[0],
+                "holdings_semantic_digest": row[1],
+                "link_state": row[2],
+                "reservation_source_as_of": row[3],
+            }
         finally:
             connection.close()
 
@@ -1197,7 +1236,8 @@ class PensionRegistryStore:
             return connection.execute(
                 "SELECT count(*) FROM pension_revisions "
                 "WHERE state IN ('SUPERSEDED', 'REJECTED') "
-                "AND holdings_json <> ?", (EMPTY_HOLDINGS_PAYLOAD,),
+                "AND holdings_json <> ?",
+                (EMPTY_HOLDINGS_PAYLOAD,),
             ).fetchone()[0]
         finally:
             connection.close()
@@ -1232,10 +1272,13 @@ class PensionRegistryStore:
             return None
         try:
             import stat as _stat
+
             path_stat = os.lstat(self._path)
-            if (not _stat.S_ISREG(path_stat.st_mode)
-                    or _stat.S_IMODE(path_stat.st_mode) != 0o600
-                    or path_stat.st_nlink != 1):
+            if (
+                not _stat.S_ISREG(path_stat.st_mode)
+                or _stat.S_IMODE(path_stat.st_mode) != 0o600
+                or path_stat.st_nlink != 1
+            ):
                 raise PensionRegistryCorruptError("read_only_path_unsafe")
             uri = f"file:{self._path.resolve().as_posix()}?mode=ro"
             connection = sqlite3.connect(uri, uri=True)
@@ -1332,9 +1375,12 @@ class PensionRegistryStore:
             if row is None:
                 return None
             return {
-                "revision_id": row[0], "state": row[1],
-                "source_content_sha256": row[2], "semantic_digest": row[3],
-                "holding_count": row[4], "source_as_of": row[5],
+                "revision_id": row[0],
+                "state": row[1],
+                "source_content_sha256": row[2],
+                "semantic_digest": row[3],
+                "holding_count": row[4],
+                "source_as_of": row[5],
             }
         finally:
             connection.close()
@@ -1406,8 +1452,7 @@ class PensionRegistryStore:
         connection, identity = self._write_tx()
         try:
             cursor = connection.execute(
-                "UPDATE pension_reminder_events SET alert_id = ? "
-                "WHERE reminder_id = ?",
+                "UPDATE pension_reminder_events SET alert_id = ? WHERE reminder_id = ?",
                 (alert_id, reminder_id),
             )
             if cursor.rowcount == 0:

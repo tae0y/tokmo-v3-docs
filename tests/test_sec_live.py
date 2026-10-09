@@ -6,14 +6,18 @@ import json
 import os
 import stat
 import urllib.error
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from email.message import Message
 from pathlib import Path
 
 import pytest
 
 from tokmo.composition import (
-    SEC_MAX_STARTS, SEC_STATE_NAME, LiveRunError, run_sec, setup_sec,
+    SEC_MAX_STARTS,
+    SEC_STATE_NAME,
+    LiveRunError,
+    run_sec,
+    setup_sec,
 )
 from tokmo.facts.sec import (
     REQUEST_TIMEOUT_SECONDS,
@@ -28,7 +32,7 @@ from tokmo.runtime.config import ConfigError, load_sec_config
 FIXTURES = Path(__file__).parent / "fixtures"
 TICKERS_BODY = (FIXTURES / "sec_company_tickers_success.json").read_bytes()
 SUBMISSIONS_BODY = (FIXTURES / "sec_submissions_success.json").read_bytes()
-NOW = datetime(2026, 7, 27, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 27, 12, 0, 0, tzinfo=UTC)
 UA_SECRET = "TokmoTest/0.0 (fixture-contact@example.invalid)"
 AAPL_CIK = "0000320193"
 
@@ -44,8 +48,12 @@ def prepare(home):
 def invoke(home, endpoint, transport, now=NOW):
     ids = iter(["record", "decision"])
     return run_sec(
-        home=home, endpoint=endpoint, transport=transport,
-        clock=lambda: now, id_factory=ids.__next__, run_id="run",
+        home=home,
+        endpoint=endpoint,
+        transport=transport,
+        clock=lambda: now,
+        id_factory=ids.__next__,
+        run_id="run",
     )
 
 
@@ -58,6 +66,7 @@ def confirm_tickers(home, now=NOW):
 
 
 # --- transport wire behavior -------------------------------------------------
+
 
 class Response:
     status = 200
@@ -127,16 +136,23 @@ def test_submissions_transport_rejects_bad_cik_without_network(cik):
 
 def test_opener_has_empty_proxy_policy_and_redirects_are_not_followed():
     transport = SecLiveTransport()
-    assert not any(handler.__class__.__name__ == "ProxyHandler"
-                   for handler in transport.opener.handlers)
+    assert not any(
+        handler.__class__.__name__ == "ProxyHandler"
+        for handler in transport.opener.handlers
+    )
     redirect = urllib.error.HTTPError("masked", 301, "masked", Message(), None)
     transport.opener = CapturingOpener(redirect)
     assert transport(build_tickers_request(user_agent=UA_SECRET)).code == "redirect"
 
 
-@pytest.mark.parametrize("status,code", [
-    (403, "auth_rejection"), (429, "http_429"), (503, "http_5xx"),
-])
+@pytest.mark.parametrize(
+    "status,code",
+    [
+        (403, "auth_rejection"),
+        (429, "http_429"),
+        (503, "http_5xx"),
+    ],
+)
 def test_http_errors_map_to_closed_codes(status, code):
     error = urllib.error.HTTPError("masked", status, "masked", Message(), None)
     transport = SecLiveTransport()
@@ -147,16 +163,21 @@ def test_http_errors_map_to_closed_codes(status, code):
 def test_body_cap_and_content_encoding_fail_closed():
     transport = SecLiveTransport()
     transport.opener = CapturingOpener(Response(b"x" * (MAX_BODY_BYTES + 1)))
-    assert transport(build_tickers_request(user_agent=UA_SECRET)).code == "body_too_large"
+    assert (
+        transport(build_tickers_request(user_agent=UA_SECRET)).code == "body_too_large"
+    )
 
     gzipped = Response()
     gzipped.headers["Content-Encoding"] = "gzip"
     transport.opener = CapturingOpener(gzipped)
-    assert transport(build_tickers_request(
-        user_agent=UA_SECRET)).code == "unsupported_content_encoding"
+    assert (
+        transport(build_tickers_request(user_agent=UA_SECRET)).code
+        == "unsupported_content_encoding"
+    )
 
 
 # --- sec config loader -------------------------------------------------------
+
 
 def test_sec_config_loader_reasons(tmp_path):
     with pytest.raises(ConfigError, match="config_missing"):
@@ -179,6 +200,7 @@ def test_sec_config_loader_reasons(tmp_path):
 
 # --- bounded probe state machine --------------------------------------------
 
+
 def test_setup_sec_is_idempotent_and_private(tmp_path):
     setup_sec(home=tmp_path)
     setup_sec(home=tmp_path)
@@ -199,8 +221,9 @@ def test_tickers_probe_stores_mapping_and_hypothesis_is_not_repeated(tmp_path):
 
     calls = []
     with pytest.raises(LiveRunError, match="already_confirmed"):
-        invoke(tmp_path, "tickers", lambda r: calls.append(r),
-               NOW + timedelta(seconds=5))
+        invoke(
+            tmp_path, "tickers", lambda r: calls.append(r), NOW + timedelta(seconds=5)
+        )
     assert calls == []
 
 
@@ -216,9 +239,11 @@ def test_submissions_probe_runs_same_tracer_boundary_and_confirms(tmp_path):
     state_path = prepare(tmp_path)
     confirm_tickers(tmp_path)
     result = invoke(
-        tmp_path, "submissions",
+        tmp_path,
+        "submissions",
         lambda _r: _SecTransportSuccess(SUBMISSIONS_BODY),
-        NOW + timedelta(seconds=5))
+        NOW + timedelta(seconds=5),
+    )
 
     assert (result.code, result.started) == ("success", 2)
     assert (result.decision_action, result.decision_reason) == ("SAVE", "saved")
@@ -230,8 +255,12 @@ def test_submissions_probe_runs_same_tracer_boundary_and_confirms(tmp_path):
 
     calls = []
     with pytest.raises(LiveRunError, match="already_confirmed"):
-        invoke(tmp_path, "submissions", lambda r: calls.append(r),
-               NOW + timedelta(seconds=10))
+        invoke(
+            tmp_path,
+            "submissions",
+            lambda r: calls.append(r),
+            NOW + timedelta(seconds=10),
+        )
     assert calls == []
 
 
@@ -259,32 +288,46 @@ def test_five_second_spacing_applies_across_endpoints(tmp_path):
     confirm_tickers(tmp_path)
     calls = []
     with pytest.raises(LiveRunError, match="not_due"):
-        invoke(tmp_path, "submissions", lambda r: calls.append(r),
-               NOW + timedelta(seconds=4))
+        invoke(
+            tmp_path,
+            "submissions",
+            lambda r: calls.append(r),
+            NOW + timedelta(seconds=4),
+        )
     assert calls == []
     with pytest.raises(LiveRunError, match="timeout"):
-        invoke(tmp_path, "submissions",
-               lambda _r: _SecTransportFailure("timeout"),
-               NOW + timedelta(seconds=5))
+        invoke(
+            tmp_path,
+            "submissions",
+            lambda _r: _SecTransportFailure("timeout"),
+            NOW + timedelta(seconds=5),
+        )
     assert state(state_path)["total_started"] == 2
 
 
 def test_ceiling_ten_started_makes_eleventh_network_zero(tmp_path):
     state_path = prepare(tmp_path)
     payload = state(state_path)
-    payload.update(total_started=SEC_MAX_STARTS, last_started_at=NOW.isoformat(),
-                   last_endpoint="sec_company_tickers", last_purpose="p",
-                   last_outcome="timeout")
+    payload.update(
+        total_started=SEC_MAX_STARTS,
+        last_started_at=NOW.isoformat(),
+        last_endpoint="sec_company_tickers",
+        last_purpose="p",
+        last_outcome="timeout",
+    )
     state_path.write_text(json.dumps(payload))
     os.chmod(state_path, 0o600)
     calls = []
     with pytest.raises(LiveRunError, match="ceiling_exhausted"):
-        invoke(tmp_path, "tickers", lambda r: calls.append(r),
-               NOW + timedelta(seconds=60))
+        invoke(
+            tmp_path, "tickers", lambda r: calls.append(r), NOW + timedelta(seconds=60)
+        )
     assert calls == []
 
 
-@pytest.mark.parametrize("content", [b"{", b"[]", b'{"total_started":0}', b"x" * 20_000])
+@pytest.mark.parametrize(
+    "content", [b"{", b"[]", b'{"total_started":0}', b"x" * 20_000]
+)
 def test_malformed_state_fails_closed_with_no_network(tmp_path, content):
     state_path = prepare(tmp_path)
     state_path.write_bytes(content)
@@ -302,8 +345,9 @@ def test_fair_access_rejection_stops_future_probes(tmp_path, code):
         invoke(tmp_path, "tickers", lambda _r: _SecTransportFailure(code))
     calls = []
     with pytest.raises(LiveRunError, match="fair_access_stop"):
-        invoke(tmp_path, "tickers", lambda r: calls.append(r),
-               NOW + timedelta(seconds=60))
+        invoke(
+            tmp_path, "tickers", lambda r: calls.append(r), NOW + timedelta(seconds=60)
+        )
     assert calls == []
 
 
@@ -319,10 +363,16 @@ def test_non_private_sec_config_is_rejected_before_network(tmp_path):
 def test_no_artifact_ever_contains_the_user_agent(tmp_path):
     prepare(tmp_path)
     confirm_tickers(tmp_path)
-    invoke(tmp_path, "submissions",
-           lambda _r: _SecTransportSuccess(SUBMISSIONS_BODY),
-           NOW + timedelta(seconds=5))
-    artifacts = [path for path in tmp_path.rglob("*")
-                 if path.is_file() and path.name != "sec.env"]
+    invoke(
+        tmp_path,
+        "submissions",
+        lambda _r: _SecTransportSuccess(SUBMISSIONS_BODY),
+        NOW + timedelta(seconds=5),
+    )
+    artifacts = [
+        path
+        for path in tmp_path.rglob("*")
+        if path.is_file() and path.name != "sec.env"
+    ]
     assert artifacts
     assert all(UA_SECRET.encode() not in path.read_bytes() for path in artifacts)

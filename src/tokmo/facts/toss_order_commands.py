@@ -3,6 +3,7 @@
 Closed routes, strict payload validation, a single injected transport call.
 No credentials acquisition, persistence, retries or investment decisions.
 """
+
 import json
 import re
 from datetime import date
@@ -12,20 +13,38 @@ from types import MappingProxyType
 from tokmo.facts.toss import valid_token
 from tokmo.facts.toss_reads import valid_account_seq_int64
 from tokmo.values.order_commands import (
-    CancelOrder, ConditionalOrder, Condition, OrderCommand, OrderCommandResult,
-    OrderOperation, OrderTransportDisabled, OrderWireRequest, OrderWireResponse,
-    RegularOrder, ReplaceOrder,
+    CancelOrder,
+    Condition,
+    ConditionalOrder,
+    OrderCommand,
+    OrderCommandResult,
+    OrderOperation,
+    OrderTransportDisabled,
+    OrderWireRequest,
+    OrderWireResponse,
+    RegularOrder,
+    ReplaceOrder,
 )
 
-ORDER_COMMAND_ROUTES = MappingProxyType({
-    OrderOperation.CREATE: ("POST", "/api/v1/orders"),
-    OrderOperation.MODIFY: ("POST", "/api/v1/orders/{id}/modify"),
-    OrderOperation.CANCEL: ("POST", "/api/v1/orders/{id}/cancel"),
-    OrderOperation.CONDITIONAL_CREATE: ("POST", "/api/v1/conditional-orders"),
-    OrderOperation.CONDITIONAL_MODIFY: ("POST", "/api/v1/conditional-orders/{id}/modify"),
-    OrderOperation.CONDITIONAL_CANCEL: ("DELETE", "/api/v1/conditional-orders/{id}"),
-})
-CREATE_OPERATIONS = frozenset({OrderOperation.CREATE, OrderOperation.CONDITIONAL_CREATE})
+ORDER_COMMAND_ROUTES = MappingProxyType(
+    {
+        OrderOperation.CREATE: ("POST", "/api/v1/orders"),
+        OrderOperation.MODIFY: ("POST", "/api/v1/orders/{id}/modify"),
+        OrderOperation.CANCEL: ("POST", "/api/v1/orders/{id}/cancel"),
+        OrderOperation.CONDITIONAL_CREATE: ("POST", "/api/v1/conditional-orders"),
+        OrderOperation.CONDITIONAL_MODIFY: (
+            "POST",
+            "/api/v1/conditional-orders/{id}/modify",
+        ),
+        OrderOperation.CONDITIONAL_CANCEL: (
+            "DELETE",
+            "/api/v1/conditional-orders/{id}",
+        ),
+    }
+)
+CREATE_OPERATIONS = frozenset(
+    {OrderOperation.CREATE, OrderOperation.CONDITIONAL_CREATE}
+)
 _NUMBER = re.compile(r"[0-9]+(?:\.[0-9]+)?\Z", re.ASCII)
 _IDENTIFIER = re.compile(r"[A-Za-z0-9_-]{1,512}\Z", re.ASCII)
 _KEY = re.compile(r"[A-Za-z0-9_-]{1,36}\Z", re.ASCII)
@@ -35,7 +54,9 @@ def _positive(value, name, *, integer=False):
     if not isinstance(value, str) or len(value) > 30 or not _NUMBER.fullmatch(value):
         raise ValueError(name)
     number = Decimal(value)
-    if number <= 0 or (integer and ("." in value or number != number.to_integral_value())):
+    if number <= 0 or (
+        integer and ("." in value or number != number.to_integral_value())
+    ):
         raise ValueError(name)
     return number
 
@@ -80,19 +101,29 @@ def _regular(order, market, symbol):
         raise ValueError("close_order_market")
     if order.time_in_force == "OPG" and market != "KR":
         raise ValueError("opening_order_market")
-    data = {"symbol": symbol, "side": order.side, "orderType": order.order_type,
-            "clientOrderId": _key(order.client_order_id),
-            "confirmHighValueOrder": _bool(order.confirm_high_value)}
+    data = {
+        "symbol": symbol,
+        "side": order.side,
+        "orderType": order.order_type,
+        "clientOrderId": _key(order.client_order_id),
+        "confirmHighValueOrder": _bool(order.confirm_high_value),
+    }
     data.update(_order_price(order.order_type, order.price, market, "price"))
     if (order.quantity is None) == (order.order_amount is None):
         raise ValueError("quantity_xor_amount")
     if order.order_amount is not None:
-        if market != "US" or order.order_type != "MARKET" or order.time_in_force != "DAY":
+        if (
+            market != "US"
+            or order.order_type != "MARKET"
+            or order.time_in_force != "DAY"
+        ):
             raise ValueError("amount_order_type")
         _positive(order.order_amount, "order_amount")
         data["orderAmount"] = order.order_amount
     else:
-        fractional = market == "US" and order.order_type == "MARKET" and order.side == "SELL"
+        fractional = (
+            market == "US" and order.order_type == "MARKET" and order.side == "SELL"
+        )
         number = _positive(order.quantity, "quantity", integer=not fractional)
         if fractional and number.as_tuple().exponent < -6:
             raise ValueError("fractional_quantity_precision")
@@ -104,7 +135,10 @@ def _regular(order, market, symbol):
 def _replace(order, market):
     if type(order) is not ReplaceOrder:
         raise ValueError("replace_order")
-    data = {"orderType": order.order_type, "confirmHighValueOrder": _bool(order.confirm_high_value)}
+    data = {
+        "orderType": order.order_type,
+        "confirmHighValueOrder": _bool(order.confirm_high_value),
+    }
     data.update(_order_price(order.order_type, order.price, market, "price"))
     if market == "KR":
         _positive(order.quantity, "quantity", integer=True)
@@ -117,21 +151,33 @@ def _replace(order, market):
 def _condition(leg, market, order_type):
     if type(leg) is not Condition or leg.side not in {"BUY", "SELL"}:
         raise ValueError("condition")
-    return {"orderSide": leg.side, "triggerPrice": _price(leg.trigger_price, market, "trigger_price"),
-            **_order_price(order_type, leg.order_price, market, "orderPrice")}
+    return {
+        "orderSide": leg.side,
+        "triggerPrice": _price(leg.trigger_price, market, "trigger_price"),
+        **_order_price(order_type, leg.order_price, market, "orderPrice"),
+    }
 
 
 def _conditional(order, market, symbol, *, creating):
-    if type(order) is not ConditionalOrder or order.kind not in {"SINGLE", "OTO", "OCO"}:
+    if type(order) is not ConditionalOrder or order.kind not in {
+        "SINGLE",
+        "OTO",
+        "OCO",
+    }:
         raise ValueError("conditional_order")
     # Integer quantities only until fractional conditional execution is documented.
     _positive(order.quantity, "quantity", integer=True)
     if type(order.expire_date) is not date:
         raise ValueError("expire_date")
     first = _condition(order.first, market, order.order_type)
-    data = {"type": order.kind, "quantity": order.quantity, "orderType": order.order_type,
-            "expireDate": order.expire_date.isoformat(), "first": first,
-            "confirmHighValueOrder": _bool(order.confirm_high_value)}
+    data = {
+        "type": order.kind,
+        "quantity": order.quantity,
+        "orderType": order.order_type,
+        "expireDate": order.expire_date.isoformat(),
+        "first": first,
+        "confirmHighValueOrder": _bool(order.confirm_high_value),
+    }
     if order.kind == "SINGLE":
         if order.second is not None:
             raise ValueError("single_second_forbidden")
@@ -142,7 +188,9 @@ def _conditional(order, market, symbol, *, creating):
         sides = (first["orderSide"], second["orderSide"])
         if sides != (("BUY", "SELL") if order.kind == "OTO" else ("SELL", "SELL")):
             raise ValueError("group_sides")
-        if order.kind == "OCO" and Decimal(first["triggerPrice"]) <= Decimal(second["triggerPrice"]):
+        if order.kind == "OCO" and Decimal(first["triggerPrice"]) <= Decimal(
+            second["triggerPrice"]
+        ):
             raise ValueError("oco_trigger_order")
         data["second"] = second
     if creating:
@@ -154,12 +202,19 @@ def _conditional(order, market, symbol, *, creating):
 
 def encode_order_command(command):
     """Return fixed method/path and canonical UTF-8 JSON, without credentials."""
-    if type(command) is not OrderCommand or type(command.operation) is not OrderOperation:
+    if (
+        type(command) is not OrderCommand
+        or type(command.operation) is not OrderOperation
+    ):
         raise ValueError("order_command")
     if command.market not in {"KR", "US"}:
         raise ValueError("market")
-    pattern = r"[A-Za-z0-9]{6}" if command.market == "KR" else r"[A-Za-z][A-Za-z0-9.\-]{0,19}"
-    if not isinstance(command.symbol, str) or not re.fullmatch(pattern, command.symbol, re.ASCII):
+    pattern = (
+        r"[A-Za-z0-9]{6}" if command.market == "KR" else r"[A-Za-z][A-Za-z0-9.\-]{0,19}"
+    )
+    if not isinstance(command.symbol, str) or not re.fullmatch(
+        pattern, command.symbol, re.ASCII
+    ):
         raise ValueError("symbol")
     op = command.operation
     method, path = ORDER_COMMAND_ROUTES[op]
@@ -167,7 +222,9 @@ def encode_order_command(command):
         if command.target_id is not None:
             raise ValueError("create_target_forbidden")
     else:
-        if not isinstance(command.target_id, str) or not _IDENTIFIER.fullmatch(command.target_id):
+        if not isinstance(command.target_id, str) or not _IDENTIFIER.fullmatch(
+            command.target_id
+        ):
             raise ValueError("target_id")
         path = path.replace("{id}", command.target_id)
     if op == OrderOperation.CREATE:
@@ -175,13 +232,23 @@ def encode_order_command(command):
     elif op == OrderOperation.MODIFY:
         data = _replace(command.payload, command.market)
     elif op in {OrderOperation.CONDITIONAL_CREATE, OrderOperation.CONDITIONAL_MODIFY}:
-        data = _conditional(command.payload, command.market, command.symbol,
-                            creating=op == OrderOperation.CONDITIONAL_CREATE)
+        data = _conditional(
+            command.payload,
+            command.market,
+            command.symbol,
+            creating=op == OrderOperation.CONDITIONAL_CREATE,
+        )
     else:
         if type(command.payload) is not CancelOrder:
             raise ValueError("cancel_payload")
         data = None if op == OrderOperation.CONDITIONAL_CANCEL else {}
-    body = None if data is None else json.dumps(data, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    body = (
+        None
+        if data is None
+        else json.dumps(
+            data, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode()
+    )
     return method, path, body
 
 
@@ -200,13 +267,23 @@ def _unique_object(pairs):
 
 def parse_order_command_response(command, response):
     previous = command.target_id
+
     def result(status, code, oid=None, request_id=None):
         return OrderCommandResult(status, code, oid, previous, request_id)
-    if type(response) is not OrderWireResponse or type(response.status) is not int or type(response.body) is not bytes:
+
+    if (
+        type(response) is not OrderWireResponse
+        or type(response.status) is not int
+        or type(response.body) is not bytes
+    ):
         return result("UNKNOWN", "response_contract")
     if len(response.body) > 1024 * 1024:
         return result("UNKNOWN", "response_too_large")
-    if response.status == 204 and command.operation == OrderOperation.CONDITIONAL_CANCEL and not response.body:
+    if (
+        response.status == 204
+        and command.operation == OrderOperation.CONDITIONAL_CANCEL
+        and not response.body
+    ):
         return result("ACCEPTED", "acknowledged", previous)
     try:
         data = json.loads(response.body, object_pairs_hook=_unique_object)
@@ -218,7 +295,11 @@ def parse_order_command_response(command, response):
         item = data.get("result")
         if type(item) is not dict:
             return result("UNKNOWN", "result_missing")
-        key = "conditionalOrderId" if command.operation.name.startswith("CONDITIONAL") else "orderId"
+        key = (
+            "conditionalOrderId"
+            if command.operation.name.startswith("CONDITIONAL")
+            else "orderId"
+        )
         oid = _identifier(item.get(key))
         if oid is None:
             return result("UNKNOWN", "order_id_missing")
@@ -235,9 +316,17 @@ def parse_order_command_response(command, response):
     code = error.get("code")
     if not isinstance(code, str) or not re.fullmatch(r"[a-z0-9_-]{1,100}", code):
         return result("UNKNOWN", "error_code_missing")
-    status = "REJECTED" if 400 <= response.status < 500 and code not in {
-        "request-in-progress", "already-processing", "idempotency-key-conflict",
-    } else "UNKNOWN"
+    status = (
+        "REJECTED"
+        if 400 <= response.status < 500
+        and code
+        not in {
+            "request-in-progress",
+            "already-processing",
+            "idempotency-key-conflict",
+        }
+        else "UNKNOWN"
+    )
     return result(status, code, request_id=_identifier(error.get("requestId")))
 
 
@@ -254,5 +343,7 @@ def execute_order_command(command, *, token, account_ref, transport):
     except OrderTransportDisabled:
         return OrderCommandResult("NOT_SENT", "transport_disabled")
     except Exception:
-        return OrderCommandResult("UNKNOWN", "transport_uncertain", previous_order_id=command.target_id)
+        return OrderCommandResult(
+            "UNKNOWN", "transport_uncertain", previous_order_id=command.target_id
+        )
     return parse_order_command_response(command, response)

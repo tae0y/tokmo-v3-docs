@@ -23,7 +23,7 @@ import stat
 import threading
 from collections.abc import Callable
 from contextlib import contextmanager
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from tokmo.records.trade_ledger_canonical import (
@@ -111,11 +111,27 @@ CREATE TABLE trade_ledger_import_batches (
 """
 
 _EVENT_COLUMNS = (
-    "event_id", "source", "account_scope", "source_record_key", "event_kind",
-    "supersedes_source_record_key", "trade_date", "transaction_type_raw",
-    "instrument_raw", "quantity", "unit_price", "amount", "medium_raw",
-    "currency_raw", "settlement_date", "fee", "tax", "payload_version",
-    "payload_hash", "stored_at", "schema_version",
+    "event_id",
+    "source",
+    "account_scope",
+    "source_record_key",
+    "event_kind",
+    "supersedes_source_record_key",
+    "trade_date",
+    "transaction_type_raw",
+    "instrument_raw",
+    "quantity",
+    "unit_price",
+    "amount",
+    "medium_raw",
+    "currency_raw",
+    "settlement_date",
+    "fee",
+    "tax",
+    "payload_version",
+    "payload_hash",
+    "stored_at",
+    "schema_version",
 )
 _INSERT_EVENT = (
     f"INSERT INTO trade_ledger_events ({', '.join(_EVENT_COLUMNS)}) "
@@ -242,10 +258,23 @@ def _event_from_semantic_row(
 ) -> tuple[TradeLedgerEvent, str]:
     """Rebuild the typed event and stored hash from one semantic row."""
     (
-        source_record_key, event_kind, supersedes, trade_date_text,
-        transaction_type_raw, instrument_raw, quantity, unit_price, amount,
-        medium_raw, currency_raw, settlement_text, fee, tax,
-        payload_version, payload_hash, schema_version,
+        source_record_key,
+        event_kind,
+        supersedes,
+        trade_date_text,
+        transaction_type_raw,
+        instrument_raw,
+        quantity,
+        unit_price,
+        amount,
+        medium_raw,
+        currency_raw,
+        settlement_text,
+        fee,
+        tax,
+        payload_version,
+        payload_hash,
+        schema_version,
     ) = row
     if (
         payload_version != TRADE_LEDGER_PAYLOAD_VERSION
@@ -255,8 +284,7 @@ def _event_from_semantic_row(
     try:
         trade_date = date.fromisoformat(trade_date_text)
         settlement_date = (
-            None if settlement_text is None
-            else date.fromisoformat(settlement_text)
+            None if settlement_text is None else date.fromisoformat(settlement_text)
         )
         event = TradeLedgerEvent(
             source=source,
@@ -293,7 +321,7 @@ def _parse_stored_at(value: object) -> datetime:
         raise StoreCorruptError("store_corrupt") from None
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise StoreCorruptError("store_corrupt")
-    return parsed.astimezone(timezone.utc)
+    return parsed.astimezone(UTC)
 
 
 def _stored_row_from_window_row(
@@ -303,7 +331,9 @@ def _stored_row_from_window_row(
     semantic = row[:-1]
     stored_at_text = row[-1]
     event, stored_hash = _event_from_semantic_row(
-        semantic, source=source, account_scope=account_scope,
+        semantic,
+        source=source,
+        account_scope=account_scope,
     )
     payload = canonical_payload_bytes(event)
     if payload_hash_hex(payload) != stored_hash:
@@ -313,14 +343,19 @@ def _stored_row_from_window_row(
 
 
 def _stored_rows_from_window_rows(
-    rows: tuple[tuple, ...] | list[tuple], *, source: str, account_scope: str,
+    rows: tuple[tuple, ...] | list[tuple],
+    *,
+    source: str,
+    account_scope: str,
 ) -> tuple[LedgerStoredRow, ...]:
     """Decode window rows and fail closed on duplicate semantic keys."""
     result = []
     seen_source_record_keys: set[str] = set()
     for row in rows:
         stored_row = _stored_row_from_window_row(
-            row, source=source, account_scope=account_scope,
+            row,
+            source=source,
+            account_scope=account_scope,
         )
         key = stored_row.event.source_record_key
         if key in seen_source_record_keys:
@@ -341,14 +376,10 @@ class _BatchOutcome:
         self.classes[index] = classification
 
     def count(self, classification: str) -> int:
-        return sum(
-            1 for value in self.classes.values() if value == classification
-        )
+        return sum(1 for value in self.classes.values() if value == classification)
 
     def new_indexes(self) -> list[int]:
-        return sorted(
-            index for index, value in self.classes.items() if value == "new"
-        )
+        return sorted(index for index, value in self.classes.items() if value == "new")
 
     def mark_all_remaining(self, classification: str) -> None:
         for index in range(self.submitted):
@@ -374,9 +405,7 @@ class TradeLedgerStore:
     # -- connection and schema ------------------------------------------------
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(
-            self._path, timeout=1.0, isolation_level=None
-        )
+        connection = sqlite3.connect(self._path, timeout=1.0, isolation_level=None)
         try:
             connection.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
             mode = connection.execute("PRAGMA journal_mode=DELETE").fetchone()
@@ -414,9 +443,7 @@ class TradeLedgerStore:
         }
         if found != _EXPECTED_SCHEMA:
             return False
-        tables = {
-            row[1]: row for row in connection.execute("PRAGMA table_list")
-        }
+        tables = {row[1]: row for row in connection.execute("PRAGMA table_list")}
         return (
             tables.get("trade_ledger_events", (None,) * 6)[5] == 1
             and tables.get("trade_ledger_import_batches", (None,) * 6)[5] == 1
@@ -444,7 +471,7 @@ class TradeLedgerStore:
         try:
             stored_at = self._clock()
         except BaseException:
-            stored_at = datetime.min.replace(tzinfo=timezone.utc)
+            stored_at = datetime.min.replace(tzinfo=UTC)
             return self._all_invalid_receipt("", 0, "invalid_batch", stored_at)
         submitted = len(events) if type(events) is tuple else 0
         try:
@@ -452,9 +479,7 @@ class TradeLedgerStore:
             if not _valid_text(batch_id):
                 raise ValueError("invalid_batch")
         except BaseException:
-            return self._all_invalid_receipt(
-                "", submitted, "invalid_batch", stored_at
-            )
+            return self._all_invalid_receipt("", submitted, "invalid_batch", stored_at)
 
         def invalid_batch() -> TradeBatchSaveReceipt:
             return self._all_invalid_receipt(
@@ -468,16 +493,12 @@ class TradeLedgerStore:
             or not _valid_audit(import_audit)
         ):
             return invalid_batch()
-        stored_at = stored_at.astimezone(timezone.utc)
-        typed = [
-            event for event in events if isinstance(event, TradeLedgerEvent)
-        ]
+        stored_at = stored_at.astimezone(UTC)
+        typed = [event for event in events if isinstance(event, TradeLedgerEvent)]
         if not typed:
             return invalid_batch()
         try:
-            scopes = {
-                (event.source, event.account_scope) for event in typed
-            }
+            scopes = {(event.source, event.account_scope) for event in typed}
         except TypeError:
             return invalid_batch()
         if len(scopes) != 1:
@@ -542,16 +563,11 @@ class TradeLedgerStore:
         except sqlite3.DatabaseError as error:
             if _sqlite_locked(error):
                 reason = "store_locked"
-            elif (
-                getattr(error, "sqlite_errorcode", None)
-                == sqlite3.SQLITE_NOTADB
-            ):
+            elif getattr(error, "sqlite_errorcode", None) == sqlite3.SQLITE_NOTADB:
                 reason = "store_corrupt"
             else:
                 reason = "store_write_failed"
-            return self._all_invalid_receipt(
-                batch_id, submitted, reason, stored_at
-            )
+            return self._all_invalid_receipt(batch_id, submitted, reason, stored_at)
         except (OSError, ValueError):
             return self._all_invalid_receipt(
                 batch_id, submitted, "store_write_failed", stored_at
@@ -579,16 +595,13 @@ class TradeLedgerStore:
                     batch_id, outcome.submitted, "schema_mismatch", stored_at
                 )
 
-            contract = registered_contract(
-                self._contracts, source, account_scope
-            )
+            contract = registered_contract(self._contracts, source, account_scope)
             contract_violation = contract is None
             if contract is not None:
                 for index in sorted(payloads):
                     event = events[index]
                     key_ok = (
-                        contract.key_number(event.source_record_key)
-                        is not None
+                        contract.key_number(event.source_record_key) is not None
                         if contract.sequential_full_history
                         else contract.key_matches(event.source_record_key)
                     )
@@ -598,11 +611,15 @@ class TradeLedgerStore:
                     )
                     if not key_ok or not linked_ok:
                         contract_violation = True
-                remaining_keys = tuple(sorted({
-                    events[index].source_record_key
-                    for index in payloads
-                    if outcome.classes.get(index) is None
-                }))
+                remaining_keys = tuple(
+                    sorted(
+                        {
+                            events[index].source_record_key
+                            for index in payloads
+                            if outcome.classes.get(index) is None
+                        }
+                    )
+                )
                 if not contract_violation and not sequence_preflight_ok(
                     contract, remaining_keys
                 ):
@@ -623,26 +640,33 @@ class TradeLedgerStore:
 
             if source == "retirement_excel_delta_v1":
                 from tokmo.records.pension_delta import delta_admission_reason
-                reason = ("source_contract_violation" if len(payloads) != len(events)
-                          else delta_admission_reason(connection, events))
+
+                reason = (
+                    "source_contract_violation"
+                    if len(payloads) != len(events)
+                    else delta_admission_reason(connection, events)
+                )
                 if reason is not None:
                     return self._rollback_with_failure_audit(
                         connection,
-                        self._all_invalid_receipt(batch_id, outcome.submitted, reason, stored_at),
-                        source=source, account_scope=account_scope, import_audit=import_audit)
+                        self._all_invalid_receipt(
+                            batch_id, outcome.submitted, reason, stored_at
+                        ),
+                        source=source,
+                        account_scope=account_scope,
+                        import_audit=import_audit,
+                    )
 
-            distinct_keys = tuple(sorted({
-                events[index].source_record_key for index in payloads
-            }))
+            distinct_keys = tuple(
+                sorted({events[index].source_record_key for index in payloads})
+            )
             existing = self._load_existing_payloads(
                 connection, source, account_scope, distinct_keys
             )
 
             by_key: dict[str, list[int]] = {}
             for index in sorted(payloads):
-                by_key.setdefault(
-                    events[index].source_record_key, []
-                ).append(index)
+                by_key.setdefault(events[index].source_record_key, []).append(index)
             for key, indexes in by_key.items():
                 group_payloads = {payloads[index] for index in indexes}
                 if len(group_payloads) > 1:
@@ -666,14 +690,21 @@ class TradeLedgerStore:
             supersession_violation = False
             if not identity_conflict and contract.allows_linked_supersession:
                 supersession_violation = self._apply_supersession_rules(
-                    connection, events, payloads, outcome,
-                    source=source, account_scope=account_scope,
+                    connection,
+                    events,
+                    payloads,
+                    outcome,
+                    source=source,
+                    account_scope=account_scope,
                 )
 
             failure_reason = None
             if source == "retirement_excel_v1" and outcome.new_indexes():
                 from tokmo.records.pension_delta import legacy_overlaps_delta
-                if legacy_overlaps_delta(connection, [events[i] for i in outcome.new_indexes()]):
+
+                if legacy_overlaps_delta(
+                    connection, [events[i] for i in outcome.new_indexes()]
+                ):
                     failure_reason = "batch_identity_conflict"
             if identity_conflict:
                 failure_reason = "batch_identity_conflict"
@@ -698,29 +729,32 @@ class TradeLedgerStore:
                 event_id = self._id_factory()
                 if not _valid_text(event_id):
                     raise ValueError("store_write_failed")
-                connection.execute(_INSERT_EVENT, (
-                    event_id,
-                    fields["source"],
-                    fields["account_scope"],
-                    fields["source_record_key"],
-                    fields["event_kind"],
-                    fields["supersedes_source_record_key"],
-                    fields["trade_date"],
-                    fields["transaction_type_raw"],
-                    fields["instrument_raw"],
-                    fields["quantity"],
-                    fields["unit_price"],
-                    fields["amount"],
-                    fields["medium_raw"],
-                    fields["currency_raw"],
-                    fields["settlement_date"],
-                    fields["fee"],
-                    fields["tax"],
-                    TRADE_LEDGER_PAYLOAD_VERSION,
-                    payload_hash_hex(payloads[index]),
-                    stored_at.isoformat(),
-                    TRADE_LEDGER_SCHEMA_VERSION,
-                ))
+                connection.execute(
+                    _INSERT_EVENT,
+                    (
+                        event_id,
+                        fields["source"],
+                        fields["account_scope"],
+                        fields["source_record_key"],
+                        fields["event_kind"],
+                        fields["supersedes_source_record_key"],
+                        fields["trade_date"],
+                        fields["transaction_type_raw"],
+                        fields["instrument_raw"],
+                        fields["quantity"],
+                        fields["unit_price"],
+                        fields["amount"],
+                        fields["medium_raw"],
+                        fields["currency_raw"],
+                        fields["settlement_date"],
+                        fields["fee"],
+                        fields["tax"],
+                        TRADE_LEDGER_PAYLOAD_VERSION,
+                        payload_hash_hex(payloads[index]),
+                        stored_at.isoformat(),
+                        TRADE_LEDGER_SCHEMA_VERSION,
+                    ),
+                )
             receipt = TradeBatchSaveReceipt(
                 status="SAVED",
                 import_batch_id=batch_id,
@@ -733,13 +767,25 @@ class TradeLedgerStore:
                 reason="",
                 stored_at=stored_at,
             )
-            connection.execute(_INSERT_BATCH, (
-                batch_id, source, account_scope, import_audit.file_sha256,
-                import_audit.importer_version, receipt.submitted_count,
-                receipt.new_candidate_count, receipt.inserted_count,
-                receipt.duplicate_count, receipt.conflict_count,
-                receipt.invalid_count, "SAVED", "", stored_at.isoformat(),
-            ))
+            connection.execute(
+                _INSERT_BATCH,
+                (
+                    batch_id,
+                    source,
+                    account_scope,
+                    import_audit.file_sha256,
+                    import_audit.importer_version,
+                    receipt.submitted_count,
+                    receipt.new_candidate_count,
+                    receipt.inserted_count,
+                    receipt.duplicate_count,
+                    receipt.conflict_count,
+                    receipt.invalid_count,
+                    "SAVED",
+                    "",
+                    stored_at.isoformat(),
+                ),
+            )
             connection.execute("COMMIT")
             return receipt
         except BaseException:
@@ -783,8 +829,7 @@ class TradeLedgerStore:
             ):
                 target = event.supersedes_source_record_key
                 if target == event.source_record_key or (
-                    target not in stored_keys
-                    and target not in seen_batch_keys
+                    target not in stored_keys and target not in seen_batch_keys
                 ):
                     outcome.mark(index, "invalid")
                     violation = True
@@ -818,15 +863,25 @@ class TradeLedgerStore:
         try:
             connection.execute("BEGIN IMMEDIATE")
             try:
-                connection.execute(_INSERT_BATCH, (
-                    receipt.import_batch_id, source, account_scope,
-                    import_audit.file_sha256, import_audit.importer_version,
-                    receipt.submitted_count, receipt.new_candidate_count,
-                    receipt.inserted_count, receipt.duplicate_count,
-                    receipt.conflict_count, receipt.invalid_count,
-                    "FAILED", receipt.reason,
-                    receipt.stored_at.isoformat(),
-                ))
+                connection.execute(
+                    _INSERT_BATCH,
+                    (
+                        receipt.import_batch_id,
+                        source,
+                        account_scope,
+                        import_audit.file_sha256,
+                        import_audit.importer_version,
+                        receipt.submitted_count,
+                        receipt.new_candidate_count,
+                        receipt.inserted_count,
+                        receipt.duplicate_count,
+                        receipt.conflict_count,
+                        receipt.invalid_count,
+                        "FAILED",
+                        receipt.reason,
+                        receipt.stored_at.isoformat(),
+                    ),
+                )
                 connection.execute("COMMIT")
             except BaseException:
                 connection.execute("ROLLBACK")
@@ -948,10 +1003,7 @@ class TradeLedgerStore:
         except sqlite3.DatabaseError as error:
             if _sqlite_locked(error):
                 raise StoreLockedError("store_locked") from None
-            if (
-                getattr(error, "sqlite_errorcode", None)
-                == sqlite3.SQLITE_NOTADB
-            ):
+            if getattr(error, "sqlite_errorcode", None) == sqlite3.SQLITE_NOTADB:
                 raise StoreCorruptError("store_corrupt") from None
             raise StoreReadError("store_read_failed") from None
         except (OSError, ValueError):
@@ -983,8 +1035,8 @@ class TradeLedgerStore:
             raise StoreReadError("store_read_failed") from None
         if from_stored_at > to_stored_at:
             raise StoreReadError("store_read_failed") from None
-        from_stored_at = from_stored_at.astimezone(timezone.utc)
-        to_stored_at = to_stored_at.astimezone(timezone.utc)
+        from_stored_at = from_stored_at.astimezone(UTC)
+        to_stored_at = to_stored_at.astimezone(UTC)
         if sqlite3.sqlite_version_info < MIN_SQLITE_VERSION:
             raise StoreReadError("schema_mismatch") from None
         try:
@@ -1001,7 +1053,8 @@ class TradeLedgerStore:
                 rows = connection.execute(
                     _SELECT_WINDOW,
                     (
-                        source, account_scope,
+                        source,
+                        account_scope,
                         from_stored_at.isoformat(),
                         to_stored_at.isoformat(),
                     ),
@@ -1009,17 +1062,16 @@ class TradeLedgerStore:
             finally:
                 connection.close()
             return _stored_rows_from_window_rows(
-                rows, source=source, account_scope=account_scope,
+                rows,
+                source=source,
+                account_scope=account_scope,
             )
         except (StoreReadError, StoreCorruptError):
             raise
         except sqlite3.DatabaseError as error:
             if _sqlite_locked(error):
                 raise StoreLockedError("store_locked") from None
-            if (
-                getattr(error, "sqlite_errorcode", None)
-                == sqlite3.SQLITE_NOTADB
-            ):
+            if getattr(error, "sqlite_errorcode", None) == sqlite3.SQLITE_NOTADB:
                 raise StoreCorruptError("store_corrupt") from None
             raise StoreReadError("store_read_failed") from None
         except (OSError, ValueError):
@@ -1044,9 +1096,7 @@ def _file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def finalize_candidate(
-    candidate_path: Path | str, canonical_path: Path | str
-) -> None:
+def finalize_candidate(candidate_path: Path | str, canonical_path: Path | str) -> None:
     candidate = Path(candidate_path).resolve()
     canonical = Path(canonical_path).resolve()
 
@@ -1059,9 +1109,7 @@ def finalize_candidate(
 
     connection = sqlite3.connect(str(candidate))
     try:
-        result = connection.execute(
-            "PRAGMA wal_checkpoint(TRUNCATE)"
-        ).fetchone()
+        result = connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
         if result[0] != 0 or result[1] != result[2]:
             raise RuntimeError("wal_checkpoint_failed")
     finally:
@@ -1098,9 +1146,7 @@ def finalize_candidate(
         os.close(directory_fd)
 
 
-def recover_promotion(
-    candidate_path: Path | str, canonical_path: Path | str
-) -> None:
+def recover_promotion(candidate_path: Path | str, canonical_path: Path | str) -> None:
     candidate = Path(candidate_path).resolve()
     canonical = Path(canonical_path).resolve()
 
@@ -1130,10 +1176,7 @@ def cleanup_candidate_alias(
 
     if not candidate.exists():
         return
-    if (
-        not canonical.exists()
-        or candidate.stat().st_ino != canonical.stat().st_ino
-    ):
+    if not canonical.exists() or candidate.stat().st_ino != canonical.stat().st_ino:
         raise RuntimeError("store_corrupt")
     try:
         os.unlink(str(candidate))

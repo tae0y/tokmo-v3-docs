@@ -1,12 +1,12 @@
 """Typed mutable market-calendar cache."""
 
-from contextlib import contextmanager
-from dataclasses import dataclass
-from datetime import date, datetime, timezone
-from enum import Enum
 import fcntl
 import hashlib
 import os
+from contextlib import contextmanager
+from dataclasses import dataclass
+from datetime import UTC, date, datetime
+from enum import Enum
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -14,7 +14,12 @@ from tokmo.records.atomic_json import read_atomic_json, write_atomic_json
 from tokmo.values._primitives import MISSING
 from tokmo.values.calendar_refresh import CalendarFetchResult, CalendarIdentityError
 from tokmo.values.material_pack import canonical_decode, canonical_encode
-from tokmo.values.session_gate import ENABLED_SESSION_KINDS, MARKET_TIMEZONE, Market, SessionKind
+from tokmo.values.session_gate import (
+    ENABLED_SESSION_KINDS,
+    MARKET_TIMEZONE,
+    Market,
+    SessionKind,
+)
 from tokmo.values.toss_market_calendar import CalendarSession, KrMarketDay, UsMarketDay
 
 CALENDAR_CACHE_SCHEMA_VERSION = 2
@@ -49,7 +54,7 @@ def _parse_time(value: str) -> datetime:
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ValueError("timestamp must be aware")
-    canonical = parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    canonical = parsed.astimezone(UTC).isoformat().replace("+00:00", "Z")
     if canonical != value:
         raise ValueError("timestamp must be canonical UTC")
     return parsed
@@ -58,7 +63,7 @@ def _parse_time(value: str) -> datetime:
 def _iso_time(value: datetime) -> str:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("timestamp must be aware")
-    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 @dataclass(frozen=True)
@@ -83,7 +88,10 @@ class CalendarDayCacheSchema2:
     parser_version: str
 
     def __post_init__(self):
-        if type(self.schema_version) is not int or self.schema_version != CALENDAR_CACHE_SCHEMA_VERSION:
+        if (
+            type(self.schema_version) is not int
+            or self.schema_version != CALENDAR_CACHE_SCHEMA_VERSION
+        ):
             raise ValueError("unsupported calendar day cache")
         for value in (self.trade_date, self.source_trade_date):
             if date.fromisoformat(value).isoformat() != value:
@@ -91,7 +99,9 @@ class CalendarDayCacheSchema2:
         if type(self.sessions) is not dict:
             raise ValueError("invalid calendar sessions")
         for kind, value in self.sessions.items():
-            if type(kind) is not str or not isinstance(value, CalendarSessionCacheSchema2):
+            if type(kind) is not str or not isinstance(
+                value, CalendarSessionCacheSchema2
+            ):
                 raise ValueError("invalid cached calendar session")
         _parse_time(self.fetched_at)
         if type(self.parser_version) is not str or not self.parser_version:
@@ -106,7 +116,10 @@ class CalendarCacheSchema2:
     updated_at: str
 
     def __post_init__(self):
-        if type(self.schema_version) is not int or self.schema_version != CALENDAR_CACHE_SCHEMA_VERSION:
+        if (
+            type(self.schema_version) is not int
+            or self.schema_version != CALENDAR_CACHE_SCHEMA_VERSION
+        ):
             raise ValueError("unsupported calendar cache")
         if self.kr is not None and not isinstance(self.kr, CalendarDayCacheSchema2):
             raise ValueError("invalid KR cache")
@@ -120,19 +133,26 @@ def _day_dict(day):
         return None
     return {
         "trade_date": day.trade_date,
-        "sessions": {kind: {"start": value.start, "end": value.end}
-                     for kind, value in day.sessions.items()},
+        "sessions": {
+            kind: {"start": value.start, "end": value.end}
+            for kind, value in day.sessions.items()
+        },
         "source_trade_date": day.source_trade_date,
-        "fetched_at": day.fetched_at, "schema_version": day.schema_version,
+        "fetched_at": day.fetched_at,
+        "schema_version": day.schema_version,
         "parser_version": day.parser_version,
     }
 
 
 def _cache_bytes(cache):
-    return canonical_encode({
-        "schema_version": cache.schema_version, "kr": _day_dict(cache.kr),
-        "us": _day_dict(cache.us), "updated_at": cache.updated_at,
-    })
+    return canonical_encode(
+        {
+            "schema_version": cache.schema_version,
+            "kr": _day_dict(cache.kr),
+            "us": _day_dict(cache.us),
+            "updated_at": cache.updated_at,
+        }
+    )
 
 
 def _exact(value, keys):
@@ -144,8 +164,12 @@ def _decode_day(value, market):
     if value is None:
         return None
     keys = {
-        "trade_date", "sessions", "source_trade_date",
-        "fetched_at", "schema_version", "parser_version",
+        "trade_date",
+        "sessions",
+        "source_trade_date",
+        "fetched_at",
+        "schema_version",
+        "parser_version",
     }
     _exact(value, keys)
     if type(value["sessions"]) is not dict:
@@ -167,8 +191,13 @@ def _decode_cache(raw):
         # V1 contained only regular boundaries. Validate its outer identity,
         # then discard both incomplete entries so callers refresh fail-closed.
         legacy_keys = {
-            "trade_date", "regular_start", "regular_end", "source_trade_date",
-            "fetched_at", "schema_version", "parser_version",
+            "trade_date",
+            "regular_start",
+            "regular_end",
+            "source_trade_date",
+            "fetched_at",
+            "schema_version",
+            "parser_version",
         }
         for entry in (value["kr"], value["us"]):
             if entry is None:
@@ -182,13 +211,16 @@ def _decode_cache(raw):
             if (entry["regular_start"] is None) != (entry["regular_end"] is None):
                 raise ValueError("incomplete legacy regular session")
             if entry["regular_start"] is not None:
-                if _parse_time(entry["regular_start"]) >= _parse_time(entry["regular_end"]):
+                if _parse_time(entry["regular_start"]) >= _parse_time(
+                    entry["regular_end"]
+                ):
                     raise ValueError("invalid legacy regular session")
             _parse_time(entry["fetched_at"])
         _parse_time(value["updated_at"])
         return CalendarCacheSchema2(2, None, None, value["updated_at"])
     result = CalendarCacheSchema2(
-        value["schema_version"], _decode_day(value["kr"], Market.KR),
+        value["schema_version"],
+        _decode_day(value["kr"], Market.KR),
         _decode_day(value["us"], Market.US),
         value["updated_at"],
     )
@@ -219,11 +251,15 @@ def _to_cached(day, market, fetched_at):
     values = {}
     if market is Market.KR:
         integrated = day.integrated
-        source = {} if integrated is None or integrated is MISSING else {
-            SessionKind.PRE_MARKET: integrated.pre_market,
-            SessionKind.REGULAR_MARKET: integrated.regular_market,
-            SessionKind.AFTER_MARKET: integrated.after_market,
-        }
+        source = (
+            {}
+            if integrated is None or integrated is MISSING
+            else {
+                SessionKind.PRE_MARKET: integrated.pre_market,
+                SessionKind.REGULAR_MARKET: integrated.regular_market,
+                SessionKind.AFTER_MARKET: integrated.after_market,
+            }
+        )
     else:
         source = {
             SessionKind.DAY_MARKET: day.day_market,
@@ -238,7 +274,8 @@ def _to_cached(day, market, fetched_at):
         if not isinstance(session, CalendarSession):
             raise ValueError("calendar session structure changed")
         values[kind.value] = CalendarSessionCacheSchema2(
-            _iso_time(session.start_time), _iso_time(session.end_time),
+            _iso_time(session.start_time),
+            _iso_time(session.end_time),
         )
     return CalendarDayCacheSchema2(
         trade_date=day.date.isoformat(),
@@ -259,7 +296,9 @@ class CalendarCacheStore:
         if not self.path.exists() and not self.path.is_symlink():
             return None
         try:
-            return _decode_cache(read_atomic_json(self.path, max_bytes=CALENDAR_CACHE_MAX_BYTES))
+            return _decode_cache(
+                read_atomic_json(self.path, max_bytes=CALENDAR_CACHE_MAX_BYTES)
+            )
         except (OSError, TypeError, ValueError) as error:
             raise CalendarCacheCorruptError("corrupt calendar cache") from error
 
@@ -267,17 +306,23 @@ class CalendarCacheStore:
         now = _iso_time(self.clock())
         candidate = CalendarCacheSchema2(
             CALENDAR_CACHE_SCHEMA_VERSION,
-            _to_cached(kr, Market.KR, now), _to_cached(us, Market.US, now), now,
+            _to_cached(kr, Market.KR, now),
+            _to_cached(us, Market.US, now),
+            now,
         )
         previous = self.read()
-        if (previous is not None
-                and (None if previous.kr is None else previous.kr.trade_date)
-                == (None if candidate.kr is None else candidate.kr.trade_date)
-                and (None if previous.us is None else previous.us.trade_date)
-                == (None if candidate.us is None else candidate.us.trade_date)):
+        if (
+            previous is not None
+            and (None if previous.kr is None else previous.kr.trade_date)
+            == (None if candidate.kr is None else candidate.kr.trade_date)
+            and (None if previous.us is None else previous.us.trade_date)
+            == (None if candidate.us is None else candidate.us.trade_date)
+        ):
             return
         write_atomic_json(
-            self.path, _cache_bytes(candidate), max_bytes=CALENDAR_CACHE_MAX_BYTES,
+            self.path,
+            _cache_bytes(candidate),
+            max_bytes=CALENDAR_CACHE_MAX_BYTES,
         )
 
     @contextmanager
@@ -294,8 +339,12 @@ class CalendarCacheStore:
             os.close(descriptor)
 
     def replace_market(
-        self, market: Market, expected_previous_digest: str | None,
-        fetch: CalendarFetchResult, *, authority,
+        self,
+        market: Market,
+        expected_previous_digest: str | None,
+        fetch: CalendarFetchResult,
+        *,
+        authority,
     ) -> CalendarReplaceResult:
         """Locked CAS replacement of one market entry, sealed by the kernel.
 
@@ -312,8 +361,10 @@ class CalendarCacheStore:
             raise CalendarIdentityError("fetch result market mismatch")
         with self._store_lock():
             previous = self.read()
-            current = None if previous is None else (
-                previous.kr if market is Market.KR else previous.us
+            current = (
+                None
+                if previous is None
+                else (previous.kr if market is Market.KR else previous.us)
             )
             if calendar_market_digest(current) != expected_previous_digest:
                 raise CalendarCacheCasConflictError("calendar cache CAS conflict")
@@ -325,11 +376,15 @@ class CalendarCacheStore:
                 raise CalendarCacheSameDateConflictError(
                     "same-date content conflict requires reviewed replacement"
                 )
-            kr = candidate if market is Market.KR else (
-                None if previous is None else previous.kr
+            kr = (
+                candidate
+                if market is Market.KR
+                else (None if previous is None else previous.kr)
             )
-            us = candidate if market is Market.US else (
-                None if previous is None else previous.us
+            us = (
+                candidate
+                if market is Market.US
+                else (None if previous is None else previous.us)
             )
             # Durable one-time consumption in the kernel DB; raises (and so
             # publishes nothing) unless the receipt is currently claimed and
@@ -337,7 +392,9 @@ class CalendarCacheStore:
             authority.consume_calendar_cache_commit(fetch.receipt, now=self.clock())
             cache = CalendarCacheSchema2(CALENDAR_CACHE_SCHEMA_VERSION, kr, us, now)
             write_atomic_json(
-                self.path, _cache_bytes(cache), max_bytes=CALENDAR_CACHE_MAX_BYTES,
+                self.path,
+                _cache_bytes(cache),
+                max_bytes=CALENDAR_CACHE_MAX_BYTES,
             )
             return CalendarReplaceResult.REPLACED
 
@@ -350,6 +407,7 @@ class CalendarCacheStore:
         day = cache.kr if market is Market.KR else cache.us
         if day is None:
             return True
-        return date.fromisoformat(day.trade_date) != now.astimezone(
-            ZoneInfo(MARKET_TIMEZONE[market])
-        ).date()
+        return (
+            date.fromisoformat(day.trade_date)
+            != now.astimezone(ZoneInfo(MARKET_TIMEZONE[market])).date()
+        )

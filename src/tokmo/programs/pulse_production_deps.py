@@ -13,26 +13,26 @@ through dependency injection; production transport is assembled only by the
 explicit production composition path and remains guarded by lane ownership.
 """
 
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
 import json
 import os
 import sqlite3
 import stat
 import time
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import MappingProxyType
-from typing import Callable, Mapping
 
 from tokmo.programs.integrated_pulse import PulseDepsV1
-from tokmo.programs.news_feedback import build_news_callback_handler
-from tokmo.programs.news_event_admission import reconcile_news_outbox
 from tokmo.programs.news_alert_delivery import (
     live_delivery_authorized,
     run_alert_delivery,
     run_canary_alert_delivery,
     run_live_alert_delivery,
 )
+from tokmo.programs.news_event_admission import reconcile_news_outbox
+from tokmo.programs.news_feedback import build_news_callback_handler
 from tokmo.programs.news_official_evidence import (
     build_official_evidence_reader,
     build_official_receipt_sink,
@@ -58,7 +58,6 @@ from tokmo.records.order_scan_state import OrderScanStateStore
 from tokmo.records.playbook_identity import read_instrument_name
 from tokmo.records.trade_ledger_store import TradeLedgerStore
 from tokmo.values.current_holdings import classify_market
-from tokmo.watchlists import WatchlistError, load_watchlist_identities
 from tokmo.values.news_classifier import (
     DEFAULT_NEWS_CLASSIFIER_MODEL_ID,
     NEWS_CLASSIFIER_PROVIDER,
@@ -66,9 +65,9 @@ from tokmo.values.news_classifier import (
 )
 from tokmo.values.news_config import (
     DISCOVERY_MAX_DOCUMENTS,
-    PRODUCER_CANDIDATES_PER_TICK,
     PRODUCER_CANDIDATE_ATTEMPT_MAX,
     PRODUCER_CANDIDATE_TTL_SECONDS,
+    PRODUCER_CANDIDATES_PER_TICK,
     PRODUCER_INTERVAL_SECONDS,
     PRODUCER_LEASE_SECONDS,
     PRODUCER_RECOVERY_BACKOFF_CAP_SECONDS,
@@ -76,6 +75,7 @@ from tokmo.values.news_config import (
 from tokmo.values.operation_lane_registry import OPERATION_LANE_REGISTRY_V1
 from tokmo.values.ops_kernel import ProducerRole
 from tokmo.values.session_gate import Market
+from tokmo.watchlists import WatchlistError, load_watchlist_identities
 
 
 class PulseProductionDepsError(ValueError):
@@ -86,9 +86,12 @@ _CADENCE_POLICY = "cadence-300s-market-portfolio-v1"
 _CADENCE_BOUNDARY_WAIT_SECONDS = 12.0
 
 
-def wait_for_cadence_complete(root: Path, scheduled_for_utc: datetime,
-                              *, timeout_seconds: float =
-                              _CADENCE_BOUNDARY_WAIT_SECONDS) -> bool:
+def wait_for_cadence_complete(
+    root: Path,
+    scheduled_for_utc: datetime,
+    *,
+    timeout_seconds: float = _CADENCE_BOUNDARY_WAIT_SECONDS,
+) -> bool:
     """Wait boundedly for the same-slot production cadence to COMPLETE.
 
     Read-only SQLite access only. FAILED/PARTIAL/other terminal states fail
@@ -96,20 +99,21 @@ def wait_for_cadence_complete(root: Path, scheduled_for_utc: datetime,
     not recorded or started a provider wire when this function runs.
     """
     db = Path(root) / "ops" / "cadence_ticks.sqlite3"
-    slot = scheduled_for_utc.astimezone(timezone.utc).strftime(
-        "%Y-%m-%dT%H:%M:%S.000000Z")
+    slot = scheduled_for_utc.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.000000Z")
     deadline = time.monotonic() + max(0.0, timeout_seconds)
     first_attempt = True
     while first_attempt or time.monotonic() <= deadline:
         first_attempt = False
         if db.exists():
             try:
-                with sqlite3.connect(f"file:{db}?mode=ro", uri=True,
-                                     timeout=0.2) as conn:
+                with sqlite3.connect(
+                    f"file:{db}?mode=ro", uri=True, timeout=0.2
+                ) as conn:
                     row = conn.execute(
                         "SELECT status FROM cadence_tick_receipts "
                         "WHERE policy_version=? AND scheduled_for_utc=?",
-                        (_CADENCE_POLICY, slot)).fetchone()
+                        (_CADENCE_POLICY, slot),
+                    ).fetchone()
             except sqlite3.Error:
                 return False
             if row is not None:
@@ -134,6 +138,7 @@ def _make_unique_id_factory(clock: Callable[[], datetime]) -> Callable[[], str]:
     own via ``id_factory`` parameter on ``TradeLedgerStore``.
     """
     import secrets
+
     counter = {"n": 0}
 
     def _factory() -> str:
@@ -148,9 +153,12 @@ def _make_unique_id_factory(clock: Callable[[], datetime]) -> Callable[[], str]:
 def _news_registry_entity(aliases):
     """The one public-catalog entity any official alias matches, else None.
     An ambiguous multi-entity match fails closed (no merge)."""
-    keys = {key for alias in aliases
-            for key, known in _PUBLIC_ALIASES.items()
-            if key.startswith("ent:") and _normalise(str(alias)) in known}
+    keys = {
+        key
+        for alias in aliases
+        for key, known in _PUBLIC_ALIASES.items()
+        if key.startswith("ent:") and _normalise(str(alias)) in known
+    }
     return keys.pop() if len(keys) == 1 else None
 
 
@@ -167,9 +175,11 @@ def resolve_news_identity_pairs(entries):
     symbol always stays an alias of the resolved identity."""
     pairs = {}
     for symbol, market, names in entries:
-        aliases = tuple(dict.fromkeys(
-            str(item) for item in (symbol, *tuple(names))
-            if str(item).strip()))
+        aliases = tuple(
+            dict.fromkeys(
+                str(item) for item in (symbol, *tuple(names)) if str(item).strip()
+            )
+        )
         if not aliases:
             continue
         key = _news_registry_entity(aliases)
@@ -185,8 +195,12 @@ def resolve_news_identity_pairs(entries):
 # YouTube 12man typed hypothesis index keys → taxonomy interest lanes:
 # entities feed identity candidates/scope; metric/effect/source-event terms
 # feed their typed lanes only, never entity alias identity.
-_HYPOTHESIS_INTEREST_LANES = {"ENTITY": "ENTITY", "METRIC": "METRIC",
-                              "EFFECT": "EFFECT", "SOURCE_EVENT": "CATALYST"}
+_HYPOTHESIS_INTEREST_LANES = {
+    "ENTITY": "ENTITY",
+    "METRIC": "METRIC",
+    "EFFECT": "EFFECT",
+    "SOURCE_EVENT": "CATALYST",
+}
 
 
 def enumerate_news_interest_terms(ops_kernel, watchlist_root):
@@ -219,13 +233,11 @@ def enumerate_news_interest_terms(ops_kernel, watchlist_root):
             hypotheses = ()
         for hypothesis in hypotheses:
             try:
-                index_keys = ops_kernel.read_hypothesis_index(
-                    hypothesis.hypothesis_id)
+                index_keys = ops_kernel.read_hypothesis_index(hypothesis.hypothesis_id)
             except Exception:
                 continue
             for key in index_keys:
-                lane = _HYPOTHESIS_INTEREST_LANES.get(
-                    getattr(key.kind, "value", None))
+                lane = _HYPOTHESIS_INTEREST_LANES.get(getattr(key.kind, "value", None))
                 if lane is None:
                     continue
                 add(lane, str(key.value).split(":", 1)[-1])
@@ -244,7 +256,8 @@ NEWS_CANARY_WINDOW_MAX_SECONDS = 72 * 3600
 # 2026-09-14 adds explicit continuous LIVE operation after stabilization.
 NEWS_LIVE_WINDOW_MAX_SECONDS = 7 * 24 * 3600
 _ACTIVATION_ID_CHARS = frozenset(
-    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
+)
 
 
 @dataclass(frozen=True)
@@ -258,6 +271,7 @@ class NewsDeliveryV1:
     (independent reversibility). ``predecessor_activation_id`` names the
     canary activation whose durable SENT + duplicate-observation proof is
     a live-mode precondition checked against the ledger, not this file."""
+
     mode: str
     activation_id: "str | None"
     cutoff: "datetime | None"
@@ -268,25 +282,40 @@ class NewsDeliveryV1:
 
     def canary_active(self, now: datetime) -> bool:
         """True only inside the bounded [cutoff, window_end) canary window."""
-        return (self.mode == "TELEGRAM_CANARY"
-                and self.cutoff is not None and self.window_end is not None
-                and self.cutoff <= now < self.window_end)
+        return (
+            self.mode == "TELEGRAM_CANARY"
+            and self.cutoff is not None
+            and self.window_end is not None
+            and self.cutoff <= now < self.window_end
+        )
 
     def live_active(self, now: datetime) -> bool:
         """Live operation starts at cutoff, with an optional explicit expiry."""
-        return (self.mode == "TELEGRAM_LIVE"
-                and self.cutoff is not None and self.cutoff <= now
-                and ((self.continuous is True and self.window_end is None)
-                     or (not self.continuous and self.window_end is not None and now < self.window_end)))
+        return (
+            self.mode == "TELEGRAM_LIVE"
+            and self.cutoff is not None
+            and self.cutoff <= now
+            and (
+                (self.continuous is True and self.window_end is None)
+                or (
+                    not self.continuous
+                    and self.window_end is not None
+                    and now < self.window_end
+                )
+            )
+        )
 
 
 NEWS_DELIVERY_OFF = NewsDeliveryV1("OFF", None, None, None, None)
 
 
 def _valid_activation_id(value) -> bool:
-    return (type(value) is str and 1 <= len(value) <= 64
-            and set(value) <= _ACTIVATION_ID_CHARS
-            and value[0] not in "._-")
+    return (
+        type(value) is str
+        and 1 <= len(value) <= 64
+        and set(value) <= _ACTIVATION_ID_CHARS
+        and value[0] not in "._-"
+    )
 
 
 def _parse_aware_window_end(payload):
@@ -299,7 +328,7 @@ def _parse_aware_window_end(payload):
         return None
     if window_end.tzinfo is None or window_end.utcoffset() is None:
         return None
-    return window_end.astimezone(timezone.utc)
+    return window_end.astimezone(UTC)
 
 
 def news_delivery_from_payload(payload, activation, producer_mode):
@@ -317,20 +346,19 @@ def news_delivery_from_payload(payload, activation, producer_mode):
     (cutoff, cutoff + NEWS_LIVE_WINDOW_MAX_SECONDS] requiring explicit
     renewal. Explicit continuous=true LIVE operation instead has no window_end.
     Canary operation always remains bounded. Anything else resolves to OFF."""
-    if type(payload) is not dict or not activation.enabled \
-            or producer_mode != "SHADOW":
+    if type(payload) is not dict or not activation.enabled or producer_mode != "SHADOW":
         return NEWS_DELIVERY_OFF
     mode = payload.get("delivery_mode")
     if mode not in ("TELEGRAM_CANARY", "TELEGRAM_LIVE"):
         return NEWS_DELIVERY_OFF
     if not _valid_activation_id(payload.get("activation_id")):
         return NEWS_DELIVERY_OFF
-    continuous=payload.get('continuous',False)
+    continuous = payload.get("continuous", False)
     if type(continuous) is not bool or activation.cutoff is None:
         return NEWS_DELIVERY_OFF
     window_end = _parse_aware_window_end(payload)
     if continuous:
-        if mode!='TELEGRAM_LIVE' or payload.get('window_end') is not None:
+        if mode != "TELEGRAM_LIVE" or payload.get("window_end") is not None:
             return NEWS_DELIVERY_OFF
     elif window_end is None:
         return NEWS_DELIVERY_OFF
@@ -339,26 +367,43 @@ def news_delivery_from_payload(payload, activation, producer_mode):
         if type(cap) is not int or cap != 1:
             return NEWS_DELIVERY_OFF
         span = window_end - activation.cutoff
-        if not (timedelta(0) < span
-                <= timedelta(seconds=NEWS_CANARY_WINDOW_MAX_SECONDS)):
+        if not (
+            timedelta(0) < span <= timedelta(seconds=NEWS_CANARY_WINDOW_MAX_SECONDS)
+        ):
             return NEWS_DELIVERY_OFF
-        return NewsDeliveryV1("TELEGRAM_CANARY", payload["activation_id"],
-                              activation.cutoff, window_end, 1)
+        return NewsDeliveryV1(
+            "TELEGRAM_CANARY",
+            payload["activation_id"],
+            activation.cutoff,
+            window_end,
+            1,
+        )
     predecessor = payload.get("predecessor_activation_id")
-    if not _valid_activation_id(predecessor) \
-            or predecessor == payload["activation_id"]:
+    if not _valid_activation_id(predecessor) or predecessor == payload["activation_id"]:
         return NEWS_DELIVERY_OFF
     if "telegram_attempt_cap" in payload:
         return NEWS_DELIVERY_OFF
     if continuous:
-        return NewsDeliveryV1('TELEGRAM_LIVE',payload['activation_id'],
-                              activation.cutoff,None,None,predecessor,True)
+        return NewsDeliveryV1(
+            "TELEGRAM_LIVE",
+            payload["activation_id"],
+            activation.cutoff,
+            None,
+            None,
+            predecessor,
+            True,
+        )
     span = window_end - activation.cutoff
-    if not (timedelta(0) < span
-            <= timedelta(seconds=NEWS_LIVE_WINDOW_MAX_SECONDS)):
+    if not (timedelta(0) < span <= timedelta(seconds=NEWS_LIVE_WINDOW_MAX_SECONDS)):
         return NEWS_DELIVERY_OFF
-    return NewsDeliveryV1("TELEGRAM_LIVE", payload["activation_id"],
-                          activation.cutoff, window_end, None, predecessor)
+    return NewsDeliveryV1(
+        "TELEGRAM_LIVE",
+        payload["activation_id"],
+        activation.cutoff,
+        window_end,
+        None,
+        predecessor,
+    )
 
 
 class NewsGateSnapshotV1(tuple):
@@ -367,8 +412,9 @@ class NewsGateSnapshotV1(tuple):
     independent ``delivery`` judgment derived from the same byte string so
     producer and delivery can never split-brain across two file reads."""
 
-    def __new__(cls, activation, producer_mode,
-                delivery: NewsDeliveryV1 = NEWS_DELIVERY_OFF):
+    def __new__(
+        cls, activation, producer_mode, delivery: NewsDeliveryV1 = NEWS_DELIVERY_OFF
+    ):
         snapshot = tuple.__new__(cls, (activation, producer_mode))
         snapshot.delivery = delivery
         return snapshot
@@ -386,15 +432,17 @@ def read_news_gate(root) -> "tuple[DialogueActivationV1, str]":
     path = Path(root) / "news_activation.json"
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
-    except OSError:                       # absent/denied/symlink(ELOOP)
+    except OSError:  # absent/denied/symlink(ELOOP)
         return _NEWS_GATE_OFF_SNAPSHOT
     try:
-        info = os.fstat(fd)               # verify the opened object, not path
-        if not (stat.S_ISREG(info.st_mode)
-                and info.st_nlink == 1
-                and stat.S_IMODE(info.st_mode) == 0o600
-                and info.st_uid == os.geteuid()
-                and info.st_size <= NEWS_GATE_MAX_BYTES):
+        info = os.fstat(fd)  # verify the opened object, not path
+        if not (
+            stat.S_ISREG(info.st_mode)
+            and info.st_nlink == 1
+            and stat.S_IMODE(info.st_mode) == 0o600
+            and info.st_uid == os.geteuid()
+            and info.st_size <= NEWS_GATE_MAX_BYTES
+        ):
             return _NEWS_GATE_OFF_SNAPSHOT
         raw = os.read(fd, NEWS_GATE_MAX_BYTES + 1)
     except OSError:
@@ -412,7 +460,8 @@ def read_news_gate(root) -> "tuple[DialogueActivationV1, str]":
         return _NEWS_GATE_OFF_SNAPSHOT
     mode = "SHADOW" if payload.get("producer_mode") == "SHADOW" else "OFF"
     return NewsGateSnapshotV1(
-        activation, mode, news_delivery_from_payload(payload, activation, mode))
+        activation, mode, news_delivery_from_payload(payload, activation, mode)
+    )
 
 
 def read_news_activation(root):
@@ -473,101 +522,154 @@ def build_pulse_production_deps(
     # Default stores under isolated root
     if lookahead_store is None:
         lookahead_store = CalendarLookaheadStoreV1(
-            root / "ops" / "calendar_lookahead.sqlite3", clock=clock)
+            root / "ops" / "calendar_lookahead.sqlite3", clock=clock
+        )
     if holdings_store is None:
         holdings_store = CurrentHoldingsStore(
-            root / "stores" / "current_holdings.json", clock=clock)
+            root / "stores" / "current_holdings.json", clock=clock
+        )
     if native_refs_store is None:
         native_refs_store = AccountNativeRefStoreV1(
-            root / "ops" / "account_native_refs.sqlite3", clock=clock)
+            root / "ops" / "account_native_refs.sqlite3", clock=clock
+        )
     if quote_store is None:
         quote_store = LatestQuoteStore(
-            root / "stores" / "latest_quotes.sqlite3", clock=clock)
+            root / "stores" / "latest_quotes.sqlite3", clock=clock
+        )
     if ledger_store is None:
         ledger_store = TradeLedgerStore(
-            root / "stores" / "trade_ledger.sqlite3", clock=clock,
-            id_factory=_make_unique_id_factory(clock))
+            root / "stores" / "trade_ledger.sqlite3",
+            clock=clock,
+            id_factory=_make_unique_id_factory(clock),
+        )
     if scan_state_store is None:
         scan_state_store = OrderScanStateStore(
-            root / "stores" / "order_scan_state.sqlite3", clock=clock)
+            root / "stores" / "order_scan_state.sqlite3", clock=clock
+        )
     if dialogue_store is None:
         dialogue_store = ExecutionDialogueStore(
-            root / "stores" / "execution_dialogue.sqlite3", clock=clock)
-    news_callback_handler=None
-    news_outbox_reconcile=None
-    news_delivery_runner=None
-    news_producer_deps=None
+            root / "stores" / "execution_dialogue.sqlite3", clock=clock
+        )
+    news_callback_handler = None
+    news_outbox_reconcile = None
+    news_delivery_runner = None
+    news_producer_deps = None
     if news_gate is None:
-        news_gate=read_news_gate(root)
-    news_activation,news_producer_mode=news_gate
+        news_gate = read_news_gate(root)
+    news_activation, news_producer_mode = news_gate
     if news_activation.enabled:
-        news_episode_store=NewsEpisodeStore(root / "stores" / "news_episodes.sqlite3")
+        news_episode_store = NewsEpisodeStore(root / "stores" / "news_episodes.sqlite3")
         if news_ops_kernel is None:
-            news_ops_kernel=OpsKernelStore(root / "ops" / "ops_kernel.sqlite3",stable_phase_ids=frozenset())
-        news_callback_handler=build_news_callback_handler(news_episode_store,news_ops_kernel.read_outbox,now=clock)
+            news_ops_kernel = OpsKernelStore(
+                root / "ops" / "ops_kernel.sqlite3", stable_phase_ids=frozenset()
+            )
+        news_callback_handler = build_news_callback_handler(
+            news_episode_store, news_ops_kernel.read_outbox, now=clock
+        )
         # G3 delivery judgment (approval packet §2.1/§2.2): TELEGRAM is
         # possible only with the approved canary gate AND the canonical
         # injected sender AND an unconsumed durable attempt ledger inside the
         # fixed window. Plain-tuple snapshots (legacy callers) carry no
         # delivery attribute and therefore stay OFF.
-        news_delivery=getattr(news_gate,"delivery",NEWS_DELIVERY_OFF)
+        news_delivery = getattr(news_gate, "delivery", NEWS_DELIVERY_OFF)
         if news_telegram_sender is None:
             news_telegram_sender = telegram_sender
-        if news_delivery.mode in ("TELEGRAM_CANARY","TELEGRAM_LIVE") \
-                and news_telegram_sender is None:
-            news_delivery=NEWS_DELIVERY_OFF
+        if (
+            news_delivery.mode in ("TELEGRAM_CANARY", "TELEGRAM_LIVE")
+            and news_telegram_sender is None
+        ):
+            news_delivery = NEWS_DELIVERY_OFF
+
         def news_delivery_enabled(observed_now):
-            if news_delivery.mode=="TELEGRAM_LIVE":
+            if news_delivery.mode == "TELEGRAM_LIVE":
                 return live_delivery_authorized(
-                    news_episode_store,news_delivery,observed_now)[0]
-            return (news_delivery.canary_active(observed_now)
-                    and news_episode_store.canary_attempt(
-                        news_delivery.activation_id) is None)
+                    news_episode_store, news_delivery, observed_now
+                )[0]
+            return (
+                news_delivery.canary_active(observed_now)
+                and news_episode_store.canary_attempt(news_delivery.activation_id)
+                is None
+            )
+
         def news_outbox_reconcile(observed_now):
-            enabled=news_delivery_enabled(observed_now)
-            return reconcile_news_outbox(store=news_episode_store,ops_kernel=news_ops_kernel,
-                role=ProducerRole.HERMES,activation_enabled=enabled,
-                telegram_cutoff=news_delivery.cutoff if enabled else None,now=observed_now)
+            enabled = news_delivery_enabled(observed_now)
+            return reconcile_news_outbox(
+                store=news_episode_store,
+                ops_kernel=news_ops_kernel,
+                role=ProducerRole.HERMES,
+                activation_enabled=enabled,
+                telegram_cutoff=news_delivery.cutoff if enabled else None,
+                now=observed_now,
+            )
+
         def news_delivery_runner(observed_now):
             # In canary mode the canary runner itself enforces window, cap,
             # and reservation-before-transport, reporting the OFF reason; in
             # live mode the live runner enforces the durable predecessor
             # proof, redaction guard, and delivery-only trip semantics.
-            if news_delivery.mode=="TELEGRAM_CANARY":
-                return run_canary_alert_delivery(ops_kernel=news_ops_kernel,role=ProducerRole.HERMES,
-                    ledger=news_episode_store,delivery=news_delivery,
-                    telegram_send=news_telegram_sender,keyboard_resolver=lambda alert_id:None,
-                    delivery_binder=news_delivery_binder,now=observed_now)
-            if news_delivery.mode=="TELEGRAM_LIVE":
-                return run_live_alert_delivery(ops_kernel=news_ops_kernel,role=ProducerRole.HERMES,
-                    ledger=news_episode_store,delivery=news_delivery,
-                    telegram_send=news_telegram_sender,keyboard_resolver=lambda alert_id:None,
-                    delivery_binder=news_delivery_binder,now=observed_now)
-            return run_alert_delivery(ops_kernel=news_ops_kernel,role=ProducerRole.HERMES,
-                telegram_send=_no_transport,keyboard_resolver=lambda alert_id:None,
-                delivery_binder=news_delivery_binder,now=observed_now)
+            if news_delivery.mode == "TELEGRAM_CANARY":
+                return run_canary_alert_delivery(
+                    ops_kernel=news_ops_kernel,
+                    role=ProducerRole.HERMES,
+                    ledger=news_episode_store,
+                    delivery=news_delivery,
+                    telegram_send=news_telegram_sender,
+                    keyboard_resolver=lambda alert_id: None,
+                    delivery_binder=news_delivery_binder,
+                    now=observed_now,
+                )
+            if news_delivery.mode == "TELEGRAM_LIVE":
+                return run_live_alert_delivery(
+                    ops_kernel=news_ops_kernel,
+                    role=ProducerRole.HERMES,
+                    ledger=news_episode_store,
+                    delivery=news_delivery,
+                    telegram_send=news_telegram_sender,
+                    keyboard_resolver=lambda alert_id: None,
+                    delivery_binder=news_delivery_binder,
+                    now=observed_now,
+                )
+            return run_alert_delivery(
+                ops_kernel=news_ops_kernel,
+                role=ProducerRole.HERMES,
+                telegram_send=_no_transport,
+                keyboard_resolver=lambda alert_id: None,
+                delivery_binder=news_delivery_binder,
+                now=observed_now,
+            )
+
         def news_delivery_binder(alert_id, provider_id, *, now):
             # The new worker reads canonical delivery receipts directly.
             if not alert_id.startswith("nda-"):
-                return news_episode_store.bind_delivery_by_ops_alert(alert_id, provider_id, now=now)
+                return news_episode_store.bind_delivery_by_ops_alert(
+                    alert_id, provider_id, now=now
+                )
+
         from tokmo.programs.news_decision_config import read_decision_config
-        if news_producer_mode=="SHADOW" and not read_decision_config(root)["enabled"]:
+
+        if news_producer_mode == "SHADOW" and not read_decision_config(root)["enabled"]:
             # Inert producer dependency bundle (SDS §6.8-1): supply seams and
             # bounds only — the executable stage lives solely inside
             # run_pulse_once's held-flock scope.
-            news_documents_path = (Path(news_documents_path)
-                                   if news_documents_path is not None else
-                                   root / "news" / "external_news_v4.sqlite3")
+            news_documents_path = (
+                Path(news_documents_path)
+                if news_documents_path is not None
+                else root / "news" / "external_news_v4.sqlite3"
+            )
+
             def news_documents_reader(window_from):
                 return read_discovery_documents_v1(
-                    news_documents_path,window_from=window_from,
-                    max_rows=DISCOVERY_MAX_DOCUMENTS)
+                    news_documents_path,
+                    window_from=window_from,
+                    max_rows=DISCOVERY_MAX_DOCUMENTS,
+                )
+
             def news_holding_terms():
                 # Public instrument names only (SDS §9-6): scope, quantity,
                 # and price data never leave this factory.
-                terms=set()
+                terms = set()
                 try:
-                    state=holdings_store.read()
+                    state = holdings_store.read()
                 except Exception:
                     return frozenset()
                 if state is None:
@@ -577,62 +679,71 @@ def build_pulse_production_deps(
                         terms.add(item.symbol)
                         if playbook_root is None:
                             continue
-                        for market in ("KR","US"):
-                            name=read_instrument_name(
-                                playbook_root,account_scope=account.account_scope,
-                                market=market,symbol=item.symbol)
+                        for market in ("KR", "US"):
+                            name = read_instrument_name(
+                                playbook_root,
+                                account_scope=account.account_scope,
+                                market=market,
+                                symbol=item.symbol,
+                            )
                             if name:
                                 terms.add(name)
                 return frozenset(terms)
+
             def news_identity_pairs():
                 # Official local identity pairs for taxonomy stage 1 (M2):
                 # holdings + watchlist entries resolve through the canonical
                 # registry — never a bare-symbol identity (SDS §9-6 scope
                 # rule holds: public symbol/name only).
-                entries=[]
+                entries = []
                 try:
-                    state=holdings_store.read()
+                    state = holdings_store.read()
                 except Exception:
-                    state=None
-                for account in (state.accounts if state is not None else ()):
+                    state = None
+                for account in state.accounts if state is not None else ():
                     for item in account.holdings:
-                        market=classify_market(
-                            getattr(item,"market_raw",None),
-                            getattr(item,"market_field",None))
-                        names=[]
-                        matched=[]
+                        market = classify_market(
+                            getattr(item, "market_raw", None),
+                            getattr(item, "market_field", None),
+                        )
+                        names = []
+                        matched = []
                         if playbook_root is not None:
-                            markets=(("KR","US") if market is None
-                                     else (market.value,))
+                            markets = (
+                                ("KR", "US") if market is None else (market.value,)
+                            )
                             for market_token in markets:
-                                name=read_instrument_name(
+                                name = read_instrument_name(
                                     playbook_root,
                                     account_scope=account.account_scope,
-                                    market=market_token,symbol=item.symbol)
+                                    market=market_token,
+                                    symbol=item.symbol,
+                                )
                                 if name:
                                     names.append(name)
                                     matched.append(market_token)
-                        if market is None and len(matched)==1:
-                            market=Market(matched[0])
-                        entries.append((item.symbol,market,tuple(names)))
+                        if market is None and len(matched) == 1:
+                            market = Market(matched[0])
+                        entries.append((item.symbol, market, tuple(names)))
                 if watchlist_root is not None:
                     try:
-                        identities=load_watchlist_identities(
-                            Path(watchlist_root))
+                        identities = load_watchlist_identities(Path(watchlist_root))
                     except WatchlistError:
-                        identities={}
-                    for market,rows in identities.items():
-                        for symbol,name in rows:
-                            entries.append((symbol,market,(name,)))
+                        identities = {}
+                    for market, rows in identities.items():
+                        for symbol, name in rows:
+                            entries.append((symbol, market, (name,)))
                 return resolve_news_identity_pairs(entries)
+
             def news_interest_terms():
                 # Typed interest terms (M3): watchlists + open YouTube typed
                 # hypotheses via the canonical read-only enumerators.
-                return enumerate_news_interest_terms(
-                    news_ops_kernel,watchlist_root)
+                return enumerate_news_interest_terms(news_ops_kernel, watchlist_root)
+
             def _classifier_unbound(request):
                 raise NewsClassifierFailure("MODEL_UNAVAILABLE")
-            news_producer_deps=NewsProducerDepsV1(
+
+            news_producer_deps = NewsProducerDepsV1(
                 episode_store=news_episode_store,
                 ops_kernel=news_ops_kernel,
                 role=ProducerRole.HERMES,
@@ -641,8 +752,8 @@ def build_pulse_production_deps(
                 classifier_call=_classifier_unbound,
                 classifier_config_path=root / "news_classifier_model.json",
                 admitted_catalog=MappingProxyType(
-                    {DEFAULT_NEWS_CLASSIFIER_MODEL_ID:
-                     NEWS_CLASSIFIER_PROVIDER}),
+                    {DEFAULT_NEWS_CLASSIFIER_MODEL_ID: NEWS_CLASSIFIER_PROVIDER}
+                ),
                 gate_cutoff=news_activation.cutoff,
                 slot_seconds=PRODUCER_INTERVAL_SECONDS,
                 candidates_per_tick=PRODUCER_CANDIDATES_PER_TICK,
@@ -665,7 +776,9 @@ def build_pulse_production_deps(
                     else (Path.home() / ".local" / "share" / "tokmo-v3").resolve()
                     / "opendart-bulk.sqlite3",
                     live=official_live_seam,
-                    receipt_sink=build_official_receipt_sink(root)))
+                    receipt_sink=build_official_receipt_sink(root),
+                ),
+            )
 
     def lookahead_reader(market: Market):
         return lookahead_store.read_days(market)  # type: ignore[union-attr]
@@ -690,8 +803,7 @@ def build_pulse_production_deps(
     # construction doesn't fail — they must never be called without
     # explicit provider wiring.
     def _no_transport(*args, **kwargs):
-        raise PulseProductionDepsError(
-            "no provider transport wired in G2 DI factory")
+        raise PulseProductionDepsError("no provider transport wired in G2 DI factory")
 
     return PulseDepsV1(
         clock=clock,
@@ -702,14 +814,16 @@ def build_pulse_production_deps(
         token_fetch=token_fetch if token_fetch is not None else _no_transport,
         quotes_fetch=quotes_fetch if quotes_fetch is not None else _no_transport,
         orders_page_fetch=(
-            orders_page_fetch if orders_page_fetch is not None
-            else _no_transport),
+            orders_page_fetch if orders_page_fetch is not None else _no_transport
+        ),
         order_detail_fetch=(
-            order_detail_fetch if order_detail_fetch is not None
-            else _no_transport),
+            order_detail_fetch if order_detail_fetch is not None else _no_transport
+        ),
         conditional_orders_fetch=(
-            conditional_orders_fetch if conditional_orders_fetch is not None
-            else _no_transport),
+            conditional_orders_fetch
+            if conditional_orders_fetch is not None
+            else _no_transport
+        ),
         quote_store=quote_store,
         ledger_store=ledger_store,
         scan_state_store=scan_state_store,

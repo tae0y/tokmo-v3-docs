@@ -89,9 +89,16 @@ def test_programs_do_not_import_presentation_internals():
 def test_presentation_does_not_access_network_env_or_clock():
     """presentation must not touch network, environment, clock, or filesystem."""
     FORBIDDEN_PATTERNS = (
-        "os.environ", "getenv(", "datetime.now(", "utcnow(",
-        "urlopen(", "socket", "ssl.", "http.client",
-        "urllib.request", "urllib.error",
+        "os.environ",
+        "getenv(",
+        "datetime.now(",
+        "utcnow(",
+        "urlopen(",
+        "socket",
+        "ssl.",
+        "http.client",
+        "urllib.request",
+        "urllib.error",
     )
     for path in sorted(SRC_ROOT.glob("presentation/**/*.py")):
         if "__pycache__" in path.parts:

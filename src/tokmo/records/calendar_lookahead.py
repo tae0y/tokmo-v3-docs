@@ -9,12 +9,12 @@ interval membership in UTC — never by the market's current local date, which
 misclassifies the US Day Market between 09:00 and 13:00 KST.
 """
 
-from dataclasses import dataclass
-from datetime import date, datetime, timedelta
 import os
-from pathlib import Path
 import sqlite3
 import stat
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
+from pathlib import Path
 
 from tokmo.values.cadence_policy import validate_cadence_operation
 from tokmo.values.material_pack import canonical_decode, canonical_encode
@@ -34,8 +34,11 @@ class CalendarLookaheadConflictError(ValueError):
 
 
 def _aware_utc(value) -> bool:
-    return (isinstance(value, datetime) and value.tzinfo is not None
-            and value.utcoffset() == timedelta(0))
+    return (
+        isinstance(value, datetime)
+        and value.tzinfo is not None
+        and value.utcoffset() == timedelta(0)
+    )
 
 
 def _iso(value: datetime) -> str:
@@ -96,8 +99,7 @@ class LookaheadDayV1:
                 raise ValueError("sessions must not overlap")
         if not _aware_utc(self.fetched_at):
             raise ValueError("fetched_at must be aware UTC")
-        operation = ("CALENDAR_DAY_KR" if self.market is Market.KR
-                     else "CALENDAR_DAY_US")
+        operation = "CALENDAR_DAY_KR" if self.market is Market.KR else "CALENDAR_DAY_US"
         try:
             validate_cadence_operation(operation, self.provenance)
         except ValueError:
@@ -110,8 +112,11 @@ def _day_payload(day: LookaheadDayV1) -> dict:
         "trade_date": day.trade_date,
         "source_trade_date": day.source_trade_date,
         "sessions": [
-            {"kind": session.kind, "start": _iso(session.start_utc),
-             "end": _iso(session.end_utc)}
+            {
+                "kind": session.kind,
+                "start": _iso(session.start_utc),
+                "end": _iso(session.end_utc),
+            }
             for session in day.sessions
         ],
         "fetched_at": _iso(day.fetched_at),
@@ -122,8 +127,15 @@ def _day_payload(day: LookaheadDayV1) -> dict:
 
 def _day_from_payload(raw: bytes) -> LookaheadDayV1:
     value = canonical_decode(raw, max_bytes=_PAYLOAD_MAX_BYTES)
-    expected = {"market", "trade_date", "source_trade_date", "sessions",
-                "fetched_at", "provenance", "schema_version"}
+    expected = {
+        "market",
+        "trade_date",
+        "source_trade_date",
+        "sessions",
+        "fetched_at",
+        "provenance",
+        "schema_version",
+    }
     if type(value) is not dict or set(value) != expected:
         raise ValueError("non-canonical lookahead payload")
     if value["schema_version"] != LOOKAHEAD_SCHEMA_VERSION:
@@ -137,8 +149,10 @@ def _day_from_payload(raw: bytes) -> LookaheadDayV1:
         for item in value["sessions"]
     )
     return LookaheadDayV1(
-        Market(value["market"]), value["trade_date"],
-        value["source_trade_date"], sessions,
+        Market(value["market"]),
+        value["trade_date"],
+        value["source_trade_date"],
+        sessions,
         datetime.fromisoformat(value["fetched_at"].replace("Z", "+00:00")),
         value["provenance"],
     )
@@ -168,7 +182,8 @@ def verify_against_current_cache(day: LookaheadDayV1, cached) -> None:
     }
     if ours != theirs:
         raise CalendarLookaheadConflictError(
-            "lookahead and current cache disagree on the same trade date")
+            "lookahead and current cache disagree on the same trade date"
+        )
 
 
 _SCHEMA = """
@@ -210,13 +225,13 @@ class CalendarLookaheadStoreV1:
             connection.close()
             raise
 
-    def replace_market_days(self, market: Market,
-                            days: tuple[LookaheadDayV1, ...]) -> None:
+    def replace_market_days(
+        self, market: Market, days: tuple[LookaheadDayV1, ...]
+    ) -> None:
         """Atomically replace one market's window with 1..2 ascending days."""
         if not isinstance(market, Market):
             raise ValueError("unknown market")
-        if (type(days) is not tuple or not 1 <= len(days)
-                <= _MAX_DAYS_PER_MARKET):
+        if type(days) is not tuple or not 1 <= len(days) <= _MAX_DAYS_PER_MARKET:
             raise ValueError("lookahead window holds one or two days")
         dates = []
         for day in days:
@@ -236,9 +251,13 @@ class CalendarLookaheadStoreV1:
                 for day in days:
                     connection.execute(
                         "INSERT INTO calendar_lookahead VALUES(?,?,?,?,?)",
-                        (market.value, day.trade_date,
-                         canonical_encode(_day_payload(day)).decode(),
-                         _iso(day.fetched_at), LOOKAHEAD_SCHEMA_VERSION),
+                        (
+                            market.value,
+                            day.trade_date,
+                            canonical_encode(_day_payload(day)).decode(),
+                            _iso(day.fetched_at),
+                            LOOKAHEAD_SCHEMA_VERSION,
+                        ),
                     )
                 connection.execute("COMMIT")
             except BaseException:
@@ -273,7 +292,8 @@ class CalendarLookaheadStoreV1:
                 day = _day_from_payload(payload.encode())
             except (TypeError, ValueError, KeyError) as error:
                 raise CalendarLookaheadCorruptError(
-                    "corrupt lookahead payload") from error
+                    "corrupt lookahead payload"
+                ) from error
             if day.trade_date != trade_date or day.market is not market:
                 raise CalendarLookaheadCorruptError("lookahead identity drift")
             days.append(day)
@@ -294,9 +314,9 @@ def _closed(market, reason):
     return PulseSessionVerdictV1(market, False, reason, None, None, None)
 
 
-def judge_lookahead_session(market: Market,
-                            days: tuple[LookaheadDayV1, ...],
-                            now_utc: datetime) -> PulseSessionVerdictV1:
+def judge_lookahead_session(
+    market: Market, days: tuple[LookaheadDayV1, ...], now_utc: datetime
+) -> PulseSessionVerdictV1:
     """Interval-membership session verdict (§13.4).
 
     Provider-declared absolute ``[start, end)`` membership picks the
@@ -319,8 +339,9 @@ def judge_lookahead_session(market: Market,
         if day.market is not market:
             return _closed(market, "market_mismatch")
         for session in day.sessions:
-            intervals.append((session.start_utc, session.end_utc,
-                              day.trade_date, session.kind))
+            intervals.append(
+                (session.start_utc, session.end_utc, day.trade_date, session.kind)
+            )
     intervals.sort(key=lambda item: (item[0], item[1]))
     for earlier, later in zip(intervals, intervals[1:]):
         if later[0] < earlier[1]:

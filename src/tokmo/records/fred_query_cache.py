@@ -13,24 +13,33 @@ expired ``STARTED`` row to ``FAILED``/``LOCAL_STATE_UNKNOWN_START`` and
 never deletes it: the transport may already have started before the crash.
 """
 
-from dataclasses import dataclass
-from datetime import date, datetime, timezone
-from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 import os
+from dataclasses import dataclass
+from datetime import UTC, date, datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from tokmo.records.durability import fsync_directory
 from tokmo.records.private_sqlite import (
-    acquire_immediate_transaction, assert_no_sidecars_after_close,
-    assert_private_sidecars_while_open, connect_private, prepare_private_path,
+    acquire_immediate_transaction,
+    assert_no_sidecars_after_close,
+    assert_private_sidecars_while_open,
+    connect_private,
+    prepare_private_path,
     private_creation,
 )
 from tokmo.values.fred_query import (
-    LOCAL_STATE_UNKNOWN_START, STARTED_LEASE, FredCompletenessV1,
-    FredObservationV1, FredQueryCacheCorruption, FredQueryFailureCodeV1,
-    FredSeriesFactV1, FredValueStateV1, build_fred_series_fact_v1,
+    LOCAL_STATE_UNKNOWN_START,
+    STARTED_LEASE,
+    FredCompletenessV1,
+    FredObservationV1,
+    FredQueryCacheCorruption,
+    FredQueryFailureCodeV1,
+    FredSeriesFactV1,
+    FredValueStateV1,
+    build_fred_series_fact_v1,
     canonical_json,
 )
 
@@ -62,10 +71,24 @@ PRAGMA user_version=1;
 """
 
 _EXPECTED_COLUMNS = {
-    "query_success": ("query_identity", "series_id", "revision_identity",
-                      "fetched_at", "fact_json", "fact_digest", "due_slot"),
-    "query_attempt": ("query_identity", "due_slot", "attempt_seq", "state",
-                      "started_at", "finished_at", "failure_code"),
+    "query_success": (
+        "query_identity",
+        "series_id",
+        "revision_identity",
+        "fetched_at",
+        "fact_json",
+        "fact_digest",
+        "due_slot",
+    ),
+    "query_attempt": (
+        "query_identity",
+        "due_slot",
+        "attempt_seq",
+        "state",
+        "started_at",
+        "finished_at",
+        "failure_code",
+    ),
 }
 
 
@@ -96,9 +119,12 @@ class FredClaimV1:
 
 
 def _instant(value: object) -> str:
-    if (type(value) is not datetime or value.tzinfo is None
-            or value.utcoffset() is None
-            or value.utcoffset().total_seconds() != 0):
+    if (
+        type(value) is not datetime
+        or value.tzinfo is None
+        or value.utcoffset() is None
+        or value.utcoffset().total_seconds() != 0
+    ):
         raise ValueError("aware_utc_required")
     return value.isoformat(timespec="microseconds").replace("+00:00", "Z")
 
@@ -111,8 +137,11 @@ def _moment(value: str) -> datetime:
 
 
 def _require_identity(value: object) -> str:
-    if (type(value) is not str or len(value) != 64
-            or any(character not in "0123456789abcdef" for character in value)):
+    if (
+        type(value) is not str
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
         raise ValueError("invalid_query_identity")
     return value
 
@@ -126,18 +155,20 @@ def _require_slot(value: object) -> str:
 def encode_fact(fact: FredSeriesFactV1) -> bytes:
     if not isinstance(fact, FredSeriesFactV1):
         raise ValueError("fact_required")
-    return canonical_json({
-        "schema": FACT_SCHEMA,
-        "query_identity": fact.query_identity,
-        "series_id": fact.series_id,
-        "fetched_at": fact.fetched_at,
-        "release_id": fact.release_id,
-        "release_date": fact.release_date,
-        "vintage_date": fact.vintage_date,
-        "revision_identity": fact.revision_identity,
-        "completeness": fact.completeness,
-        "observations": [item.normalized() for item in fact.observations],
-    })
+    return canonical_json(
+        {
+            "schema": FACT_SCHEMA,
+            "query_identity": fact.query_identity,
+            "series_id": fact.series_id,
+            "fetched_at": fact.fetched_at,
+            "release_id": fact.release_id,
+            "release_date": fact.release_date,
+            "vintage_date": fact.vintage_date,
+            "revision_identity": fact.revision_identity,
+            "completeness": fact.completeness,
+            "observations": [item.normalized() for item in fact.observations],
+        }
+    )
 
 
 def decode_fact(blob: object) -> FredSeriesFactV1:
@@ -157,19 +188,28 @@ def decode_fact(blob: object) -> FredSeriesFactV1:
                 None if item["value"] is None else Decimal(item["value"]),
                 FredValueStateV1(item["value_state"]),
                 date.fromisoformat(item["realtime_start"]),
-                date.fromisoformat(item["realtime_end"]))
-            for item in payload["observations"])
+                date.fromisoformat(item["realtime_end"]),
+            )
+            for item in payload["observations"]
+        )
         fact = build_fred_series_fact_v1(
             query_identity=payload["query_identity"],
             series_id=payload["series_id"],
             observations=observations,
             fetched_at=_stored_instant(payload["fetched_at"]),
             release_id=payload["release_id"],
-            release_date=(None if payload["release_date"] is None
-                          else date.fromisoformat(payload["release_date"])),
-            vintage_date=(None if payload["vintage_date"] is None
-                          else date.fromisoformat(payload["vintage_date"])),
-            completeness=FredCompletenessV1(payload["completeness"]))
+            release_date=(
+                None
+                if payload["release_date"] is None
+                else date.fromisoformat(payload["release_date"])
+            ),
+            vintage_date=(
+                None
+                if payload["vintage_date"] is None
+                else date.fromisoformat(payload["vintage_date"])
+            ),
+            completeness=FredCompletenessV1(payload["completeness"]),
+        )
     except (KeyError, TypeError, ValueError, InvalidOperation) as error:
         raise FredQueryCacheCorruption("invalid_stored_fact") from error
     if fact.revision_identity != payload["revision_identity"]:
@@ -182,8 +222,7 @@ def decode_fact(blob: object) -> FredSeriesFactV1:
 def _stored_instant(value: object) -> datetime:
     if type(value) is not str or not value.endswith("Z"):
         raise ValueError("aware_utc_required")
-    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(
-        timezone.utc)
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
 
 
 class FredQueryCacheV1:
@@ -201,8 +240,9 @@ class FredQueryCacheV1:
         created = not self.path.exists()
         if created:
             with private_creation():
-                descriptor = os.open(self.path, os.O_RDWR | os.O_CREAT | os.O_EXCL,
-                                     0o600)
+                descriptor = os.open(
+                    self.path, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600
+                )
                 os.close(descriptor)
             fsync_directory(root)
         self._initialize(created)
@@ -235,8 +275,9 @@ class FredQueryCacheV1:
         if connection.execute("PRAGMA user_version").fetchone()[0] != USER_VERSION:
             raise FredQueryCacheCorruption("schema_mismatch")
         for table, columns in _EXPECTED_COLUMNS.items():
-            actual = tuple(row[1] for row in connection.execute(
-                f"PRAGMA table_info('{table}')"))
+            actual = tuple(
+                row[1] for row in connection.execute(f"PRAGMA table_info('{table}')")
+            )
             if actual != columns:
                 raise FredQueryCacheCorruption("schema_mismatch")
 
@@ -245,14 +286,17 @@ class FredQueryCacheV1:
         try:
             rows = connection.execute(
                 "SELECT query_identity,revision_identity,fact_json,fact_digest "
-                "FROM query_success").fetchall()
+                "FROM query_success"
+            ).fetchall()
         finally:
             connection.close()
         for identity, revision, blob, digest in rows:
             fact = decode_fact(blob)
-            if (hashlib.sha256(blob).hexdigest() != digest
-                    or fact.query_identity != identity
-                    or fact.revision_identity != revision):
+            if (
+                hashlib.sha256(blob).hexdigest() != digest
+                or fact.query_identity != identity
+                or fact.revision_identity != revision
+            ):
                 raise FredQueryCacheCorruption("stored_fact_digest_mismatch")
 
     # -- reconciliation -----------------------------------------------------
@@ -262,7 +306,8 @@ class FredQueryCacheV1:
         return connection.execute(
             "UPDATE query_attempt SET state='FAILED',finished_at=?,failure_code=? "
             "WHERE state='STARTED' AND started_at < ?",
-            (_instant(now), LOCAL_STATE_UNKNOWN_START, cutoff)).rowcount
+            (_instant(now), LOCAL_STATE_UNKNOWN_START, cutoff),
+        ).rowcount
 
     def reconcile_stale_claims(self, *, now: datetime) -> int:
         _instant(now)
@@ -283,8 +328,9 @@ class FredQueryCacheV1:
 
     # -- reads --------------------------------------------------------------
 
-    def read_attempt_state(self, query_identity: str, due_slot: str, *,
-                           now: datetime) -> FredAttemptStateV1:
+    def read_attempt_state(
+        self, query_identity: str, due_slot: str, *, now: datetime
+    ) -> FredAttemptStateV1:
         _require_identity(query_identity)
         _require_slot(due_slot)
         _instant(now)
@@ -295,7 +341,9 @@ class FredQueryCacheV1:
             rows = connection.execute(
                 "SELECT attempt_seq,state,started_at,finished_at,failure_code "
                 "FROM query_attempt WHERE query_identity=? AND due_slot=? "
-                "ORDER BY attempt_seq", (query_identity, due_slot)).fetchall()
+                "ORDER BY attempt_seq",
+                (query_identity, due_slot),
+            ).fetchall()
             connection.execute("COMMIT")
         except BaseException:
             if connection.in_transaction:
@@ -305,8 +353,9 @@ class FredQueryCacheV1:
             connection.close()
         return _attempt_state(rows)
 
-    def read_success_for_series(self, series_id: str, *,
-                                now: datetime) -> FredCachedSuccessV1 | None:
+    def read_success_for_series(
+        self, series_id: str, *, now: datetime
+    ) -> FredCachedSuccessV1 | None:
         if type(series_id) is not str or not series_id:
             raise ValueError("invalid_series_id")
         _instant(now)
@@ -318,7 +367,8 @@ class FredQueryCacheV1:
                 "SELECT query_identity,series_id,revision_identity,fetched_at,"
                 "fact_json,fact_digest,due_slot FROM query_success "
                 "WHERE series_id=? ORDER BY fetched_at DESC LIMIT 1",
-                (series_id,)).fetchone()
+                (series_id,),
+            ).fetchone()
             connection.execute("COMMIT")
         except BaseException:
             if connection.in_transaction:
@@ -329,23 +379,30 @@ class FredQueryCacheV1:
         if row is None:
             return None
         fact = decode_fact(row[4])
-        if (hashlib.sha256(row[4]).hexdigest() != row[5]
-                or fact.query_identity != row[0]
-                or fact.revision_identity != row[2]
-                or fact.series_id != row[1]):
+        if (
+            hashlib.sha256(row[4]).hexdigest() != row[5]
+            or fact.query_identity != row[0]
+            or fact.revision_identity != row[2]
+            or fact.series_id != row[1]
+        ):
             raise FredQueryCacheCorruption("stored_fact_digest_mismatch")
-        return FredCachedSuccessV1(row[0], row[1], row[2], _moment(row[3]),
-                                   row[6], fact)
+        return FredCachedSuccessV1(
+            row[0], row[1], row[2], _moment(row[3]), row[6], fact
+        )
 
     def attempt_rows(self, query_identity: str, due_slot: str) -> tuple:
         _require_identity(query_identity)
         _require_slot(due_slot)
         connection = self._connect()
         try:
-            return tuple(connection.execute(
-                "SELECT attempt_seq,state,started_at,finished_at,failure_code "
-                "FROM query_attempt WHERE query_identity=? AND due_slot=? "
-                "ORDER BY attempt_seq", (query_identity, due_slot)).fetchall())
+            return tuple(
+                connection.execute(
+                    "SELECT attempt_seq,state,started_at,finished_at,failure_code "
+                    "FROM query_attempt WHERE query_identity=? AND due_slot=? "
+                    "ORDER BY attempt_seq",
+                    (query_identity, due_slot),
+                ).fetchall()
+            )
         finally:
             connection.close()
 
@@ -359,15 +416,17 @@ class FredQueryCacheV1:
         """
         connection = self._connect()
         try:
-            return connection.execute(
-                "SELECT COUNT(*) FROM query_attempt").fetchone()[0]
+            return connection.execute("SELECT COUNT(*) FROM query_attempt").fetchone()[
+                0
+            ]
         finally:
             connection.close()
 
     # -- claim and settlement ----------------------------------------------
 
-    def claim(self, query_identity: str, due_slot: str, *,
-              now: datetime) -> FredClaimV1 | None:
+    def claim(
+        self, query_identity: str, due_slot: str, *, now: datetime
+    ) -> FredClaimV1 | None:
         _require_identity(query_identity)
         _require_slot(due_slot)
         started = _instant(now)
@@ -378,18 +437,20 @@ class FredQueryCacheV1:
             active = connection.execute(
                 "SELECT count(*) FROM query_attempt WHERE query_identity=? "
                 "AND due_slot=? AND state='STARTED'",
-                (query_identity, due_slot)).fetchone()[0]
+                (query_identity, due_slot),
+            ).fetchone()[0]
             if active:
                 connection.execute("COMMIT")
                 return None
             attempt_seq = connection.execute(
                 "SELECT COALESCE(MAX(attempt_seq),0)+1 FROM query_attempt "
                 "WHERE query_identity=? AND due_slot=?",
-                (query_identity, due_slot)).fetchone()[0]
+                (query_identity, due_slot),
+            ).fetchone()[0]
             connection.execute(
                 "INSERT INTO query_attempt VALUES(?,?,?,?,?,?,?)",
-                (query_identity, due_slot, attempt_seq, "STARTED", started,
-                 None, None))
+                (query_identity, due_slot, attempt_seq, "STARTED", started, None, None),
+            )
             connection.execute("COMMIT")
         except BaseException:
             if connection.in_transaction:
@@ -400,8 +461,9 @@ class FredQueryCacheV1:
         fsync_directory(self.root)
         return FredClaimV1(query_identity, due_slot, attempt_seq, now)
 
-    def settle_success(self, claim: FredClaimV1, fact: FredSeriesFactV1, *,
-                       now: datetime) -> None:
+    def settle_success(
+        self, claim: FredClaimV1, fact: FredSeriesFactV1, *, now: datetime
+    ) -> None:
         self._require_claim(claim)
         if not isinstance(fact, FredSeriesFactV1):
             raise ValueError("fact_required")
@@ -421,8 +483,16 @@ class FredQueryCacheV1:
                 "revision_identity=excluded.revision_identity,"
                 "fetched_at=excluded.fetched_at,fact_json=excluded.fact_json,"
                 "fact_digest=excluded.fact_digest,due_slot=excluded.due_slot",
-                (fact.query_identity, fact.series_id, fact.revision_identity,
-                 _instant(fact.fetched_at), blob, digest, claim.due_slot))
+                (
+                    fact.query_identity,
+                    fact.series_id,
+                    fact.revision_identity,
+                    _instant(fact.fetched_at),
+                    blob,
+                    digest,
+                    claim.due_slot,
+                ),
+            )
             connection.execute("COMMIT")
         except BaseException:
             if connection.in_transaction:
@@ -432,9 +502,9 @@ class FredQueryCacheV1:
             connection.close()
         fsync_directory(self.root)
 
-    def settle_failure(self, claim: FredClaimV1,
-                       failure_code: FredQueryFailureCodeV1, *,
-                       now: datetime) -> None:
+    def settle_failure(
+        self, claim: FredClaimV1, failure_code: FredQueryFailureCodeV1, *, now: datetime
+    ) -> None:
         self._require_claim(claim)
         if not isinstance(failure_code, FredQueryFailureCodeV1):
             raise ValueError("invalid_failure_code")
@@ -443,8 +513,7 @@ class FredQueryCacheV1:
         try:
             acquire_immediate_transaction(connection)
             self._reconcile(connection, now)
-            self._settle_row(connection, claim, "FAILED", finished,
-                             failure_code.value)
+            self._settle_row(connection, claim, "FAILED", finished, failure_code.value)
             connection.execute("COMMIT")
         except BaseException:
             if connection.in_transaction:
@@ -460,14 +529,26 @@ class FredQueryCacheV1:
             raise ValueError("claim_required")
 
     @staticmethod
-    def _settle_row(connection, claim: FredClaimV1, state: str, finished: str,
-                    failure_code: str | None) -> None:
+    def _settle_row(
+        connection,
+        claim: FredClaimV1,
+        state: str,
+        finished: str,
+        failure_code: str | None,
+    ) -> None:
         changed = connection.execute(
             "UPDATE query_attempt SET state=?,finished_at=?,failure_code=? "
             "WHERE query_identity=? AND due_slot=? AND attempt_seq=? "
             "AND state='STARTED'",
-            (state, finished, failure_code, claim.query_identity,
-             claim.due_slot, claim.attempt_seq)).rowcount
+            (
+                state,
+                finished,
+                failure_code,
+                claim.query_identity,
+                claim.due_slot,
+                claim.attempt_seq,
+            ),
+        ).rowcount
         if changed != 1:
             raise ValueError("settlement_conflict")
 

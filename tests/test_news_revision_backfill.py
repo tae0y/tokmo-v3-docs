@@ -1,34 +1,46 @@
 """Backfill of already-recorded revision evidence into news documents."""
 
-from datetime import datetime, timedelta, timezone
 import sqlite3
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from tokmo.programs.external_news_storage import bootstrap_external_news
 from tokmo.programs.news_intake import persist_news_result
 from tokmo.programs.news_revision_backfill import backfill_news_revisions
-from tokmo.records.external_news import ExternalNewsStore
 from tokmo.values.news_connectors import (
-    JTBC_BREAKING_RSS, NewsConnectorItem, NewsFetchResult, NewsFetchStatus,
+    JTBC_BREAKING_RSS,
+    NewsConnectorItem,
+    NewsFetchResult,
+    NewsFetchStatus,
 )
 
-NOW = datetime(2026, 8, 2, 1, 2, 3, 456789, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 2, 1, 2, 3, 456789, tzinfo=UTC)
 URL = "https://news.jtbc.co.kr/article/NB123"
 
 
-def _item(*, title="First title", summary="First summary", observed_at=NOW,
-          published_at=None, article_id="NB123"):
+def _item(
+    *,
+    title="First title",
+    summary="First summary",
+    observed_at=NOW,
+    published_at=None,
+    article_id="NB123",
+):
     return NewsConnectorItem(
-        canonical_url=URL, source_article_id=article_id, title=title,
-        summary_text=summary, observed_at=observed_at,
+        canonical_url=URL,
+        source_article_id=article_id,
+        title=title,
+        summary_text=summary,
+        observed_at=observed_at,
         published_at=published_at or NOW - timedelta(minutes=5),
     )
 
 
 def _persist(path, item):
     return persist_news_result(
-        path, JTBC_BREAKING_RSS,
+        path,
+        JTBC_BREAKING_RSS,
         NewsFetchResult(NewsFetchStatus.COLLECTED, (item,)),
         target_ref="feed:breaking",
     )[0]
@@ -40,8 +52,8 @@ def _stale_the_document(path, **columns):
     try:
         clause = ",".join(f"{name}=?" for name in columns)
         connection.execute(
-            f"UPDATE news_documents SET {clause},revision_no=1",
-            tuple(columns.values()))
+            f"UPDATE news_documents SET {clause},revision_no=1", tuple(columns.values())
+        )
         connection.commit()
     finally:
         connection.close()
@@ -61,10 +73,20 @@ def test_dry_run_reports_the_work_without_touching_documents(tmp_path):
     path = tmp_path / "private" / "external.sqlite3"
     bootstrap_external_news(path, now=NOW)
     _persist(path, _item())
-    _persist(path, _item(title="Corrected title", summary="Corrected summary",
-                         observed_at=NOW + timedelta(minutes=1)))
-    _stale_the_document(path, title="First title", summary_text="First summary",
-                        title_fingerprint="b" * 64)
+    _persist(
+        path,
+        _item(
+            title="Corrected title",
+            summary="Corrected summary",
+            observed_at=NOW + timedelta(minutes=1),
+        ),
+    )
+    _stale_the_document(
+        path,
+        title="First title",
+        summary_text="First summary",
+        title_fingerprint="b" * 64,
+    )
 
     report = backfill_news_revisions(path)
 
@@ -79,12 +101,28 @@ def test_apply_brings_the_document_to_the_latest_recorded_revision(tmp_path):
     path = tmp_path / "private" / "external.sqlite3"
     bootstrap_external_news(path, now=NOW)
     _persist(path, _item())
-    _persist(path, _item(title="Corrected title", summary="Corrected summary",
-                         observed_at=NOW + timedelta(minutes=1)))
-    _persist(path, _item(title="Final title", summary="Corrected summary",
-                         observed_at=NOW + timedelta(minutes=2)))
-    _stale_the_document(path, title="First title", summary_text="First summary",
-                        title_fingerprint="b" * 64)
+    _persist(
+        path,
+        _item(
+            title="Corrected title",
+            summary="Corrected summary",
+            observed_at=NOW + timedelta(minutes=1),
+        ),
+    )
+    _persist(
+        path,
+        _item(
+            title="Final title",
+            summary="Corrected summary",
+            observed_at=NOW + timedelta(minutes=2),
+        ),
+    )
+    _stale_the_document(
+        path,
+        title="First title",
+        summary_text="First summary",
+        title_fingerprint="b" * 64,
+    )
 
     report = backfill_news_revisions(path, apply=True)
 
@@ -98,10 +136,20 @@ def test_backfill_is_idempotent(tmp_path):
     path = tmp_path / "private" / "external.sqlite3"
     bootstrap_external_news(path, now=NOW)
     _persist(path, _item())
-    _persist(path, _item(title="Corrected title", summary="Corrected summary",
-                         observed_at=NOW + timedelta(minutes=1)))
-    _stale_the_document(path, title="First title", summary_text="First summary",
-                        title_fingerprint="b" * 64)
+    _persist(
+        path,
+        _item(
+            title="Corrected title",
+            summary="Corrected summary",
+            observed_at=NOW + timedelta(minutes=1),
+        ),
+    )
+    _stale_the_document(
+        path,
+        title="First title",
+        summary_text="First summary",
+        title_fingerprint="b" * 64,
+    )
     backfill_news_revisions(path, apply=True)
     after_first = _document(path)
 
@@ -129,9 +177,15 @@ def test_unrecoverable_fields_are_reported_and_skipped(tmp_path):
     bootstrap_external_news(path, now=NOW)
     _persist(path, _item())
     # A rotated GUID is stored only as a hash, so it cannot be replayed.
-    _persist(path, _item(title="Corrected title", summary="First summary",
-                         article_id="NB124",
-                         observed_at=NOW + timedelta(minutes=1)))
+    _persist(
+        path,
+        _item(
+            title="Corrected title",
+            summary="First summary",
+            article_id="NB124",
+            observed_at=NOW + timedelta(minutes=1),
+        ),
+    )
     _stale_the_document(path, title="First title", title_fingerprint="b" * 64)
 
     report = backfill_news_revisions(path, apply=True)
@@ -141,8 +195,8 @@ def test_unrecoverable_fields_are_reported_and_skipped(tmp_path):
     connection = sqlite3.connect(path)
     try:
         assert connection.execute(
-            "SELECT source_article_id FROM news_documents").fetchone() == (
-            "NB124",)
+            "SELECT source_article_id FROM news_documents"
+        ).fetchone() == ("NB124",)
     finally:
         connection.close()
 
@@ -152,8 +206,7 @@ def test_backfill_refuses_a_pre_migration_store(tmp_path):
     bootstrap_external_news(path, now=NOW)
     connection = sqlite3.connect(path)
     try:
-        connection.execute(
-            "UPDATE schema_meta SET schema_id='external-news-n4'")
+        connection.execute("UPDATE schema_meta SET schema_id='external-news-n4'")
         connection.commit()
     finally:
         connection.close()

@@ -9,13 +9,13 @@ production trades session-date source reads only this store and fails
 ``failed_calendar``-truthfully when the history is insufficient or corrupt.
 """
 
-from datetime import date, datetime, timedelta, timezone
 import os
 import sqlite3
 import stat
 import subprocess
 import sys
 import threading
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -30,8 +30,8 @@ from tokmo.records.regular_session_history import (
 from tokmo.values.ops_kernel import CalendarStartReceiptV1
 from tokmo.values.session_gate import Market
 
-NOW = datetime(2026, 8, 2, 5, 0, tzinfo=timezone.utc)
-SLOT = datetime(2026, 8, 2, 5, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 2, 5, 0, tzinfo=UTC)
+SLOT = datetime(2026, 8, 2, 5, 0, tzinfo=UTC)
 
 
 class _Authority:
@@ -55,7 +55,11 @@ class _Authority:
 
 def receipt_for(market, local_date, ordinal=0):
     return CalendarStartReceiptV1(
-        "cadence-300s-v1", SLOT, market, local_date, ordinal,
+        "cadence-300s-v1",
+        SLOT,
+        market,
+        local_date,
+        ordinal,
         f"calendar:{market.value}:{local_date.isoformat()}:{ordinal}",
         "STARTED",
     )
@@ -63,13 +67,16 @@ def receipt_for(market, local_date, ordinal=0):
 
 def store_at(tmp_path, name="history.sqlite3"):
     return RegularSessionHistoryStore(
-        tmp_path / "ops" / name, clock=lambda: NOW,
+        tmp_path / "ops" / name,
+        clock=lambda: NOW,
     )
 
 
 def seed(store, market, local_date, session, ordinal=0):
     return store.append_backfilled(
-        market, local_date, session,
+        market,
+        local_date,
+        session,
         receipt=receipt_for(market, local_date, ordinal),
         authority=_Authority(),
     )
@@ -83,7 +90,8 @@ def test_construction_and_absent_store_reads_perform_no_creation(tmp_path):
     assert not (tmp_path / "ops").exists()
     assert store.read(Market.KR, date(2026, 8, 1)) is None
     assert store.next_backfill_target(
-        Market.KR, date(2026, 8, 2),
+        Market.KR,
+        date(2026, 8, 2),
     ) == date(2026, 8, 1)
     assert not store.path.exists()  # only an append creates the private file
 
@@ -92,10 +100,16 @@ def test_backfilled_append_round_trips_the_official_fact(tmp_path):
     store = store_at(tmp_path)
     authority = _Authority()
     receipt = receipt_for(Market.KR, date(2026, 7, 31))
-    assert store.append_backfilled(
-        Market.KR, date(2026, 7, 31), "regular",
-        receipt=receipt, authority=authority,
-    ) == "created"
+    assert (
+        store.append_backfilled(
+            Market.KR,
+            date(2026, 7, 31),
+            "regular",
+            receipt=receipt,
+            authority=authority,
+        )
+        == "created"
+    )
     assert authority.verified and authority.verified[0][0] is receipt
     row = store.read(Market.KR, date(2026, 7, 31))
     assert row["session"] == "regular"
@@ -109,18 +123,29 @@ def test_settled_append_requires_validated_official_provenance(tmp_path):
     empty = _Authority()
     with pytest.raises(RegularSessionHistoryProvenanceError):
         store.append_settled(
-            Market.KR, date(2026, 8, 2), "no_regular", authority=empty,
+            Market.KR,
+            date(2026, 8, 2),
+            "no_regular",
+            authority=empty,
         )
     assert store.read(Market.KR, date(2026, 8, 2)) is None  # never forged
 
-    good = _Authority(settled={
-        (Market.KR, date(2026, 8, 2)): {
-            "native_identity": "calendar:KR:2026-08-02:0",
-        },
-    })
-    assert store.append_settled(
-        Market.KR, date(2026, 8, 2), "no_regular", authority=good,
-    ) == "created"
+    good = _Authority(
+        settled={
+            (Market.KR, date(2026, 8, 2)): {
+                "native_identity": "calendar:KR:2026-08-02:0",
+            },
+        }
+    )
+    assert (
+        store.append_settled(
+            Market.KR,
+            date(2026, 8, 2),
+            "no_regular",
+            authority=good,
+        )
+        == "created"
+    )
     assert store.read(Market.KR, date(2026, 8, 2))["session"] == "no_regular"
 
 
@@ -128,7 +153,9 @@ def test_refused_receipt_appends_nothing(tmp_path):
     store = store_at(tmp_path)
     with pytest.raises(Exception):
         store.append_backfilled(
-            Market.KR, date(2026, 7, 30), "regular",
+            Market.KR,
+            date(2026, 7, 30),
+            "regular",
             receipt=receipt_for(Market.KR, date(2026, 7, 30)),
             authority=_Authority(refuse_receipts=True),
         )
@@ -139,13 +166,17 @@ def test_receipt_identity_must_match_the_appended_fact(tmp_path):
     store = store_at(tmp_path)
     with pytest.raises(RegularSessionHistoryProvenanceError):
         store.append_backfilled(
-            Market.KR, date(2026, 7, 30), "regular",
+            Market.KR,
+            date(2026, 7, 30),
+            "regular",
             receipt=receipt_for(Market.US, date(2026, 7, 30)),
             authority=_Authority(),
         )
     with pytest.raises(RegularSessionHistoryProvenanceError):
         store.append_backfilled(
-            Market.KR, date(2026, 7, 30), "regular",
+            Market.KR,
+            date(2026, 7, 30),
+            "regular",
             receipt=receipt_for(Market.KR, date(2026, 7, 29)),
             authority=_Authority(),
         )
@@ -176,13 +207,17 @@ def test_invalid_fact_shapes_are_rejected_before_any_write(tmp_path):
         seed(store, Market.KR, date(2026, 7, 31), "holiday")
     with pytest.raises(RegularSessionHistoryError):
         store.append_backfilled(
-            "KR", date(2026, 7, 31), "regular",
+            "KR",
+            date(2026, 7, 31),
+            "regular",
             receipt=receipt_for(Market.KR, date(2026, 7, 31)),
             authority=_Authority(),
         )
     with pytest.raises(RegularSessionHistoryError):
         store.append_backfilled(
-            Market.KR, datetime(2026, 7, 31, tzinfo=timezone.utc), "regular",
+            Market.KR,
+            datetime(2026, 7, 31, tzinfo=UTC),
+            "regular",
             receipt=receipt_for(Market.KR, date(2026, 7, 31)),
             authority=_Authority(),
         )
@@ -239,9 +274,7 @@ def test_noncanonical_row_bytes_fail_closed_on_read(tmp_path):
     store = store_at(tmp_path)
     seed(store, Market.KR, date(2026, 7, 31), "regular")
     raw = sqlite3.connect(store.path)
-    raw.execute(
-        "UPDATE regular_session_history SET source_identity='forged!'"
-    )
+    raw.execute("UPDATE regular_session_history SET source_identity='forged!'")
     raw.commit()
     raw.close()
     with pytest.raises(RegularSessionHistoryCorruptError):
@@ -286,9 +319,7 @@ def test_repeated_concurrent_fresh_opens_never_observe_partial_schema(tmp_path):
             except Exception as error:  # noqa: BLE001 - collected for assertion
                 errors.append(error)
 
-        threads = [
-            threading.Thread(target=append, args=(day,)) for day in range(1, 9)
-        ]
+        threads = [threading.Thread(target=append, args=(day,)) for day in range(1, 9)]
         for thread in threads:
             thread.start()
         for thread in threads:
@@ -296,9 +327,13 @@ def test_repeated_concurrent_fresh_opens_never_observe_partial_schema(tmp_path):
         assert not errors, errors
         survivor = RegularSessionHistoryStore(path, clock=lambda: NOW)
         for day in range(1, 9):
-            assert survivor.read(
-                Market.KR, date(2026, 7, day),
-            )["session"] == "regular"
+            assert (
+                survivor.read(
+                    Market.KR,
+                    date(2026, 7, day),
+                )["session"]
+                == "regular"
+            )
         assert stat.S_IMODE(os.lstat(path).st_mode) == 0o600
 
 
@@ -332,8 +367,10 @@ def test_cross_process_concurrent_fresh_creation_all_commit(tmp_path):
     processes = [
         subprocess.Popen(
             [sys.executable, "-c", script, str(day), str(path)],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            env=environment, text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=environment,
+            text=True,
         )
         for day in range(1, 7)
     ]
@@ -378,7 +415,9 @@ def test_backfill_walk_never_examines_a_thirty_sixth_date(tmp_path):
     # the walk truthfully stops rather than inspecting date 36.
     for offset in range(35):
         seed(
-            store, Market.KR, anchor - timedelta(days=offset),
+            store,
+            Market.KR,
+            anchor - timedelta(days=offset),
             "regular" if offset < 10 else "no_regular",
         )
     assert store.next_backfill_target(Market.KR, anchor) is None
@@ -391,7 +430,7 @@ def test_reader_returns_descending_official_regular_dates(tmp_path):
     store = store_at(tmp_path)
     anchor = date(2026, 8, 3)
     expected = []
-    for offset in range(0, 30):
+    for offset in range(30):
         day = anchor - timedelta(days=offset)
         session = "regular" if day.weekday() < 5 else "no_regular"
         seed(store, Market.KR, day, session)

@@ -9,7 +9,7 @@ receipt, a field-mismatched receipt, or a receipt whose claim was already
 consumed all mean provider call zero and cache mutation zero.
 """
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -35,7 +35,7 @@ from tokmo.values.toss_market_calendar import (
 )
 
 # 19:00Z: KR local date 2026-08-02, US local date 2026-08-01.
-NOW = datetime(2026, 8, 1, 19, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 1, 19, 0, tzinfo=UTC)
 KR_DATE = date(2026, 8, 2)
 US_DATE = date(2026, 8, 1)
 ROLE = ProducerRole.COLLECTOR
@@ -48,12 +48,18 @@ def at(minutes):
 
 def policy():
     return CadencePolicyV1(
-        policy_version="cadence-test-v1", cadence_seconds=60,
-        max_start_lag_seconds=10, child_timeout_seconds=40,
+        policy_version="cadence-test-v1",
+        cadence_seconds=60,
+        max_start_lag_seconds=10,
+        child_timeout_seconds=40,
         termination_margin_seconds=10,
         request_limits=TickRequestLimitsV1(
-            total_wire_starts=27, token_starts=0, calendar_starts=2,
-            holdings_starts=0, quote_starts=0, trades_starts=0,
+            total_wire_starts=27,
+            token_starts=0,
+            calendar_starts=2,
+            holdings_starts=0,
+            quote_starts=0,
+            trades_starts=0,
         ),
     )
 
@@ -66,8 +72,13 @@ def issue_receipt(kernel, market, local_date, *, slot=NOW):
     """The only green path to a receipt: plan and start through the kernel."""
     kernel.plan_calendar_slot(ROLE, market, local_date, slot, now=slot)
     return kernel.start_calendar_attempt(
-        ROLE, policy(), scheduled_for_utc=slot, market=market,
-        market_local_date=local_date, eligible_slot_utc=slot, now=slot,
+        ROLE,
+        policy(),
+        scheduled_for_utc=slot,
+        market=market,
+        market_local_date=local_date,
+        eligible_slot_utc=slot,
+        now=slot,
         child_limits=CHILD_LIMITS,
     )
 
@@ -81,8 +92,8 @@ def issue_receipts(kernel, *, slot=NOW, now=NOW):
 
 def kr_day(trade_date=KR_DATE):
     session = CalendarSession(
-        datetime(trade_date.year, trade_date.month, trade_date.day, 0, 0, tzinfo=timezone.utc),
-        datetime(trade_date.year, trade_date.month, trade_date.day, 6, 30, tzinfo=timezone.utc),
+        datetime(trade_date.year, trade_date.month, trade_date.day, 0, 0, tzinfo=UTC),
+        datetime(trade_date.year, trade_date.month, trade_date.day, 6, 30, tzinfo=UTC),
     )
     return KrMarketDay(trade_date, IntegratedHour(regular_market=session))
 
@@ -95,8 +106,12 @@ def us_day(trade_date=US_DATE, *, naive=False):
         )
     else:
         session = CalendarSession(
-            datetime(trade_date.year, trade_date.month, trade_date.day, 13, 30, tzinfo=timezone.utc),
-            datetime(trade_date.year, trade_date.month, trade_date.day, 20, 0, tzinfo=timezone.utc),
+            datetime(
+                trade_date.year, trade_date.month, trade_date.day, 13, 30, tzinfo=UTC
+            ),
+            datetime(
+                trade_date.year, trade_date.month, trade_date.day, 20, 0, tzinfo=UTC
+            ),
         )
     return UsMarketDay(trade_date, regular_market=session)
 
@@ -155,11 +170,14 @@ def test_cold_cache_us_failure_does_not_suppress_kr_attempt(tmp_path):
     def us_fetcher(*, market, local_trade_date, receipt):
         raise RuntimeError("provider down")
 
-    results = by_market(run(
-        store, kernel,
-        lambda *, market, local_trade_date, receipt: kr_day(local_trade_date),
-        us_fetcher,
-    ))
+    results = by_market(
+        run(
+            store,
+            kernel,
+            lambda *, market, local_trade_date, receipt: kr_day(local_trade_date),
+            us_fetcher,
+        )
+    )
     assert results[Market.KR].state is MarketRefreshState.SUCCESS
     assert results[Market.US].state is MarketRefreshState.PROVIDER_FAILED
     cache = store.read()
@@ -181,12 +199,19 @@ def test_wrong_market_date_and_boundary_results_never_commit(tmp_path):
             Market.KR: issue_receipt(kernel, Market.KR, KR_DATE, slot=at(minutes)),
             Market.US: issue_receipt(kernel, Market.US, US_DATE, slot=at(minutes)),
         }
-        results = by_market(run(
-            store, kernel,
-            lambda *, market, local_trade_date, receipt, build=build: build(local_trade_date),
-            lambda *, market, local_trade_date, receipt: us_day(local_trade_date, naive=True),
-            receipts=receipts,
-        ))
+        results = by_market(
+            run(
+                store,
+                kernel,
+                lambda *, market, local_trade_date, receipt, build=build: build(
+                    local_trade_date
+                ),
+                lambda *, market, local_trade_date, receipt: us_day(
+                    local_trade_date, naive=True
+                ),
+                receipts=receipts,
+            )
+        )
         assert results[Market.KR].state is expected
         assert results[Market.US].state is MarketRefreshState.INVALID_BOUNDARY
         assert store.read() is None  # nothing was committed
@@ -194,8 +219,12 @@ def test_wrong_market_date_and_boundary_results_never_commit(tmp_path):
         # next case starts a fresh kernel-issued attempt.
         for market, local_date in ((Market.KR, KR_DATE), (Market.US, US_DATE)):
             kernel.settle_calendar_attempt(
-                ROLE, market, local_date, receipts[market].attempt_ordinal,
-                "FAILED", now=at(minutes + 1),
+                ROLE,
+                market,
+                local_date,
+                receipts[market].attempt_ordinal,
+                "FAILED",
+                now=at(minutes + 1),
             )
         minutes += 7
 
@@ -205,18 +234,26 @@ def test_fresh_cache_is_success_without_any_fetch_or_receipt(tmp_path):
 
     store = make_store(tmp_path)
     kernel = make_kernel(tmp_path)
-    run(store, kernel,
+    run(
+        store,
+        kernel,
         lambda *, market, local_trade_date, receipt: kr_day(local_trade_date),
-        lambda *, market, local_trade_date, receipt: us_day(local_trade_date))
+        lambda *, market, local_trade_date, receipt: us_day(local_trade_date),
+    )
 
     def forbidden(**_):
         raise AssertionError("fresh cache must not fetch")
 
     # A cache-hit tick needs no admission receipt and reserves no capacity.
-    results = by_market(run(
-        store, kernel, forbidden, forbidden,
-        receipts={Market.KR: None, Market.US: None},
-    ))
+    results = by_market(
+        run(
+            store,
+            kernel,
+            forbidden,
+            forbidden,
+            receipts={Market.KR: None, Market.US: None},
+        )
+    )
     for market in Market:
         assert results[market].state is MarketRefreshState.SUCCESS
         assert results[market].refreshed is False
@@ -228,26 +265,35 @@ def test_one_stale_market_refreshes_alone(tmp_path):
 
     store = make_store(tmp_path)
     kernel = make_kernel(tmp_path)
-    run(store, kernel,
+    run(
+        store,
+        kernel,
         lambda *, market, local_trade_date, receipt: kr_day(local_trade_date),
-        lambda *, market, local_trade_date, receipt: us_day(local_trade_date))
+        lambda *, market, local_trade_date, receipt: us_day(local_trade_date),
+    )
 
     # New York local midnight passed (04:00Z): only US is stale; KR is still
     # inside its 2026-08-02 local date.
-    later = datetime(2026, 8, 2, 4, 30, tzinfo=timezone.utc)
+    later = datetime(2026, 8, 2, 4, 30, tzinfo=UTC)
 
     def kr_forbidden(**_):
         raise AssertionError("KR is fresh and must not fetch")
 
-    results = by_market(run(
-        store, kernel, kr_forbidden,
-        lambda *, market, local_trade_date, receipt: us_day(local_trade_date),
-        now=later,
-        receipts={
-            Market.KR: None,
-            Market.US: issue_receipt(kernel, Market.US, date(2026, 8, 2), slot=later),
-        },
-    ))
+    results = by_market(
+        run(
+            store,
+            kernel,
+            kr_forbidden,
+            lambda *, market, local_trade_date, receipt: us_day(local_trade_date),
+            now=later,
+            receipts={
+                Market.KR: None,
+                Market.US: issue_receipt(
+                    kernel, Market.US, date(2026, 8, 2), slot=later
+                ),
+            },
+        )
+    )
     assert results[Market.US].state is MarketRefreshState.SUCCESS
     assert results[Market.US].refreshed is True
     assert results[Market.KR].state is MarketRefreshState.SUCCESS
@@ -267,10 +313,15 @@ def test_corrupt_shared_cache_closes_both_markets_with_zero_fetches(tmp_path):
     def forbidden(**_):
         raise AssertionError("corrupt cache must not fetch")
 
-    results = by_market(run(
-        store, kernel, forbidden, forbidden,
-        receipts={Market.KR: None, Market.US: None},
-    ))
+    results = by_market(
+        run(
+            store,
+            kernel,
+            forbidden,
+            forbidden,
+            receipts={Market.KR: None, Market.US: None},
+        )
+    )
     for market in Market:
         assert results[market].state is MarketRefreshState.CACHE_UPDATE_FAILED
         assert results[market].refreshed is False
@@ -290,25 +341,35 @@ def test_cas_conflict_with_valid_racing_commit_rejudges_to_current_success(tmp_p
     racing_kernel = make_kernel(tmp_path, name="racing")
     racing_receipt = issue_receipt(racing_kernel, Market.KR, KR_DATE)
     racing_kernel.claim_calendar_provider(racing_receipt, now=NOW)
-    racing = CalendarCacheStore(tmp_path / "ops" / "calendar_cache.json", clock=lambda: NOW)
+    racing = CalendarCacheStore(
+        tmp_path / "ops" / "calendar_cache.json", clock=lambda: NOW
+    )
     calls = []
 
     def kr_fetcher(*, market, local_trade_date, receipt):
         # Another writer commits the same valid KR local date mid-flight.
         calls.append(market)
         racing.replace_market(
-            Market.KR, None,
+            Market.KR,
+            None,
             CalendarFetchResult(
-                Market.KR, local_trade_date, kr_day(local_trade_date), racing_receipt,
+                Market.KR,
+                local_trade_date,
+                kr_day(local_trade_date),
+                racing_receipt,
             ),
             authority=racing_kernel,
         )
         return kr_day(local_trade_date)
 
-    results = by_market(run(
-        store, kernel, kr_fetcher,
-        lambda *, market, local_trade_date, receipt: us_day(local_trade_date),
-    ))
+    results = by_market(
+        run(
+            store,
+            kernel,
+            kr_fetcher,
+            lambda *, market, local_trade_date, receipt: us_day(local_trade_date),
+        )
+    )
     kr_result = results[Market.KR]
     # The racing writer's entry IS the current local date: rejudge to a typed
     # usable success without calling the provider again or overwriting.
@@ -334,10 +395,14 @@ def test_cas_conflict_with_corrupt_reread_fails_closed(tmp_path):
         path.write_bytes(b"{corrupt")
         return kr_day(local_trade_date)
 
-    results = by_market(run(
-        store, kernel, kr_fetcher,
-        lambda *, market, local_trade_date, receipt: us_day(local_trade_date),
-    ))
+    results = by_market(
+        run(
+            store,
+            kernel,
+            kr_fetcher,
+            lambda *, market, local_trade_date, receipt: us_day(local_trade_date),
+        )
+    )
     assert results[Market.KR].state is MarketRefreshState.CACHE_UPDATE_FAILED
     assert results[Market.KR].refreshed is False
     assert results[Market.KR].rejudged is False
@@ -353,22 +418,29 @@ def test_cas_conflict_with_foreign_date_commit_stays_conflict(tmp_path):
     racing_kernel = make_kernel(tmp_path, name="racing")
     racing_receipt = issue_receipt(racing_kernel, Market.KR, foreign)
     racing_kernel.claim_calendar_provider(racing_receipt, now=NOW)
-    racing = CalendarCacheStore(tmp_path / "ops" / "calendar_cache.json", clock=lambda: NOW)
+    racing = CalendarCacheStore(
+        tmp_path / "ops" / "calendar_cache.json", clock=lambda: NOW
+    )
     calls = []
 
     def kr_fetcher(*, market, local_trade_date, receipt):
         calls.append(market)
         racing.replace_market(
-            Market.KR, None,
+            Market.KR,
+            None,
             CalendarFetchResult(Market.KR, foreign, kr_day(foreign), racing_receipt),
             authority=racing_kernel,
         )
         return kr_day(local_trade_date)
 
-    results = by_market(run(
-        store, kernel, kr_fetcher,
-        lambda *, market, local_trade_date, receipt: us_day(local_trade_date),
-    ))
+    results = by_market(
+        run(
+            store,
+            kernel,
+            kr_fetcher,
+            lambda *, market, local_trade_date, receipt: us_day(local_trade_date),
+        )
+    )
     # The re-read entry is NOT the requested local date: no usable rejudge,
     # no overwrite, and still no provider re-call.
     assert calls == [Market.KR]
@@ -390,12 +462,21 @@ def test_stale_market_without_started_receipt_fetches_zero(tmp_path):
 
     def counting(*, market, local_trade_date, receipt):
         calls.append(market)
-        return kr_day(local_trade_date) if market is Market.KR else us_day(local_trade_date)
+        return (
+            kr_day(local_trade_date)
+            if market is Market.KR
+            else us_day(local_trade_date)
+        )
 
-    results = by_market(run(
-        store, kernel, counting, counting,
-        receipts={Market.KR: None, Market.US: None},
-    ))
+    results = by_market(
+        run(
+            store,
+            kernel,
+            counting,
+            counting,
+            receipts={Market.KR: None, Market.US: None},
+        )
+    )
     assert calls == []
     for market in Market:
         assert results[market].state is MarketRefreshState.INVALID_IDENTITY
@@ -428,15 +509,25 @@ def test_mismatched_untyped_or_subclassed_receipt_fetches_zero(tmp_path):
         pass
 
     subclassed = SubReceipt(
-        "cadence-test-v1", NOW, Market.KR, KR_DATE, 0,
-        "calendar:KR:2026-08-02:0", "STARTED",
+        "cadence-test-v1",
+        NOW,
+        Market.KR,
+        KR_DATE,
+        0,
+        "calendar:KR:2026-08-02:0",
+        "STARTED",
     )
 
     for kr_receipt in (wrong_market, wrong_date, Forged(), subclassed, "receipt"):
-        results = by_market(run(
-            store, kernel, counting, counting,
-            receipts={Market.KR: kr_receipt, Market.US: None},
-        ))
+        results = by_market(
+            run(
+                store,
+                kernel,
+                counting,
+                counting,
+                receipts={Market.KR: kr_receipt, Market.US: None},
+            )
+        )
         assert results[Market.KR].state is MarketRefreshState.INVALID_IDENTITY
     assert calls == []
     assert store.read() is None
@@ -461,10 +552,15 @@ def test_kernel_issued_receipt_permits_exactly_one_call_and_binds_commit(tmp_pat
     def us_forbidden(**_):
         raise AssertionError("US has no receipt and must not fetch")
 
-    results = by_market(run(
-        store, kernel, kr_fetcher, us_forbidden,
-        receipts={Market.KR: receipt, Market.US: None},
-    ))
+    results = by_market(
+        run(
+            store,
+            kernel,
+            kr_fetcher,
+            us_forbidden,
+            receipts={Market.KR: receipt, Market.US: None},
+        )
+    )
     assert calls == [(Market.KR, KR_DATE, "calendar:KR:2026-08-02:0")]
     kr_result = results[Market.KR]
     assert kr_result.state is MarketRefreshState.SUCCESS
@@ -477,8 +573,12 @@ def test_kernel_issued_receipt_permits_exactly_one_call_and_binds_commit(tmp_pat
         kernel.claim_calendar_provider(receipt, now=at(1))
     # Terminal settlement closes the same durable identity in the kernel.
     settled = kernel.settle_calendar_attempt(
-        ProducerRole.COLLECTOR, Market.KR, KR_DATE, receipt.attempt_ordinal,
-        "SUCCEEDED", now=NOW,
+        ProducerRole.COLLECTOR,
+        Market.KR,
+        KR_DATE,
+        receipt.attempt_ordinal,
+        "SUCCEEDED",
+        now=NOW,
     )
     assert settled["state"] == "SUCCEEDED"
 
@@ -522,13 +622,23 @@ def test_hand_constructed_receipt_with_canonical_fields_is_refused(tmp_path):
         return kr_day(kwargs["local_trade_date"])
 
     forged = CalendarStartReceiptV1(
-        "cadence-test-v1", NOW, Market.KR, KR_DATE, 0,
-        "calendar:KR:2026-08-02:0", "STARTED",
+        "cadence-test-v1",
+        NOW,
+        Market.KR,
+        KR_DATE,
+        0,
+        "calendar:KR:2026-08-02:0",
+        "STARTED",
     )
-    results = by_market(run(
-        store, kernel, counting, counting,
-        receipts={Market.KR: forged, Market.US: None},
-    ))
+    results = by_market(
+        run(
+            store,
+            kernel,
+            counting,
+            counting,
+            receipts={Market.KR: forged, Market.US: None},
+        )
+    )
     assert calls == []
     assert results[Market.KR].state is MarketRefreshState.INVALID_IDENTITY
     assert results[Market.KR].refreshed is False
@@ -551,22 +661,42 @@ def test_receipt_field_mismatch_with_kernel_rows_is_refused(tmp_path):
         return kr_day(kwargs["local_trade_date"])
 
     wrong_policy = CalendarStartReceiptV1(
-        "cadence-forged-v1", NOW, Market.KR, KR_DATE, 0,
-        "calendar:KR:2026-08-02:0", "STARTED",
+        "cadence-forged-v1",
+        NOW,
+        Market.KR,
+        KR_DATE,
+        0,
+        "calendar:KR:2026-08-02:0",
+        "STARTED",
     )
     wrong_slot = CalendarStartReceiptV1(
-        "cadence-test-v1", at(60), Market.KR, KR_DATE, 0,
-        "calendar:KR:2026-08-02:0", "STARTED",
+        "cadence-test-v1",
+        at(60),
+        Market.KR,
+        KR_DATE,
+        0,
+        "calendar:KR:2026-08-02:0",
+        "STARTED",
     )
     wrong_ordinal = CalendarStartReceiptV1(
-        "cadence-test-v1", NOW, Market.KR, KR_DATE, 3,
-        "calendar:KR:2026-08-02:3", "STARTED",
+        "cadence-test-v1",
+        NOW,
+        Market.KR,
+        KR_DATE,
+        3,
+        "calendar:KR:2026-08-02:3",
+        "STARTED",
     )
     for forged in (wrong_policy, wrong_slot, wrong_ordinal):
-        results = by_market(run(
-            store, kernel, counting, counting,
-            receipts={Market.KR: forged, Market.US: None},
-        ))
+        results = by_market(
+            run(
+                store,
+                kernel,
+                counting,
+                counting,
+                receipts={Market.KR: forged, Market.US: None},
+            )
+        )
         assert results[Market.KR].state is MarketRefreshState.INVALID_IDENTITY
     assert calls == []
     assert store.read() is None
@@ -578,10 +708,13 @@ def test_same_receipt_second_refresh_performs_provider_zero(tmp_path):
     kernel = make_kernel(tmp_path)
     receipt = issue_receipt(kernel, Market.KR, KR_DATE)
     store = make_store(tmp_path)
-    run(store, kernel,
+    run(
+        store,
+        kernel,
         lambda *, market, local_trade_date, receipt: kr_day(local_trade_date),
         lambda **_: (_ for _ in ()).throw(AssertionError("no US receipt")),
-        receipts={Market.KR: receipt, Market.US: None})
+        receipts={Market.KR: receipt, Market.US: None},
+    )
     assert store.read().kr.trade_date == KR_DATE.isoformat()
 
     # The identical receipt object is still typed and still says STARTED, but
@@ -594,10 +727,15 @@ def test_same_receipt_second_refresh_performs_provider_zero(tmp_path):
         calls.append(1)
         return kr_day(kwargs["local_trade_date"])
 
-    results = by_market(run(
-        second, kernel, counting, counting,
-        receipts={Market.KR: receipt, Market.US: None},
-    ))
+    results = by_market(
+        run(
+            second,
+            kernel,
+            counting,
+            counting,
+            receipts={Market.KR: receipt, Market.US: None},
+        )
+    )
     assert calls == []
     assert results[Market.KR].state is MarketRefreshState.INVALID_IDENTITY
     assert second.read() is None
@@ -610,7 +748,12 @@ def test_terminal_or_unknown_receipt_is_refused(tmp_path):
     kernel = make_kernel(tmp_path)
     kr_receipt = issue_receipt(kernel, Market.KR, KR_DATE)
     kernel.settle_calendar_attempt(
-        ROLE, Market.KR, KR_DATE, kr_receipt.attempt_ordinal, "FAILED", now=at(1),
+        ROLE,
+        Market.KR,
+        KR_DATE,
+        kr_receipt.attempt_ordinal,
+        "FAILED",
+        now=at(1),
     )
     us_receipt = issue_receipt(kernel, Market.US, US_DATE, slot=at(2))
     kernel.reconcile_cadence(ROLE, now=at(3))  # crash path: US attempt -> UNKNOWN
@@ -622,10 +765,15 @@ def test_terminal_or_unknown_receipt_is_refused(tmp_path):
 
     # Both stale receipt objects still carry the frozen "STARTED" value; the
     # kernel rows are terminal, so both are refused with provider zero.
-    results = by_market(run(
-        store, kernel, counting, counting,
-        receipts={Market.KR: kr_receipt, Market.US: us_receipt},
-    ))
+    results = by_market(
+        run(
+            store,
+            kernel,
+            counting,
+            counting,
+            receipts={Market.KR: kr_receipt, Market.US: us_receipt},
+        )
+    )
     assert calls == []
     assert results[Market.KR].state is MarketRefreshState.INVALID_IDENTITY
     assert results[Market.US].state is MarketRefreshState.INVALID_IDENTITY
@@ -638,10 +786,13 @@ def test_receipt_reused_for_direct_cache_mutation_is_refused(tmp_path):
     kernel = make_kernel(tmp_path)
     receipt = issue_receipt(kernel, Market.KR, KR_DATE)
     store = make_store(tmp_path)
-    run(store, kernel,
+    run(
+        store,
+        kernel,
         lambda *, market, local_trade_date, receipt: kr_day(local_trade_date),
         lambda **_: (_ for _ in ()).throw(AssertionError("no US receipt")),
-        receipts={Market.KR: receipt, Market.US: None})
+        receipts={Market.KR: receipt, Market.US: None},
+    )
     assert store.read().kr.trade_date == KR_DATE.isoformat()
 
     # Bypassing refresh and driving the cache store directly with the already

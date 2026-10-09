@@ -20,9 +20,7 @@ def store_current_price_outcome(
     if not isinstance(outcome, TossPriceQueryOutcome):
         return CurrentPriceStorageRunResult("protocol_failure", 0, 0, 0)
     if outcome.code != "success":
-        return CurrentPriceStorageRunResult(
-            f"query_{outcome.code}", 0, 0, 0
-        )
+        return CurrentPriceStorageRunResult(f"query_{outcome.code}", 0, 0, 0)
     receipt = store.save_batch(outcome.facts)
     if receipt.status == "SAVED":
         return CurrentPriceStorageRunResult(

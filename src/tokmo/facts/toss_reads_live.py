@@ -20,17 +20,16 @@ from tokmo.facts.toss import (
 from tokmo.facts.toss_reads import (
     REQUEST_TIMEOUT_SECONDS,
     SPEC_TABLE,
-    TossReadOperation,
     TossReadRequest,
     valid_account_seq_int64,
     valid_iso_date,
 )
 
 __all__ = [
-    "TOSS_HOST",
-    "METHOD",
     "ACCOUNT_HEADER",
     "MAX_BODY_BYTES",
+    "METHOD",
+    "TOSS_HOST",
     "TossReadsLiveTransport",
     "build_live_opener",
 ]
@@ -72,17 +71,17 @@ class TossReadsLiveTransport:
         self.opener = build_live_opener(https_handler)
 
     def __call__(
-            self,
-            request: TossReadRequest) -> _TossTransportSuccess | _TossTransportFailure:
+        self, request: TossReadRequest
+    ) -> _TossTransportSuccess | _TossTransportFailure:
         try:
             url = _wire_url(request)
             headers = _wire_headers(request)
             if url is None or headers is None:
                 return _TossTransportFailure(code="protocol_failure")
             wire = urllib.request.Request(
-                url, data=None, method=METHOD, headers=headers)
-            with self.opener.open(
-                    wire, timeout=request.timeout_seconds) as response:
+                url, data=None, method=METHOD, headers=headers
+            )
+            with self.opener.open(wire, timeout=request.timeout_seconds) as response:
                 return _read_success(response)
         except urllib.error.HTTPError as err:
             return _map_http_error(err)
@@ -102,6 +101,7 @@ class TossReadsLiveTransport:
 # =========================================================================
 # Wire URL construction — host/path/query all from the closed spec table
 # =========================================================================
+
 
 def _wire_url(request: TossReadRequest) -> str | None:
     """Construct the wire-exact URL from the request's validated parameters.
@@ -218,10 +218,12 @@ def _build_query(request: TossReadRequest, op: str) -> list[str] | None:
         if re.fullmatch(r"[0-9A-Z]{6}", request.symbol) is None:
             return None
         if request.count is not None:
-            if type(request.count) is not int or not 1 <= request.count <= 100: return None
+            if type(request.count) is not int or not 1 <= request.count <= 100:
+                return None
             parts.append(f"count={request.count}")
         if request.until:
-            if not valid_iso_date(request.until): return None
+            if not valid_iso_date(request.until):
+                return None
             parts.append(f"until={request.until}")
 
     elif op == "STOCK_WARNINGS":
@@ -233,13 +235,7 @@ def _build_query(request: TossReadRequest, op: str) -> list[str] | None:
         parts.append(f"baseCurrency={request.base_currency}")
         parts.append(f"quoteCurrency={request.quote_currency}")
 
-    elif op == "KR_MARKET_CALENDAR":
-        if request.date:
-            if not valid_iso_date(request.date):
-                return None
-            parts.append(f"date={request.date}")
-
-    elif op == "US_MARKET_CALENDAR":
+    elif op == "KR_MARKET_CALENDAR" or op == "US_MARKET_CALENDAR":
         if request.date:
             if not valid_iso_date(request.date):
                 return None
@@ -252,7 +248,8 @@ def _build_query(request: TossReadRequest, op: str) -> list[str] | None:
         if request.exclude_investment_caution is not None:
             parts.append(
                 f"excludeInvestmentCaution="
-                f"{'true' if request.exclude_investment_caution else 'false'}")
+                f"{'true' if request.exclude_investment_caution else 'false'}"
+            )
         if request.count is not None:
             parts.append(f"count={request.count}")
 
@@ -261,7 +258,7 @@ def _build_query(request: TossReadRequest, op: str) -> list[str] | None:
         parts.append(f"symbols={urllib.parse.quote(joined, safe='_,')}")
 
     elif op == "INDICATOR_CANDLES":
-        pass  # symbol in path
+        # symbol in path
         parts.append(f"interval={request.interval}")
         if request.count is not None:
             parts.append(f"count={request.count}")
@@ -269,7 +266,7 @@ def _build_query(request: TossReadRequest, op: str) -> list[str] | None:
             parts.append(f"before={_dt(request.before)}")
 
     elif op == "INDICATOR_INVESTOR_TRADING":
-        pass  # symbol in path
+        # symbol in path
         parts.append(f"interval={request.interval}")
         if request.count is not None:
             parts.append(f"count={request.count}")
@@ -331,6 +328,7 @@ def _dt(value) -> str:
 # Wire headers
 # =========================================================================
 
+
 def _wire_headers(request: TossReadRequest) -> dict[str, str] | None:
     if not valid_token(request.token):
         return None
@@ -357,6 +355,7 @@ def _wire_headers(request: TossReadRequest) -> dict[str, str] | None:
 # Response reading
 # =========================================================================
 
+
 def _read_success(response) -> _TossTransportSuccess | _TossTransportFailure:
     if getattr(response, "status", None) != 200:
         return _TossTransportFailure(code="protocol_failure")
@@ -376,8 +375,8 @@ def _read_success(response) -> _TossTransportSuccess | _TossTransportFailure:
     return _TossTransportSuccess(
         body=body,
         rate_limit_remaining=_bounded_int(
-            response.headers.get("X-RateLimit-Remaining"),
-            MAX_RATE_LIMIT_REMAINING),
+            response.headers.get("X-RateLimit-Remaining"), MAX_RATE_LIMIT_REMAINING
+        ),
     )
 
 
@@ -389,8 +388,8 @@ def _map_http_error(err: urllib.error.HTTPError) -> _TossTransportFailure:
         return _TossTransportFailure(
             code="http_429",
             retry_after=_bounded_int(
-                err.headers.get("Retry-After") if err.headers else None,
-                MAX_RETRY_AFTER),
+                err.headers.get("Retry-After") if err.headers else None, MAX_RETRY_AFTER
+            ),
         )
     if code == 401:
         return _TossTransportFailure(code="auth_rejection")

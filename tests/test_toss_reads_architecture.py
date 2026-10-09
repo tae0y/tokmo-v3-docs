@@ -11,7 +11,6 @@ from pathlib import Path
 
 import pytest
 
-from tokmo.facts.toss import _TossTransportFailure, _TossTransportSuccess
 from tokmo.facts.toss_reads import (
     REQUEST_TIMEOUT_SECONDS,
     SPEC_TABLE,
@@ -20,12 +19,8 @@ from tokmo.facts.toss_reads import (
     TossReadSpec,
 )
 from tokmo.facts.toss_reads_live import (
-    ACCOUNT_HEADER,
     METHOD,
-    MAX_BODY_BYTES,
-    TOSS_HOST,
     TossReadsLiveTransport,
-    build_live_opener,
 )
 
 SRC_ROOT = Path(__file__).parents[1] / "src" / "tokmo"
@@ -44,14 +39,31 @@ READ_MODELS_MODULES = (
 READ_PARSERS_MODULE = "facts/toss_read_parsers.py"
 
 # The 20 authorized operations.
-EXPECTED_OPERATIONS = frozenset({
-    "BUYING_POWER", "SELLABLE_QUANTITY", "COMMISSIONS",
-    "ORDERBOOK", "TRADES", "PRICE_LIMITS", "STOCK_CANDLES", "STOCKS",
-    "STOCK_WARNINGS", "STOCK_INVESTOR_TRADING", "EXCHANGE_RATE", "KR_MARKET_CALENDAR",
-    "US_MARKET_CALENDAR", "RANKINGS", "INDICATOR_PRICES",
-    "INDICATOR_CANDLES", "INDICATOR_INVESTOR_TRADING", "ORDERS",
-    "ORDER_DETAIL", "CONDITIONAL_ORDERS", "CONDITIONAL_ORDER_DETAIL",
-})
+EXPECTED_OPERATIONS = frozenset(
+    {
+        "BUYING_POWER",
+        "SELLABLE_QUANTITY",
+        "COMMISSIONS",
+        "ORDERBOOK",
+        "TRADES",
+        "PRICE_LIMITS",
+        "STOCK_CANDLES",
+        "STOCKS",
+        "STOCK_WARNINGS",
+        "STOCK_INVESTOR_TRADING",
+        "EXCHANGE_RATE",
+        "KR_MARKET_CALENDAR",
+        "US_MARKET_CALENDAR",
+        "RANKINGS",
+        "INDICATOR_PRICES",
+        "INDICATOR_CANDLES",
+        "INDICATOR_INVESTOR_TRADING",
+        "ORDERS",
+        "ORDER_DETAIL",
+        "CONDITIONAL_ORDERS",
+        "CONDITIONAL_ORDER_DETAIL",
+    }
+)
 
 EXPECTED_PATHS = {
     "STOCK_INVESTOR_TRADING": "/api/v1/stocks/{symbol}/investor-trading",
@@ -79,7 +91,9 @@ EXPECTED_PATHS = {
 
 EXPECTED_RATE_GROUPS = {
     "STOCK_INVESTOR_TRADING": "STOCK_TRADING_TREND",
-    "BUYING_POWER": "ORDER_INFO", "SELLABLE_QUANTITY": "ORDER_INFO", "COMMISSIONS": "ORDER_INFO",
+    "BUYING_POWER": "ORDER_INFO",
+    "SELLABLE_QUANTITY": "ORDER_INFO",
+    "COMMISSIONS": "ORDER_INFO",
     "ORDERBOOK": "MARKET_DATA",
     "TRADES": "MARKET_DATA",
     "PRICE_LIMITS": "MARKET_DATA",
@@ -99,10 +113,17 @@ EXPECTED_RATE_GROUPS = {
     "CONDITIONAL_ORDER_DETAIL": "CONDITIONAL_ORDER_HISTORY",
 }
 
-ACCOUNT_REQUIRED = frozenset({
-    "BUYING_POWER", "SELLABLE_QUANTITY", "COMMISSIONS",
-    "ORDERS", "ORDER_DETAIL", "CONDITIONAL_ORDERS", "CONDITIONAL_ORDER_DETAIL",
-})
+ACCOUNT_REQUIRED = frozenset(
+    {
+        "BUYING_POWER",
+        "SELLABLE_QUANTITY",
+        "COMMISSIONS",
+        "ORDERS",
+        "ORDER_DETAIL",
+        "CONDITIONAL_ORDERS",
+        "CONDITIONAL_ORDER_DETAIL",
+    }
+)
 ACCOUNT_FORBIDDEN = EXPECTED_OPERATIONS - ACCOUNT_REQUIRED
 
 EXCLUDED_READS = ()  # Order Info GETs are now part of the approved Quant scope.
@@ -111,6 +132,7 @@ WRITE_METHODS = ("POST", "PUT", "PATCH", "DELETE")
 
 
 # --- closed-set exhaustiveness -------------------------------------------
+
 
 def test_spec_table_has_exactly_twenty_one_keys():
     assert set(SPEC_TABLE) == set(TossReadOperation)
@@ -127,7 +149,7 @@ def test_spec_table_paths_match_plan():
 def test_spec_table_rate_groups_match_plan():
     for op_value, expected_rg in EXPECTED_RATE_GROUPS.items():
         spec = _spec_by_value(op_value)
-        assert spec.rate_group == expected_rg, (op_value)
+        assert spec.rate_group == expected_rg, op_value
 
 
 def test_account_rule_matches_plan():
@@ -139,12 +161,14 @@ def test_account_rule_matches_plan():
 
 def test_spec_table_has_no_mutable_method_or_host():
     import dataclasses
+
     field_names = {f.name for f in dataclasses.fields(TossReadSpec)}
     assert "method" not in field_names
     assert "host" not in field_names
 
 
 # --- GET constant --------------------------------------------------------
+
 
 def test_live_module_method_is_get_constant():
     assert METHOD == "GET"
@@ -157,6 +181,7 @@ def test_live_module_has_no_write_method_construction():
 
 
 # --- excluded reads unreachable ------------------------------------------
+
 
 @pytest.mark.parametrize("excluded_path", EXCLUDED_READS)
 def test_excluded_read_path_is_not_in_spec_table(excluded_path):
@@ -177,9 +202,11 @@ def test_excluded_read_strings_are_absent_from_source():
 
 # --- invalid identity rejected before I/O --------------------------------
 
+
 class _NullOpener:
     def __init__(self):
         self.calls = []
+
     def open(self, request, timeout):
         self.calls.append((request, timeout))
         raise AssertionError("opener must not be called")
@@ -226,9 +253,13 @@ def test_bundle3_request_without_account_rejected_before_io():
 # --- no persistence/program/judgment imports -----------------------------
 
 FORBIDDEN_IMPORT_AREAS = (
-    "tokmo.records", "tokmo.programs", "tokmo.observability",
-    "tokmo.runtime", "tokmo.composition",
+    "tokmo.records",
+    "tokmo.programs",
+    "tokmo.observability",
+    "tokmo.runtime",
+    "tokmo.composition",
 )
+
 
 def _module_imports(path):
     imports = []
@@ -240,12 +271,15 @@ def _module_imports(path):
     return imports
 
 
-@pytest.mark.parametrize("module", [
-    READS_MODULE,
-    READS_LIVE_MODULE,
-    READ_PARSERS_MODULE,
-    *READ_MODELS_MODULES,
-])
+@pytest.mark.parametrize(
+    "module",
+    [
+        READS_MODULE,
+        READS_LIVE_MODULE,
+        READ_PARSERS_MODULE,
+        *READ_MODELS_MODULES,
+    ],
+)
 def test_no_persistence_program_or_composition_imports(module):
     imports = _module_imports(SRC_ROOT / module)
     for name in imports:
@@ -269,6 +303,7 @@ def test_no_new_top_level_dependencies():
 
 # --- no auto-pagination --------------------------------------------------
 
+
 def test_no_loop_or_iterator_in_query_function():
     """The one-request orchestration must not loop, recurse, or auto-paginate."""
     text = (SRC_ROOT / READS_MODULE).read_text()
@@ -284,6 +319,7 @@ def test_no_loop_or_iterator_in_query_function():
 
 
 # --- helpers --------------------------------------------------------------
+
 
 def _spec_by_value(op_value):
     op = TossReadOperation(op_value)

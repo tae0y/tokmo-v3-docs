@@ -1,8 +1,7 @@
 import os
 import sqlite3
 from dataclasses import replace
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import UTC, datetime
 
 import pytest
 
@@ -26,13 +25,12 @@ from tokmo.values.ops_kernel import (
     DispositionAction,
     DispositionV1,
     OpsKernelConflictError,
-    OpsKernelCorruptError,
     OpsKernelMigrationRequiredError,
     ProducerRole,
     ReplayResult,
 )
 
-NOW = datetime(2026, 8, 4, 1, 2, 3, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 4, 1, 2, 3, tzinfo=UTC)
 BINDING = "a" * 64
 POLICY = "b" * 64
 
@@ -43,8 +41,13 @@ def make_store(tmp_path):
 
 def candidate(candidate_id="candidate-1", subject_id="subject-1"):
     return CandidateManifestV1(
-        candidate_id, subject_id, "QUOTE_STATE", ("evidence-1",),
-        CandidateAssignment.FULL_REVIEW, CandidateState.PENDING, NOW,
+        candidate_id,
+        subject_id,
+        "QUOTE_STATE",
+        ("evidence-1",),
+        CandidateAssignment.FULL_REVIEW,
+        CandidateState.PENDING,
+        NOW,
     )
 
 
@@ -57,12 +60,27 @@ def request(candidate_id="candidate-1", subject_id="subject-1", *, policy=POLICY
         admission_policy_digest=policy,
     )
     return AnalysisRequestV1(
-        request_id, AnalysisKind.EVENT, TriggerKindV1.DETERMINISTIC_EVENT,
-        42, candidate_id, "delta-1", subject_id, BINDING,
-        "event-v1", policy, ("event_quote_threshold_move",), NOW,
-        (ExpectedAnalysisCoverageV1(
-            "KR", "005930", "evidence-1", 41, NOW,
-        ),),
+        request_id,
+        AnalysisKind.EVENT,
+        TriggerKindV1.DETERMINISTIC_EVENT,
+        42,
+        candidate_id,
+        "delta-1",
+        subject_id,
+        BINDING,
+        "event-v1",
+        policy,
+        ("event_quote_threshold_move",),
+        NOW,
+        (
+            ExpectedAnalysisCoverageV1(
+                "KR",
+                "005930",
+                "evidence-1",
+                41,
+                NOW,
+            ),
+        ),
     )
 
 
@@ -74,7 +92,9 @@ def create_requests(store, requests=None, *, inject_crash_at=None):
         started_at=NOW,
         material_ticks={JobKind.HOLDINGS: 40, JobKind.QUOTES: 41, JobKind.TRADES: 39},
         material_binding_digest=BINDING,
-        candidates=tuple(candidate(row.candidate_id, row.subject_id) for row in requests),
+        candidates=tuple(
+            candidate(row.candidate_id, row.subject_id) for row in requests
+        ),
         requests=requests,
         inject_crash_at=inject_crash_at,
     )
@@ -82,30 +102,59 @@ def create_requests(store, requests=None, *, inject_crash_at=None):
 
 def successful_result(req):
     return AnalysisResultV1(
-        AnalysisResultV1.compute_result_id(request_id=req.request_id, decision_id="decision-1"),
-        req.request_id, AnalysisKind.EVENT, "SUCCEEDED", "decision-1",
-        "c" * 64, NOW,
+        AnalysisResultV1.compute_result_id(
+            request_id=req.request_id, decision_id="decision-1"
+        ),
+        req.request_id,
+        AnalysisKind.EVENT,
+        "SUCCEEDED",
+        "decision-1",
+        "c" * 64,
+        NOW,
     )
 
 
 def coverage(req, symbol="005930"):
     result = successful_result(req)
     return AnalysisCoverageV1(
-        AnalysisKind.EVENT, "KR", symbol, req.request_id, result.result_id,
-        req.subject_id, 41, NOW, NOW, POLICY, "evidence-1",
+        AnalysisKind.EVENT,
+        "KR",
+        symbol,
+        req.request_id,
+        result.result_id,
+        req.subject_id,
+        41,
+        NOW,
+        NOW,
+        POLICY,
+        "evidence-1",
     )
 
 
 def disposition_and_outbox(req):
     disposition = DispositionV1(
-        "decision-1", 42, req.candidate_id, req.subject_id,
-        DispositionAction.SEND, "material_change", ("evidence-1",),
-        {JobKind.QUOTES: 41}, "OK", "OK", "policy-v1", NOW,
+        "decision-1",
+        42,
+        req.candidate_id,
+        req.subject_id,
+        DispositionAction.SEND,
+        "material_change",
+        ("evidence-1",),
+        {JobKind.QUOTES: 41},
+        "OK",
+        "OK",
+        "policy-v1",
+        NOW,
     )
     outbox = AlertOutboxV1.for_disposition(
-        alert_id="alert-1", decision_id="decision-1", tick_id=42,
-        subject_id=req.subject_id, channel=AlertChannel.SHADOW,
-        severity="HIGH", body_evidence=("evidence-1",), created_at=NOW,
+        alert_id="alert-1",
+        decision_id="decision-1",
+        tick_id=42,
+        subject_id=req.subject_id,
+        channel=AlertChannel.SHADOW,
+        severity="HIGH",
+        body_evidence=("evidence-1",),
+        created_at=NOW,
     )
     return disposition, outbox
 
@@ -123,8 +172,12 @@ def test_schema_v9_exact_tables_indexes_foreign_keys_and_strict(tmp_path):
             "SELECT name FROM sqlite_schema WHERE type='index' AND name='analysis_coverage_latest'"
         ).fetchone() == ("analysis_coverage_latest",)
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
-        request_fks = connection.execute("PRAGMA foreign_key_list(analysis_requests)").fetchall()
-        coverage_fks = connection.execute("PRAGMA foreign_key_list(analysis_coverage)").fetchall()
+        request_fks = connection.execute(
+            "PRAGMA foreign_key_list(analysis_requests)"
+        ).fetchall()
+        coverage_fks = connection.execute(
+            "PRAGMA foreign_key_list(analysis_coverage)"
+        ).fetchall()
         assert {row[2] for row in request_fks} == {"candidate_manifest"}
         assert {row[2] for row in coverage_fks} == {"analysis_requests"}
 
@@ -133,20 +186,18 @@ def test_schema_v9_durably_binds_expected_coverage_and_evidence_provenance(tmp_p
     store = make_store(tmp_path)
     with sqlite3.connect(store.path) as connection:
         request_columns = {
-            row[1] for row in connection.execute(
-                "PRAGMA table_info(analysis_requests)"
-            )
+            row[1] for row in connection.execute("PRAGMA table_info(analysis_requests)")
         }
         coverage_columns = {
-            row[1] for row in connection.execute(
-                "PRAGMA table_info(analysis_coverage)"
-            )
+            row[1] for row in connection.execute("PRAGMA table_info(analysis_coverage)")
         }
     assert "expected_coverage_json" in request_columns
     assert "evidence_id" in coverage_columns
 
 
-def test_v6_constructor_requires_explicit_migration_and_preserves_every_existing_row(tmp_path):
+def test_v6_constructor_requires_explicit_migration_and_preserves_every_existing_row(
+    tmp_path,
+):
     path = tmp_path / "ops" / "ops.sqlite3"
     path.parent.mkdir(mode=0o700)
     connection = sqlite3.connect(path)
@@ -154,7 +205,11 @@ def test_v6_constructor_requires_explicit_migration_and_preserves_every_existing
     connection.execute(
         "INSERT INTO manifest_runs VALUES(42,?,?,?,?,?,'SEALED',?,NULL)",
         (
-            "2026-08-04T01:02:03.000000Z", "{}", BINDING, "{}", 0,
+            "2026-08-04T01:02:03.000000Z",
+            "{}",
+            BINDING,
+            "{}",
+            0,
             "2026-08-04T01:02:03.000000Z",
         ),
     )
@@ -191,7 +246,11 @@ def test_v6_constructor_never_enters_removed_copy_migration_hook(tmp_path, monke
         connection.execute(
             "INSERT INTO manifest_runs VALUES(42,?,?,?,?,?,'SEALED',?,NULL)",
             (
-                "2026-08-04T01:02:03.000000Z", "{}", BINDING, "{}", 0,
+                "2026-08-04T01:02:03.000000Z",
+                "{}",
+                BINDING,
+                "{}",
+                0,
                 "2026-08-04T01:02:03.000000Z",
             ),
         )
@@ -205,7 +264,10 @@ def test_v6_constructor_never_enters_removed_copy_migration_hook(tmp_path, monke
         called = True
 
     monkeypatch.setattr(
-        OpsKernelStore, "_migration_copy_validation_hook", drift, raising=False,
+        OpsKernelStore,
+        "_migration_copy_validation_hook",
+        drift,
+        raising=False,
     )
     with pytest.raises(OpsKernelMigrationRequiredError, match="migration required"):
         OpsKernelStore(path)
@@ -224,13 +286,17 @@ def test_event_request_id_is_domain_separated_and_never_candidate_id():
     assert req.request_id != req.candidate_id
     assert len(req.request_id) == 32
     assert req.request_id == AnalysisRequestV1.compute_request_id(
-        analysis_kind=AnalysisKind.EVENT, tick_id=42,
-        candidate_id=req.candidate_id, material_binding_digest=BINDING,
+        analysis_kind=AnalysisKind.EVENT,
+        tick_id=42,
+        candidate_id=req.candidate_id,
+        material_binding_digest=BINDING,
         admission_policy_digest=POLICY,
     )
     changed = AnalysisRequestV1.compute_request_id(
-        analysis_kind=AnalysisKind.EVENT, tick_id=42,
-        candidate_id=req.candidate_id, material_binding_digest=BINDING,
+        analysis_kind=AnalysisKind.EVENT,
+        tick_id=42,
+        candidate_id=req.candidate_id,
+        material_binding_digest=BINDING,
         admission_policy_digest="d" * 64,
     )
     assert changed != req.request_id
@@ -241,9 +307,15 @@ def test_request_manifest_and_request_rows_are_one_atomic_transaction(tmp_path):
     with pytest.raises(RuntimeError, match="injected"):
         create_requests(store, inject_crash_at="after_requests")
     with sqlite3.connect(store.path) as connection:
-        assert connection.execute("SELECT count(*) FROM manifest_runs").fetchone() == (0,)
-        assert connection.execute("SELECT count(*) FROM candidate_manifest").fetchone() == (0,)
-        assert connection.execute("SELECT count(*) FROM analysis_requests").fetchone() == (0,)
+        assert connection.execute("SELECT count(*) FROM manifest_runs").fetchone() == (
+            0,
+        )
+        assert connection.execute(
+            "SELECT count(*) FROM candidate_manifest"
+        ).fetchone() == (0,)
+        assert connection.execute(
+            "SELECT count(*) FROM analysis_requests"
+        ).fetchone() == (0,)
 
 
 def test_request_exact_replay_duplicate_and_payload_or_policy_drift_conflict(tmp_path):
@@ -261,16 +333,22 @@ def test_start_reconcile_unknown_updates_request_and_candidate_atomically(tmp_pa
     req = request()
     create_requests(store)
     store.seal_manifest(ProducerRole.ANALYSIS, 42, NOW)
-    assert store.start_analysis_request(ProducerRole.ANALYSIS, req.request_id, now=NOW) is ReplayResult.CREATED
+    assert (
+        store.start_analysis_request(ProducerRole.ANALYSIS, req.request_id, now=NOW)
+        is ReplayResult.CREATED
+    )
     reconciled = store.reconcile_analysis_requests(ProducerRole.ANALYSIS, now=NOW)
     expected_result_id = AnalysisResultV1.compute_result_id(
-        request_id=req.request_id, decision_id=None,
+        request_id=req.request_id,
+        decision_id=None,
     )
-    assert reconciled == ({
-        "request_id": req.request_id,
-        "result_id": expected_result_id,
-        "replay": ReplayResult.CREATED,
-    },)
+    assert reconciled == (
+        {
+            "request_id": req.request_id,
+            "result_id": expected_result_id,
+            "replay": ReplayResult.CREATED,
+        },
+    )
     with sqlite3.connect(store.path) as connection:
         assert connection.execute(
             "SELECT state FROM analysis_requests WHERE request_id=?", (req.request_id,)
@@ -279,16 +357,24 @@ def test_start_reconcile_unknown_updates_request_and_candidate_atomically(tmp_pa
             "SELECT state FROM candidate_manifest WHERE tick_id=42 AND candidate_id=?",
             (req.candidate_id,),
         ).fetchone() == ("TERMINAL",)
-        assert connection.execute("SELECT count(*) FROM analysis_coverage").fetchone() == (0,)
+        assert connection.execute(
+            "SELECT count(*) FROM analysis_coverage"
+        ).fetchone() == (0,)
         assert connection.execute(
             "SELECT kind,subject,impact_ref,state FROM incidents"
         ).fetchone() == (
-            "analysis-request-unknown", req.request_id, req.request_id, "OPEN",
+            "analysis-request-unknown",
+            req.request_id,
+            req.request_id,
+            "OPEN",
         )
         assert connection.execute(
             "SELECT origin,channel,incident_kind,incident_subject FROM alert_outbox"
         ).fetchone() == (
-            "INCIDENT", "SHADOW", "analysis-request-unknown", req.request_id,
+            "INCIDENT",
+            "SHADOW",
+            "analysis-request-unknown",
+            req.request_id,
         )
 
 
@@ -303,27 +389,44 @@ def test_success_coverage_and_candidate_request_settle_in_one_transaction(tmp_pa
     disposition, outbox = disposition_and_outbox(req)
     with pytest.raises(RuntimeError, match="injected"):
         store.settle_analysis_result_with_coverage(
-            ProducerRole.ANALYSIS, request_id=req.request_id, result=result,
-            coverage_rows=(row,), disposition=disposition,
-            outbox_or_none=outbox, inject_crash_at="after_coverage",
+            ProducerRole.ANALYSIS,
+            request_id=req.request_id,
+            result=result,
+            coverage_rows=(row,),
+            disposition=disposition,
+            outbox_or_none=outbox,
+            inject_crash_at="after_coverage",
         )
     with sqlite3.connect(store.path) as connection:
         assert connection.execute(
-            "SELECT state,result_id FROM analysis_requests WHERE request_id=?", (req.request_id,)
+            "SELECT state,result_id FROM analysis_requests WHERE request_id=?",
+            (req.request_id,),
         ).fetchone() == ("ANALYZING", None)
-        assert connection.execute("SELECT count(*) FROM analysis_coverage").fetchone() == (0,)
+        assert connection.execute(
+            "SELECT count(*) FROM analysis_coverage"
+        ).fetchone() == (0,)
         assert connection.execute(
             "SELECT state FROM candidate_manifest WHERE tick_id=42 AND candidate_id=?",
             (req.candidate_id,),
         ).fetchone() == ("PENDING",)
-    assert store.settle_analysis_result_with_coverage(
-        ProducerRole.ANALYSIS, request_id=req.request_id, result=result,
-        coverage_rows=(row,), disposition=disposition, outbox_or_none=outbox,
-    ) is ReplayResult.CREATED
+    assert (
+        store.settle_analysis_result_with_coverage(
+            ProducerRole.ANALYSIS,
+            request_id=req.request_id,
+            result=result,
+            coverage_rows=(row,),
+            disposition=disposition,
+            outbox_or_none=outbox,
+        )
+        is ReplayResult.CREATED
+    )
     with sqlite3.connect(store.path) as connection:
-        assert connection.execute("SELECT count(*) FROM analysis_coverage").fetchone() == (1,)
         assert connection.execute(
-            "SELECT state,result_id FROM analysis_requests WHERE request_id=?", (req.request_id,)
+            "SELECT count(*) FROM analysis_coverage"
+        ).fetchone() == (1,)
+        assert connection.execute(
+            "SELECT state,result_id FROM analysis_requests WHERE request_id=?",
+            (req.request_id,),
         ).fetchone() == ("SUCCEEDED", result.result_id)
         assert connection.execute(
             "SELECT state FROM candidate_manifest WHERE tick_id=42 AND candidate_id=?",
@@ -339,27 +442,39 @@ def test_non_success_forbids_coverage_and_success_symbol_requires_coverage(tmp_p
     store.start_analysis_request(ProducerRole.ANALYSIS, req.request_id, now=NOW)
     failed = AnalysisResultV1(
         AnalysisResultV1.compute_result_id(request_id=req.request_id, decision_id=None),
-        req.request_id, AnalysisKind.EVENT, "FAILED", None, None, NOW,
+        req.request_id,
+        AnalysisKind.EVENT,
+        "FAILED",
+        None,
+        None,
+        NOW,
     )
     with pytest.raises(ValueError):
         store.settle_analysis_result_with_coverage(
-            ProducerRole.ANALYSIS, request_id=req.request_id, result=failed,
+            ProducerRole.ANALYSIS,
+            request_id=req.request_id,
+            result=failed,
             coverage_rows=(coverage(req),),
         )
 
 
-@pytest.mark.parametrize(("field", "value"), (
-    ("subject_id", "wrong-subject"),
-    ("policy_digest", "d" * 64),
-    ("market", "US"),
-    ("symbol", "000660"),
-    ("material_tick_id", 40),
-    ("material_observed_at", NOW.replace(second=4)),
-    ("analyzed_at", NOW.replace(second=4)),
-    ("evidence_id", "wrong-evidence"),
-))
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("subject_id", "wrong-subject"),
+        ("policy_digest", "d" * 64),
+        ("market", "US"),
+        ("symbol", "000660"),
+        ("material_tick_id", 40),
+        ("material_observed_at", NOW.replace(second=4)),
+        ("analyzed_at", NOW.replace(second=4)),
+        ("evidence_id", "wrong-evidence"),
+    ),
+)
 def test_success_coverage_rejects_every_request_or_provenance_drift(
-    tmp_path, field, value,
+    tmp_path,
+    field,
+    value,
 ):
     store = make_store(tmp_path)
     req = request()
@@ -371,14 +486,22 @@ def test_success_coverage_rejects_every_request_or_provenance_drift(
     disposition, outbox = disposition_and_outbox(req)
     with pytest.raises(OpsKernelConflictError):
         store.settle_analysis_result_with_coverage(
-            ProducerRole.ANALYSIS, request_id=req.request_id, result=result,
-            coverage_rows=(row,), disposition=disposition,
+            ProducerRole.ANALYSIS,
+            request_id=req.request_id,
+            result=result,
+            coverage_rows=(row,),
+            disposition=disposition,
             outbox_or_none=outbox,
         )
     assert store.read_analysis_request(req.request_id)["state"] == "ANALYZING"
-    assert store.read_latest_analysis_coverage(
-        AnalysisKind.EVENT, "KR", ("005930", "000660"),
-    ) == ()
+    assert (
+        store.read_latest_analysis_coverage(
+            AnalysisKind.EVENT,
+            "KR",
+            ("005930", "000660"),
+        )
+        == ()
+    )
 
 
 @pytest.mark.parametrize("mode", ("missing", "extra"))
@@ -388,15 +511,23 @@ def test_success_coverage_requires_exact_expected_symbol_set(tmp_path, mode):
     create_requests(store)
     store.seal_manifest(ProducerRole.ANALYSIS, 42, NOW)
     store.start_analysis_request(ProducerRole.ANALYSIS, req.request_id, now=NOW)
-    rows = () if mode == "missing" else (
-        coverage(req), replace(coverage(req), market="US", symbol="AAPL"),
+    rows = (
+        ()
+        if mode == "missing"
+        else (
+            coverage(req),
+            replace(coverage(req), market="US", symbol="AAPL"),
+        )
     )
     disposition, outbox = disposition_and_outbox(req)
     with pytest.raises(OpsKernelConflictError, match="exactly match"):
         store.settle_analysis_result_with_coverage(
-            ProducerRole.ANALYSIS, request_id=req.request_id,
-            result=successful_result(req), coverage_rows=rows,
-            disposition=disposition, outbox_or_none=outbox,
+            ProducerRole.ANALYSIS,
+            request_id=req.request_id,
+            result=successful_result(req),
+            coverage_rows=rows,
+            disposition=disposition,
+            outbox_or_none=outbox,
         )
 
 
@@ -408,15 +539,25 @@ def test_latest_coverage_query_is_bounded_market_symbol_and_kind_scoped(tmp_path
     store.start_analysis_request(ProducerRole.ANALYSIS, req.request_id, now=NOW)
     disposition, outbox = disposition_and_outbox(req)
     store.settle_analysis_result_with_coverage(
-        ProducerRole.ANALYSIS, request_id=req.request_id,
-        result=successful_result(req), coverage_rows=(coverage(req),),
-        disposition=disposition, outbox_or_none=outbox,
+        ProducerRole.ANALYSIS,
+        request_id=req.request_id,
+        result=successful_result(req),
+        coverage_rows=(coverage(req),),
+        disposition=disposition,
+        outbox_or_none=outbox,
     )
     rows = store.read_latest_analysis_coverage(
-        AnalysisKind.EVENT, "KR", ("005930", "000660"),
+        AnalysisKind.EVENT,
+        "KR",
+        ("005930", "000660"),
     )
     assert len(rows) == 1
     assert rows[0]["symbol"] == "005930"
-    assert store.read_latest_analysis_coverage(
-        AnalysisKind.EVENT, "US", ("005930",),
-    ) == ()
+    assert (
+        store.read_latest_analysis_coverage(
+            AnalysisKind.EVENT,
+            "US",
+            ("005930",),
+        )
+        == ()
+    )

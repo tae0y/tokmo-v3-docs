@@ -7,13 +7,14 @@ can omit it.
 """
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
 from tokmo.facts.toss import derive_account_scope
 from tokmo.facts.toss_prices import TossPriceQueryOutcome
 from tokmo.programs.quotes_sync import run_quotes_sync
+from tokmo.values.cadence_policy import cadence_tick_v1
 from tokmo.values.current_holdings import (
     AccountHoldingsV1,
     AccountScopeIdentityV1,
@@ -21,16 +22,15 @@ from tokmo.values.current_holdings import (
     HoldingItemV1,
 )
 from tokmo.values.market_observations import TossCurrentPriceFact
-from tokmo.values.cadence_policy import cadence_tick_v1
 from tokmo.values.open_market_mask import build_open_market_mask
 from tokmo.values.session_gate import Market, SessionVerdict
 from tokmo.values.toss_market_calendar import CalendarSession
 
-NOW = datetime(2026, 8, 3, 14, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 3, 14, 0, tzinfo=UTC)
 TICK = cadence_tick_v1("cadence-300s-v1", NOW)
 SESSION = CalendarSession(
-    datetime(2026, 8, 3, 13, 30, tzinfo=timezone.utc),
-    datetime(2026, 8, 3, 20, 0, tzinfo=timezone.utc),
+    datetime(2026, 8, 3, 13, 30, tzinfo=UTC),
+    datetime(2026, 8, 3, 20, 0, tzinfo=UTC),
 )
 
 
@@ -40,8 +40,10 @@ def us_only_mask():
         SessionVerdict(Market.US, True, "open", SESSION),
     )
     return build_open_market_mask(
-        policy_version="cadence-300s-v1", scheduled_for_utc=TICK.start_utc,
-        tick_id=TICK.tick_id, verdicts=verdicts,
+        policy_version="cadence-300s-v1",
+        scheduled_for_utc=TICK.start_utc,
+        tick_id=TICK.tick_id,
+        verdicts=verdicts,
         local_dates={Market.KR: date(2026, 8, 4), Market.US: date(2026, 8, 3)},
     )
 
@@ -90,23 +92,44 @@ class Save:
 def us_holdings():
     scope = derive_account_scope("123")
     return CurrentHoldingsV1(
-        1, (AccountHoldingsV1(scope, 1, (
-            HoldingItemV1("AAPL", "1", "1", "USD", "US", "market"),
-        )),), True, NOW,
+        1,
+        (
+            AccountHoldingsV1(
+                scope, 1, (HoldingItemV1("AAPL", "1", "1", "USD", "US", "market"),)
+            ),
+        ),
+        True,
+        NOW,
         {scope: AccountScopeIdentityV1(scope, None, 1, None)},
     )
 
 
 def good_provider(symbols):
-    return TossPriceQueryOutcome("success", tuple(
-        TossCurrentPriceFact("toss-current-price-v1", symbol, "10", "USD",
-                             NOW, NOW + timedelta(seconds=1))
-        for symbol in symbols
-    ))
+    return TossPriceQueryOutcome(
+        "success",
+        tuple(
+            TossCurrentPriceFact(
+                "toss-current-price-v1",
+                symbol,
+                "10",
+                "USD",
+                NOW,
+                NOW + timedelta(seconds=1),
+            )
+            for symbol in symbols
+        ),
+    )
 
 
-def run(tmp_path, *, provider=good_provider, quote_store=None, packs=None,
-        holdings=None, watchlist_symbols=None):
+def run(
+    tmp_path,
+    *,
+    provider=good_provider,
+    quote_store=None,
+    packs=None,
+    holdings=None,
+    watchlist_symbols=None,
+):
     receipts = ReceiptSink()
     lock = tmp_path / "locks" / "quotes.lock"
     lock.parent.mkdir(parents=True, exist_ok=True)
@@ -114,12 +137,16 @@ def run(tmp_path, *, provider=good_provider, quote_store=None, packs=None,
         tick=TICK,
         holdings=us_holdings() if holdings is None else holdings,
         quotes_provider=provider,
-        quote_store=quote_store or (
-            lambda outcome: Save(NOW, inserted_count=len(outcome.facts))),
+        quote_store=quote_store
+        or (lambda outcome: Save(NOW, inserted_count=len(outcome.facts))),
         pack_writer=packs or PackSink(),
-        receipt_store=receipts, reservation_seal=lambda *args: None,
-        incident_writer=lambda *args: None, clock=lambda: NOW, now=NOW,
-        job_lock_path=lock, mask=MASK,
+        receipt_store=receipts,
+        reservation_seal=lambda *args: None,
+        incident_writer=lambda *args: None,
+        clock=lambda: NOW,
+        now=NOW,
+        job_lock_path=lock,
+        mask=MASK,
         watchlist_symbols=watchlist_symbols,
     )
     return result, receipts
@@ -141,7 +168,9 @@ def test_watchlist_extends_quote_targets_without_mutating_holdings(tmp_path):
         return good_provider(symbols)
 
     result, _ = run(
-        tmp_path, provider=provider, holdings=canonical,
+        tmp_path,
+        provider=provider,
+        holdings=canonical,
         watchlist_symbols={Market.US: frozenset({"V"})},
     )
 
@@ -165,7 +194,8 @@ def test_provider_exception_receipt_carries_exact_digest(tmp_path):
 
 def test_provider_failure_code_receipt_carries_exact_digest(tmp_path):
     result, receipts = run(
-        tmp_path, provider=lambda symbols: TossPriceQueryOutcome("http_429", ()),
+        tmp_path,
+        provider=lambda symbols: TossPriceQueryOutcome("http_429", ()),
     )
     assert_terminal(result, receipts, "failed", "failed_provider_rate_limit")
 
@@ -173,11 +203,16 @@ def test_provider_failure_code_receipt_carries_exact_digest(tmp_path):
 def test_provider_contract_failure_receipt_carries_exact_digest(tmp_path):
     # wrong symbols returned: contract mismatch after a "success" code
     result, receipts = run(
-        tmp_path, provider=lambda symbols: TossPriceQueryOutcome("success", tuple(
-            TossCurrentPriceFact("toss-current-price-v1", "WRONG", "10", "USD",
-                                 NOW, NOW)
-            for _symbol in symbols
-        )),
+        tmp_path,
+        provider=lambda symbols: TossPriceQueryOutcome(
+            "success",
+            tuple(
+                TossCurrentPriceFact(
+                    "toss-current-price-v1", "WRONG", "10", "USD", NOW, NOW
+                )
+                for _symbol in symbols
+            ),
+        ),
     )
     assert_terminal(result, receipts, "failed", "failed_provider_contract")
 
@@ -201,13 +236,18 @@ def test_holdings_absent_skip_receipt_carries_exact_digest(tmp_path):
     the legacy skipped_holdings_absent which trades still emits."""
     receipts = ReceiptSink()
     result = run_quotes_sync(
-        tick=TICK, holdings=None,
+        tick=TICK,
+        holdings=None,
         quotes_provider=lambda symbols: pytest.fail("provider must not run"),
         quote_store=lambda outcome: pytest.fail("store must not run"),
-        pack_writer=PackSink(), receipt_store=receipts,
-        reservation_seal=lambda *args: None, incident_writer=lambda *args: None,
-        clock=lambda: NOW, now=NOW,
-        job_lock_path=tmp_path / "quotes.lock", mask=MASK,
+        pack_writer=PackSink(),
+        receipt_store=receipts,
+        reservation_seal=lambda *args: None,
+        incident_writer=lambda *args: None,
+        clock=lambda: NOW,
+        now=NOW,
+        job_lock_path=tmp_path / "quotes.lock",
+        mask=MASK,
     )
     assert_terminal(result, receipts, "skipped", "skipped_zero_quote_targets")
 
@@ -222,13 +262,18 @@ def test_lock_contention_skip_receipt_carries_exact_digest(tmp_path):
     try:
         receipts = ReceiptSink()
         result = run_quotes_sync(
-            tick=TICK, holdings=us_holdings(),
+            tick=TICK,
+            holdings=us_holdings(),
             quotes_provider=lambda symbols: pytest.fail("provider must not run"),
             quote_store=lambda outcome: pytest.fail("store must not run"),
-            pack_writer=PackSink(), receipt_store=receipts,
+            pack_writer=PackSink(),
+            receipt_store=receipts,
             reservation_seal=lambda *args: None,
             incident_writer=lambda *args: None,
-            clock=lambda: NOW, now=NOW, job_lock_path=lock, mask=MASK,
+            clock=lambda: NOW,
+            now=NOW,
+            job_lock_path=lock,
+            mask=MASK,
         )
         assert_terminal(result, receipts, "skipped", "skipped_lock_contention")
     finally:
@@ -239,8 +284,8 @@ def test_lock_contention_skip_receipt_carries_exact_digest(tmp_path):
 # Watchlist quote targets (adversarial coverage)
 # ---------------------------------------------------------------------------
 
-def _run_direct(tmp_path, *, holdings, watchlist_symbols, provider,
-                packs=None):
+
+def _run_direct(tmp_path, *, holdings, watchlist_symbols, provider, packs=None):
     """run_quotes_sync with holdings passed through verbatim (None stays
     None — the module-level ``run`` helper substitutes canonical
     holdings)."""
@@ -249,14 +294,18 @@ def _run_direct(tmp_path, *, holdings, watchlist_symbols, provider,
     lock = tmp_path / "locks" / "quotes.lock"
     lock.parent.mkdir(parents=True, exist_ok=True)
     result = run_quotes_sync(
-        tick=TICK, holdings=holdings,
+        tick=TICK,
+        holdings=holdings,
         quotes_provider=provider,
-        quote_store=lambda outcome: Save(
-            NOW, inserted_count=len(outcome.facts)),
-        pack_writer=packs, receipt_store=receipts,
+        quote_store=lambda outcome: Save(NOW, inserted_count=len(outcome.facts)),
+        pack_writer=packs,
+        receipt_store=receipts,
         reservation_seal=lambda *args: None,
         incident_writer=lambda *args: None,
-        clock=lambda: NOW, now=NOW, job_lock_path=lock, mask=MASK,
+        clock=lambda: NOW,
+        now=NOW,
+        job_lock_path=lock,
+        mask=MASK,
         watchlist_symbols=watchlist_symbols,
     )
     return result, receipts, packs
@@ -272,7 +321,8 @@ def test_watchlist_only_none_holdings_one_call_saves_quote(tmp_path):
         return good_provider(symbols)
 
     result, receipts, packs = _run_direct(
-        tmp_path, holdings=None,
+        tmp_path,
+        holdings=None,
         watchlist_symbols={Market.US: frozenset({"V"})},
         provider=provider,
     )
@@ -288,7 +338,8 @@ def test_closed_market_watchlist_makes_network_zero(tmp_path):
     """A watchlist symbol whose market is not in the open mask never
     reaches the provider: zero targets, zero network."""
     result, receipts, _ = _run_direct(
-        tmp_path, holdings=None,
+        tmp_path,
+        holdings=None,
         watchlist_symbols={Market.KR: frozenset({"005930"})},
         provider=lambda symbols: pytest.fail("provider must not run"),
     )
@@ -301,7 +352,8 @@ def test_zero_union_emits_registered_reason(tmp_path):
     from tokmo.values.receipt_v1 import RECEIPT_REASON_TOKENS
 
     result, receipts, _ = _run_direct(
-        tmp_path, holdings=None,
+        tmp_path,
+        holdings=None,
         watchlist_symbols={Market.US: frozenset()},
         provider=lambda symbols: pytest.fail("provider must not run"),
     )
@@ -318,7 +370,8 @@ def test_holdings_watchlist_overlap_dedups(tmp_path):
         return good_provider(symbols)
 
     result, receipts, _ = _run_direct(
-        tmp_path, holdings=us_holdings(),
+        tmp_path,
+        holdings=us_holdings(),
         watchlist_symbols={Market.US: frozenset({"AAPL", "V"})},
         provider=provider,
     )
@@ -331,8 +384,7 @@ def test_watchlist_batch_capacity_preserved_without_truncation(tmp_path):
     policy size and fully covered — never truncated."""
     from tokmo.values.cadence_policy import QUOTE_BATCH_SYMBOLS_V1
 
-    symbols = frozenset(
-        f"S{i:03d}" for i in range(QUOTE_BATCH_SYMBOLS_V1 + 1))
+    symbols = frozenset(f"S{i:03d}" for i in range(QUOTE_BATCH_SYMBOLS_V1 + 1))
     batches = []
 
     def provider(batch):
@@ -340,7 +392,8 @@ def test_watchlist_batch_capacity_preserved_without_truncation(tmp_path):
         return good_provider(batch)
 
     result, receipts, _ = _run_direct(
-        tmp_path, holdings=None,
+        tmp_path,
+        holdings=None,
         watchlist_symbols={Market.US: symbols},
         provider=provider,
     )
@@ -354,7 +407,8 @@ def test_invalid_watchlist_contract_fails_closed_with_receipt(tmp_path):
     """A malformed watchlist mapping fails closed with a truthful,
     registered failed receipt — not an unhandled receipt-layer error."""
     result, receipts, _ = _run_direct(
-        tmp_path, holdings=None,
+        tmp_path,
+        holdings=None,
         watchlist_symbols={Market.US: ["V"]},
         provider=lambda symbols: pytest.fail("provider must not run"),
     )
@@ -363,7 +417,8 @@ def test_invalid_watchlist_contract_fails_closed_with_receipt(tmp_path):
 
 def test_watchlist_symbol_empty_string_fails_closed(tmp_path):
     result, receipts, _ = _run_direct(
-        tmp_path, holdings=None,
+        tmp_path,
+        holdings=None,
         watchlist_symbols={Market.US: frozenset({"V", ""})},
         provider=lambda symbols: pytest.fail("provider must not run"),
     )

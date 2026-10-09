@@ -16,16 +16,15 @@ lost to an old inode, and any fault leaves either the complete original v4
 file or a complete v7 file — never a partial state.
 """
 
-from datetime import date, datetime, timezone
 import fcntl
 import os
 import sqlite3
 import threading
-import time
+from datetime import UTC, date, datetime
 
 import pytest
 
-from tokmo.records.ops_kernel import OpsKernelStore, SCHEMA_VERSION
+from tokmo.records.ops_kernel import SCHEMA_VERSION, OpsKernelStore
 from tokmo.values.ops_kernel import OpsKernelCorruptError, ProducerRole
 
 TS = "2026-07-31T00:00:00.000000Z"
@@ -47,14 +46,18 @@ def build_v4(path, *, mutate=None):
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     connection = sqlite3.connect(path)
     try:
-        script = _LEGACY_SCHEMA_SQL_V4 if mutate is None else mutate(_LEGACY_SCHEMA_SQL_V4)
+        script = (
+            _LEGACY_SCHEMA_SQL_V4 if mutate is None else mutate(_LEGACY_SCHEMA_SQL_V4)
+        )
         connection.executescript(script)
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute(
-            "INSERT INTO request_day_counters VALUES('2026-07-30',1200,?,?)", (TS, TS),
+            "INSERT INTO request_day_counters VALUES('2026-07-30',1200,?,?)",
+            (TS, TS),
         )
         connection.execute(
-            "INSERT INTO request_day_counters VALUES('2026-07-31',3744,?,?)", (TS, TS),
+            "INSERT INTO request_day_counters VALUES('2026-07-31',3744,?,?)",
+            (TS, TS),
         )
         connection.execute(
             "INSERT INTO endpoint_cooldowns VALUES"
@@ -112,10 +115,12 @@ def test_valid_v4_db_requires_migration_without_mutation(tmp_path):
     # constructor migration (test-only legacy builder, Plan/SDS §4).
     connection = sqlite3.connect(path)
     try:
-        counters = dict(connection.execute(
-            "SELECT utc_day,provider_started_count FROM request_day_counters "
-            "ORDER BY utc_day"
-        ).fetchall())
+        counters = dict(
+            connection.execute(
+                "SELECT utc_day,provider_started_count FROM request_day_counters "
+                "ORDER BY utc_day"
+            ).fetchall()
+        )
         assert counters == {"2026-07-30": 1200, "2026-07-31": 3744}
         assert connection.execute(
             "SELECT source,reason FROM endpoint_cooldowns"
@@ -171,9 +176,9 @@ def test_legacy_v4_rows_remain_readable_until_reviewed_migration(tmp_path):
         OpsKernelStore(path)
     connection = sqlite3.connect(path)
     try:
-        assert connection.execute(
-            "SELECT tick_id FROM manifest_runs"
-        ).fetchone() == (7,)
+        assert connection.execute("SELECT tick_id FROM manifest_runs").fetchone() == (
+            7,
+        )
     finally:
         connection.close()
 
@@ -199,9 +204,13 @@ def test_tampered_v4_table_set_fails_closed_without_mutation(tmp_path):
 
 def test_weakened_v4_check_fails_closed_without_mutation(tmp_path):
     path = tmp_path / "ops" / "ops_kernel.sqlite3"
-    build_v4(path, mutate=lambda sql: sql.replace(
-        "provider_started_count BETWEEN 0 AND 3744", "provider_started_count >= 0",
-    ))
+    build_v4(
+        path,
+        mutate=lambda sql: sql.replace(
+            "provider_started_count BETWEEN 0 AND 3744",
+            "provider_started_count >= 0",
+        ),
+    )
     before = path.read_bytes()
     with pytest.raises(OpsKernelCorruptError, match="schema mismatch"):
         OpsKernelStore(path)
@@ -210,9 +219,13 @@ def test_weakened_v4_check_fails_closed_without_mutation(tmp_path):
 
 def test_uncommitted_interim_v5_schema_fails_closed(tmp_path):
     path = tmp_path / "ops" / "ops_kernel.sqlite3"
-    build_v4(path, mutate=lambda sql: sql.replace(
-        "provider_started_count BETWEEN 0 AND 3744", "provider_started_count >= 0",
-    ).replace("PRAGMA user_version=4", "PRAGMA user_version=5"))
+    build_v4(
+        path,
+        mutate=lambda sql: sql.replace(
+            "provider_started_count BETWEEN 0 AND 3744",
+            "provider_started_count >= 0",
+        ).replace("PRAGMA user_version=4", "PRAGMA user_version=5"),
+    )
     with pytest.raises(OpsKernelCorruptError, match="schema mismatch"):
         OpsKernelStore(path)
 
@@ -263,10 +276,12 @@ def assert_complete_v7_with_seed_rows(path):
 
 
 def assert_seed_rows(connection):
-    counters = dict(connection.execute(
-        "SELECT utc_day,provider_started_count FROM request_day_counters "
-        "WHERE utc_day<='2026-07-31' ORDER BY utc_day"
-    ).fetchall())
+    counters = dict(
+        connection.execute(
+            "SELECT utc_day,provider_started_count FROM request_day_counters "
+            "WHERE utc_day<='2026-07-31' ORDER BY utc_day"
+        ).fetchall()
+    )
     assert counters == {"2026-07-30": 1200, "2026-07-31": 3744}
     assert connection.execute(
         "SELECT kind,subject,count,state FROM incidents"
@@ -287,11 +302,11 @@ def test_normal_write_transaction_holds_shared_migration_lock(tmp_path):
 
     def write():
         store.plan_calendar_slot(
-            ProducerRole.COLLECTOR, __import__("tokmo.values.session_gate",
-                                               fromlist=["Market"]).Market.KR,
+            ProducerRole.COLLECTOR,
+            __import__("tokmo.values.session_gate", fromlist=["Market"]).Market.KR,
             date(2026, 8, 3),
-            datetime(2026, 8, 2, 20, 0, tzinfo=timezone.utc),
-            now=datetime(2026, 8, 2, 20, 0, tzinfo=timezone.utc),
+            datetime(2026, 8, 2, 20, 0, tzinfo=UTC),
+            now=datetime(2026, 8, 2, 20, 0, tzinfo=UTC),
         )
         finished.set()
 
@@ -315,7 +330,9 @@ def test_normal_write_transaction_holds_shared_migration_lock(tmp_path):
         connection.close()
 
 
-def test_migration_waits_for_open_shared_writer_and_preserves_its_commit__as_v15_refusal_contract(tmp_path):
+def test_migration_waits_for_open_shared_writer_and_preserves_its_commit__as_v15_refusal_contract(
+    tmp_path,
+):
     """Restructured (Plan/SDS 2026-08-30): ordinary construction never
     migrates, so an open coordinated writer and a racing writer observe an
     untouched complete v4 file and a typed migration-required refusal."""
@@ -339,7 +356,10 @@ def test_migration_waits_for_open_shared_writer_and_preserves_its_commit__as_v15
         release_lock(descriptor)
     assert_complete_v4_with_seed_rows(path)
 
-def test_writer_racing_migration_is_preserved_in_either_interleaving__as_v15_refusal_contract(tmp_path):
+
+def test_writer_racing_migration_is_preserved_in_either_interleaving__as_v15_refusal_contract(
+    tmp_path,
+):
     """Restructured (Plan/SDS 2026-08-30): ordinary construction never
     migrates, so an open coordinated writer and a racing writer observe an
     untouched complete v4 file and a typed migration-required refusal."""
@@ -362,6 +382,7 @@ def test_writer_racing_migration_is_preserved_in_either_interleaving__as_v15_ref
     finally:
         release_lock(descriptor)
     assert_complete_v4_with_seed_rows(path)
+
 
 def recover_and_verify(path):
     """After any injected fault, a clean reopen completes the migration with
@@ -383,7 +404,10 @@ def test_fault_during_row_copy_leaves_complete_v4__as_v15_refusal_contract(tmp_p
     assert path.read_bytes() == before
     assert_complete_v4_with_seed_rows(path)
 
-def test_fault_during_migration_validation_leaves_complete_v4__as_v15_refusal_contract(tmp_path):
+
+def test_fault_during_migration_validation_leaves_complete_v4__as_v15_refusal_contract(
+    tmp_path,
+):
     """Restructured (Plan/SDS 2026-08-30): no constructor migration exists,
     so no fault path can touch the legacy file at all."""
     from tokmo.values.ops_kernel import OpsKernelMigrationRequiredError
@@ -395,6 +419,7 @@ def test_fault_during_migration_validation_leaves_complete_v4__as_v15_refusal_co
         OpsKernelStore(path)
     assert path.read_bytes() == before
     assert_complete_v4_with_seed_rows(path)
+
 
 def test_fault_at_file_fsync_leaves_complete_v4__as_v15_refusal_contract(tmp_path):
     """Restructured (Plan/SDS 2026-08-30): no constructor migration exists,
@@ -409,6 +434,7 @@ def test_fault_at_file_fsync_leaves_complete_v4__as_v15_refusal_contract(tmp_pat
     assert path.read_bytes() == before
     assert_complete_v4_with_seed_rows(path)
 
+
 def test_fault_at_replace_leaves_complete_v4__as_v15_refusal_contract(tmp_path):
     """Restructured (Plan/SDS 2026-08-30): no constructor migration exists,
     so no fault path can touch the legacy file at all."""
@@ -422,6 +448,7 @@ def test_fault_at_replace_leaves_complete_v4__as_v15_refusal_contract(tmp_path):
     assert path.read_bytes() == before
     assert_complete_v4_with_seed_rows(path)
 
+
 def test_legacy_v4_is_never_mutated_even_under_io_faults(tmp_path, monkeypatch):
     """Restructured (Plan/SDS 2026-08-30): constructor-side migration is
     gone, so even injected fs/IO faults leave the legacy bytes untouched."""
@@ -431,7 +458,8 @@ def test_legacy_v4_is_never_mutated_even_under_io_faults(tmp_path, monkeypatch):
     build_v4(path)
     before = path.read_bytes()
     monkeypatch.setattr(
-        os, "fsync",
+        os,
+        "fsync",
         lambda descriptor: (_ for _ in ()).throw(OSError("injected fsync fault")),
     )
     try:

@@ -7,9 +7,8 @@ deterministic recall candidates only — no alert, no promotion, no order
 semantics, and no delivery path exists in this module.
 """
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import hashlib
+from dataclasses import dataclass
 
 from tokmo.values.material_pack import canonical_encode
 from tokmo.values.ops_kernel import (
@@ -33,7 +32,7 @@ def _bounded_identity(raw: str) -> str:
     if len(raw) <= _MAX_KEY_IDENTITY:
         return raw
     tail = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
-    head = raw[:_MAX_KEY_IDENTITY - 17]
+    head = raw[: _MAX_KEY_IDENTITY - 17]
     return f"{head}.{tail}"
 
 
@@ -50,10 +49,12 @@ def index_keys_from_delta(delta) -> tuple:
         ),
         HypothesisIndexKeyV1(IndexKeyKind.ENTITY, f"entity:{target}"),
         HypothesisIndexKeyV1(
-            IndexKeyKind.EFFECT, f"effect:{delta.change_basis.value}",
+            IndexKeyKind.EFFECT,
+            f"effect:{delta.change_basis.value}",
         ),
         HypothesisIndexKeyV1(
-            IndexKeyKind.SOURCE_EVENT, f"source-event:{first_evidence}",
+            IndexKeyKind.SOURCE_EVENT,
+            f"source-event:{first_evidence}",
         ),
     )
 
@@ -66,13 +67,13 @@ def recall_for_deltas(store, deltas, *, now) -> tuple:
         matched_by_hypothesis = {}
         for key in keys:
             for hypothesis_id in store.read_hypotheses_by_index(
-                key.kind, key.value,
+                key.kind,
+                key.value,
             ):
                 matched_by_hypothesis.setdefault(hypothesis_id, set()).add(key)
         for hypothesis_id in sorted(matched_by_hypothesis):
             row = store.read_hypothesis(hypothesis_id)
-            if row.state not in (HypothesisState.CANDIDATE,
-                                 HypothesisState.WATCHING):
+            if row.state not in (HypothesisState.CANDIDATE, HypothesisState.WATCHING):
                 continue
             matched = sorted(
                 matched_by_hypothesis[hypothesis_id],
@@ -81,14 +82,16 @@ def recall_for_deltas(store, deltas, *, now) -> tuple:
             # match_kind computed BEFORE the frozen construction — no
             # post-hoc mutation of the frozen dataclass.
             match_kind = "EXACT" if len(matched) == len(keys) else "PARTIAL"
-            recalls.append(RecallCandidateV1(
-                hypothesis_id=hypothesis_id,
-                statement=row.statement,
-                state=row.state,
-                matched_keys=tuple(matched),
-                match_kind=match_kind,
-                material_delta_ids=(delta.delta_id,),
-            ))
+            recalls.append(
+                RecallCandidateV1(
+                    hypothesis_id=hypothesis_id,
+                    statement=row.statement,
+                    state=row.state,
+                    matched_keys=tuple(matched),
+                    match_kind=match_kind,
+                    material_delta_ids=(delta.delta_id,),
+                )
+            )
     return tuple(recalls)
 
 
@@ -100,18 +103,20 @@ class ShadowOutcomeV1:
 
 def _shadow_payload(recall) -> str:
     """Redaction-checked payload: only already-validated token fields."""
-    payload = canonical_encode({
-        "v": 1,
-        "hypothesis_id": recall.hypothesis_id,
-        "statement": recall.statement,
-        "state": recall.state.value,
-        "match_kind": recall.match_kind,
-        "matched_keys": [
-            [key.kind.value, key.value] for key in recall.matched_keys
-        ],
-        "material_delta_ids": list(recall.material_delta_ids),
-        "would_have_sent": False,
-    }).decode("utf-8")
+    payload = canonical_encode(
+        {
+            "v": 1,
+            "hypothesis_id": recall.hypothesis_id,
+            "statement": recall.statement,
+            "state": recall.state.value,
+            "match_kind": recall.match_kind,
+            "matched_keys": [
+                [key.kind.value, key.value] for key in recall.matched_keys
+            ],
+            "material_delta_ids": list(recall.material_delta_ids),
+            "would_have_sent": False,
+        }
+    ).decode("utf-8")
     lowered = payload.lower()
     for marker in ("/users/", "tokmo", ".local", "/hermes"):
         if marker in lowered:
@@ -138,5 +143,6 @@ def record_would_have_sent_shadow(store, recalls, deltas, *, now) -> ShadowOutco
         else:
             duplicates += 1
     return ShadowOutcomeV1(
-        new_records=new_records, duplicates=duplicates,
+        new_records=new_records,
+        duplicates=duplicates,
     )

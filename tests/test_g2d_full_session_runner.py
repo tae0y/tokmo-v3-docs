@@ -29,8 +29,6 @@ provider calls = 0) plus the B-1/B-2/B-3/M-1/M-2/M-3 finding closures:
   per-tick metric (subject-tick evidence), never from GLM projection rows.
 """
 
-from datetime import date, datetime, timedelta, timezone
-from email.message import Message
 import ast
 import inspect
 import io
@@ -38,12 +36,13 @@ import json
 import os
 import socket
 import sqlite3
-
-import pytest
-
 import urllib.parse
 import urllib.request
 import urllib.response
+from datetime import UTC, date, datetime, timedelta
+from email.message import Message
+
+import pytest
 
 from tokmo import composition
 from tokmo.composition import (
@@ -56,19 +55,17 @@ from tokmo.programs import g2d_full_session_runner as g2d
 from tokmo.programs import integrated_fake_cadence
 from tokmo.programs.g2a_shadow_runner import G2AStopError, shadow_root
 from tokmo.programs.g2d_full_session_runner import (
+    _D_STAGE_ORDER,
     G2D_CAMPAIGN_DATA_CEILING,
     G2D_MAX_TICKS,
-    _D_STAGE_ORDER,
     _G2DInjectedModelCall,
     run_d_full_session,
 )
 from tokmo.values.ops_kernel import OpsKernelBudgetExceeded
-from tokmo.values.session_gate import Market
-
 
 # A wall instant on the KR regular-session day, aligned to the 300s grid so the
 # first scheduled tick sits exactly at KR open.
-START = datetime(2026, 8, 3, 1, 0, tzinfo=timezone.utc)
+START = datetime(2026, 8, 3, 1, 0, tzinfo=UTC)
 UTC_DAY = START.date()
 # KR regular window spans exactly two 300s ticks: tick 0 (01:00) and tick 1
 # (01:05) are open; tick 2 (01:10) is at/after the close, so the runner must
@@ -108,71 +105,116 @@ def _clock():
 # Path-dispatching scripted HTTPS handler (robust to per-tick call counts).
 # ---------------------------------------------------------------------------
 
+
 def _JsonResponse(body: bytes):
     headers = Message()
     response = urllib.response.addinfourl(
-        io.BytesIO(body), headers, "https://openapi.tossinvest.com/x", code=200)
-    setattr(response, "msg", "OK")
+        io.BytesIO(body), headers, "https://openapi.tossinvest.com/x", code=200
+    )
+    response.msg = "OK"
     return response
 
 
 def _token_body(expires_in: int = 3600) -> bytes:
-    return json.dumps({
-        "access_token": "a" * 40, "expires_in": expires_in,
-        "token_type": "Bearer",
-    }).encode()
+    return json.dumps(
+        {
+            "access_token": "a" * 40,
+            "expires_in": expires_in,
+            "token_type": "Bearer",
+        }
+    ).encode()
 
 
 def _kr_open_body(day: date) -> bytes:
-    return json.dumps({"result": {
-        "today": {"date": day.isoformat(), "integrated": {"regularMarket": {
-            "startTime": f"{KR_OPEN.isoformat()}",
-            "endTime": f"{KR_CLOSE.isoformat()}"}}},
-        "previousBusinessDay": {"date": "2026-07-31"},
-        "nextBusinessDay": {"date": "2026-08-04"},
-    }}).encode()
+    return json.dumps(
+        {
+            "result": {
+                "today": {
+                    "date": day.isoformat(),
+                    "integrated": {
+                        "regularMarket": {
+                            "startTime": f"{KR_OPEN.isoformat()}",
+                            "endTime": f"{KR_CLOSE.isoformat()}",
+                        }
+                    },
+                },
+                "previousBusinessDay": {"date": "2026-07-31"},
+                "nextBusinessDay": {"date": "2026-08-04"},
+            }
+        }
+    ).encode()
 
 
 def _kr_window_body(close_seconds: int):
     """A KR calendar whose regular window spans ``close_seconds`` from open."""
+
     def body(day: date) -> bytes:
-        return json.dumps({"result": {
-            "today": {"date": day.isoformat(), "integrated": {"regularMarket": {
-                "startTime": f"{KR_OPEN.isoformat()}",
-                "endTime": f"{(KR_OPEN + timedelta(seconds=close_seconds)).isoformat()}"}}},
-            "previousBusinessDay": {"date": "2026-07-31"},
-            "nextBusinessDay": {"date": "2026-08-04"},
-        }}).encode()
+        return json.dumps(
+            {
+                "result": {
+                    "today": {
+                        "date": day.isoformat(),
+                        "integrated": {
+                            "regularMarket": {
+                                "startTime": f"{KR_OPEN.isoformat()}",
+                                "endTime": f"{(KR_OPEN + timedelta(seconds=close_seconds)).isoformat()}",
+                            }
+                        },
+                    },
+                    "previousBusinessDay": {"date": "2026-07-31"},
+                    "nextBusinessDay": {"date": "2026-08-04"},
+                }
+            }
+        ).encode()
+
     return body
 
 
 def _kr_no_regular_body(day: date) -> bytes:
     """A KR holiday: the official calendar carries no regular session."""
-    return json.dumps({"result": {
-        "today": {"date": day.isoformat(), "integrated": None},
-        "previousBusinessDay": {"date": "2026-07-31"},
-        "nextBusinessDay": {"date": "2026-08-04"},
-    }}).encode()
+    return json.dumps(
+        {
+            "result": {
+                "today": {"date": day.isoformat(), "integrated": None},
+                "previousBusinessDay": {"date": "2026-07-31"},
+                "nextBusinessDay": {"date": "2026-08-04"},
+            }
+        }
+    ).encode()
 
 
 def _kr_session_body(day: date) -> bytes:
     # A past KR regular-session date for the trades window prefetch: any regular
     # window on the echoed date qualifies it as a session.
-    return json.dumps({"result": {
-        "today": {"date": day.isoformat(), "integrated": {"regularMarket": {
-            "startTime": f"{day.isoformat()}T01:00:00+00:00",
-            "endTime": f"{day.isoformat()}T06:30:00+00:00"}}},
-        "previousBusinessDay": {"date": "2026-07-31"},
-        "nextBusinessDay": {"date": "2026-08-04"},
-    }}).encode()
+    return json.dumps(
+        {
+            "result": {
+                "today": {
+                    "date": day.isoformat(),
+                    "integrated": {
+                        "regularMarket": {
+                            "startTime": f"{day.isoformat()}T01:00:00+00:00",
+                            "endTime": f"{day.isoformat()}T06:30:00+00:00",
+                        }
+                    },
+                },
+                "previousBusinessDay": {"date": "2026-07-31"},
+                "nextBusinessDay": {"date": "2026-08-04"},
+            }
+        }
+    ).encode()
 
 
 def _us_closed_body(day: date) -> bytes:
-    return json.dumps({"result": {
-        "today": {"date": day.isoformat()},
-        "previousBusinessDay": {"date": "2026-07-31"},
-        "nextBusinessDay": {"date": "2026-08-04"},
-    }}).encode()
+    return json.dumps(
+        {
+            "result": {
+                "today": {"date": day.isoformat()},
+                "previousBusinessDay": {"date": "2026-07-31"},
+                "nextBusinessDay": {"date": "2026-08-04"},
+            }
+        }
+    ).encode()
 
 
 def _accounts_body(*seqs: str) -> bytes:
@@ -180,26 +222,47 @@ def _accounts_body(*seqs: str) -> bytes:
 
 
 def _kr_holdings_body() -> bytes:
-    return json.dumps({"result": {"items": [
-        {"symbol": "005930", "quantity": "5", "averagePrice": "70000",
-         "market": "KR", "currency": "KRW"},
-    ]}}).encode()
+    return json.dumps(
+        {
+            "result": {
+                "items": [
+                    {
+                        "symbol": "005930",
+                        "quantity": "5",
+                        "averagePrice": "70000",
+                        "market": "KR",
+                        "currency": "KRW",
+                    },
+                ]
+            }
+        }
+    ).encode()
 
 
 def _kr_price_body() -> bytes:
-    return json.dumps({"result": [
-        {"symbol": "005930", "lastPrice": "70500", "currency": "KRW",
-         "timestamp": f"{KR_OPEN.isoformat()}"},
-    ]}).encode()
+    return json.dumps(
+        {
+            "result": [
+                {
+                    "symbol": "005930",
+                    "lastPrice": "70500",
+                    "currency": "KRW",
+                    "timestamp": f"{KR_OPEN.isoformat()}",
+                },
+            ]
+        }
+    ).encode()
 
 
 def _orders_empty_closed() -> bytes:
-    return json.dumps({"result": {
-        "orders": [], "nextCursor": None, "hasNext": False}}).encode()
+    return json.dumps(
+        {"result": {"orders": [], "nextCursor": None, "hasNext": False}}
+    ).encode()
 
 
-def _dispatch_handler(wire, *, kr_calendar=_kr_open_body,
-                      token_expires_in: int = 3600, holdings_body=None):
+def _dispatch_handler(
+    wire, *, kr_calendar=_kr_open_body, token_expires_in: int = 3600, holdings_body=None
+):
     """A scripted HTTPS handler that answers by request path (not by order).
 
     A whole KR-open session runs many ticks with cache-gated calendar/token, so
@@ -249,20 +312,31 @@ def _dispatch_handler(wire, *, kr_calendar=_kr_open_body,
 # Injected scripted GLM/SOL stubs (no live model provider, ever).
 # ---------------------------------------------------------------------------
 
+
 def _glm_screen_all_none(body):
-    return json.dumps({
-        "schema_version": 1,
-        "annotations": [{
-            "candidate_id": row["candidate_id"], "relevance": "NONE",
-            "materiality": "LOW", "urgency": "NONE",
-            "evidence_unknowns": [], "summary": "screened",
-        } for row in json.loads(body)["candidates"]],
-    }, separators=(",", ":")).encode()
+    return json.dumps(
+        {
+            "schema_version": 1,
+            "annotations": [
+                {
+                    "candidate_id": row["candidate_id"],
+                    "relevance": "NONE",
+                    "materiality": "LOW",
+                    "urgency": "NONE",
+                    "evidence_unknowns": [],
+                    "summary": "screened",
+                }
+                for row in json.loads(body)["candidates"]
+            ],
+        },
+        separators=(",", ":"),
+    ).encode()
 
 
 def _sol_never(body):
-    return json.dumps({"schema_version": 1, "analyses": []},
-                      separators=(",", ":")).encode()
+    return json.dumps(
+        {"schema_version": 1, "analyses": []}, separators=(",", ":")
+    ).encode()
 
 
 def _paths(wire):
@@ -288,10 +362,22 @@ def _restore_socket():
     socket.getaddrinfo, socket.create_connection = saved
 
 
-def _run(tmp_path, monkeypatch, *, glm=_glm_screen_all_none, sol=_sol_never,
-         clock=None, sleeper=None, wire=None, kr_calendar=_kr_open_body,
-         campaign_data_ceiling=G2D_CAMPAIGN_DATA_CEILING, approved_rerun=False,
-         token_expires_in=3600, holdings_body=None, metrics_sink=None):
+def _run(
+    tmp_path,
+    monkeypatch,
+    *,
+    glm=_glm_screen_all_none,
+    sol=_sol_never,
+    clock=None,
+    sleeper=None,
+    wire=None,
+    kr_calendar=_kr_open_body,
+    campaign_data_ceiling=G2D_CAMPAIGN_DATA_CEILING,
+    approved_rerun=False,
+    token_expires_in=3600,
+    holdings_body=None,
+    metrics_sink=None,
+):
     _credential(tmp_path)
     real_socket: list = []
     _forbid_socket(monkeypatch, real_socket)
@@ -300,32 +386,52 @@ def _run(tmp_path, monkeypatch, *, glm=_glm_screen_all_none, sol=_sol_never,
     # next tick's providers observe their own scheduled tick (fresh live data per
     # tick); a test may inject its own sleeper (e.g. to simulate a crash).
     if sleeper is None:
-        sleeper = clock.advance if isinstance(clock, VirtualClock) else (lambda _s: None)
+        sleeper = (
+            clock.advance if isinstance(clock, VirtualClock) else (lambda _s: None)
+        )
     if wire is None:
         wire = []
     deps = build_g2d_live_deps(
-        project_root=tmp_path, clock=clock, glm_call=glm, sol_call=sol,
+        project_root=tmp_path,
+        clock=clock,
+        glm_call=glm,
+        sol_call=sol,
         https_handler_factory=_dispatch_handler(
-            wire, kr_calendar=kr_calendar, token_expires_in=token_expires_in,
-            holdings_body=holdings_body))
+            wire,
+            kr_calendar=kr_calendar,
+            token_expires_in=token_expires_in,
+            holdings_body=holdings_body,
+        ),
+    )
     report = run_d_full_session(
-        home=tmp_path, utc_day=UTC_DAY, deps=deps, credential_path=None,
-        clock=clock, sleeper=sleeper, open_handle_probe=lambda _p: 0,
-        campaign_data_ceiling=campaign_data_ceiling, approved_rerun=approved_rerun,
-        metrics_sink=metrics_sink)
+        home=tmp_path,
+        utc_day=UTC_DAY,
+        deps=deps,
+        credential_path=None,
+        clock=clock,
+        sleeper=sleeper,
+        open_handle_probe=lambda _p: 0,
+        campaign_data_ceiling=campaign_data_ceiling,
+        approved_rerun=approved_rerun,
+        metrics_sink=metrics_sink,
+    )
     return report, wire, real_socket
 
 
 def _read_state(tmp_path):
     return json.loads(
-        (shadow_root(tmp_path, UTC_DAY) / "g2d_run_state.json").read_text())
+        (shadow_root(tmp_path, UTC_DAY) / "g2d_run_state.json").read_text()
+    )
 
 
 # ---------------------------------------------------------------------------
 # T-N20 (§10.3): self-termination on the after_close tick with data-provider 0.
 # ---------------------------------------------------------------------------
 
-def test_after_close_tick_self_terminates_before_any_data_provider(tmp_path, monkeypatch):
+
+def test_after_close_tick_self_terminates_before_any_data_provider(
+    tmp_path, monkeypatch
+):
     report, wire, real_socket = _run(tmp_path, monkeypatch)
 
     # KR was open for exactly ticks 0 and 1; the third tick read the verdict as
@@ -341,8 +447,12 @@ def test_after_close_tick_self_terminates_before_any_data_provider(tmp_path, mon
     assert report.receipt_counts.get("trades:saved") == 2
     # The live data path really ran while KR was open (holdings/quotes/trades),
     # so this is a genuine data run, not a no-op.
-    data_paths = {"/api/v1/accounts", "/api/v1/holdings", "/api/v1/prices",
-                  "/api/v1/orders"}
+    data_paths = {
+        "/api/v1/accounts",
+        "/api/v1/holdings",
+        "/api/v1/prices",
+        "/api/v1/orders",
+    }
     assert any(path in data_paths for path in _paths(wire))
     # Corrected market-local behavior (G-1, cadence SDS §4): the session-gate
     # calendar is fetched once per market for its own local date on the cold
@@ -351,7 +461,8 @@ def test_after_close_tick_self_terminates_before_any_data_provider(tmp_path, mon
     # wire entry is the last open tick's data call, with nothing after it.
     first_data = min(i for i, (_m, path) in enumerate(wire) if path in data_paths)
     cold_calendar = [
-        i for i, (_m, path) in enumerate(wire[:first_data])
+        i
+        for i, (_m, path) in enumerate(wire[:first_data])
         if path.startswith("/api/v1/market-calendar/")
     ]
     assert len(cold_calendar) == 2  # one KR + one US cold local-date fetch
@@ -361,8 +472,13 @@ def test_after_close_tick_self_terminates_before_any_data_provider(tmp_path, mon
 
 def test_stage_order_is_the_full_seven_stage_cadence(tmp_path):
     assert _D_STAGE_ORDER == (
-        "calendar_provider", "session_gate", "holdings_runner", "quotes_runner",
-        "trades_runner", "barrier_runner", "analysis_runner",
+        "calendar_provider",
+        "session_gate",
+        "holdings_runner",
+        "quotes_runner",
+        "trades_runner",
+        "barrier_runner",
+        "analysis_runner",
     )
 
 
@@ -371,12 +487,16 @@ def test_stage_order_is_the_full_seven_stage_cadence(tmp_path):
 # bounded token re-acquisition, subject-tick numeric evidence (B-1/M-1/M-3).
 # ---------------------------------------------------------------------------
 
+
 def test_full_session_78_ticks_green_past_g2b_ledger_with_token_reacquisition(
-        tmp_path, monkeypatch):
+    tmp_path, monkeypatch
+):
     report, wire, real_socket = _run(
-        tmp_path, monkeypatch,
+        tmp_path,
+        monkeypatch,
         kr_calendar=_kr_window_body(FULL_SESSION_TICKS * 300),
-        token_expires_in=3600)
+        token_expires_in=3600,
+    )
 
     # The whole KR session ran and self-terminated as a success terminus.
     assert report.stop_reason == "session_ended"
@@ -409,8 +529,8 @@ def test_full_session_78_ticks_green_past_g2b_ledger_with_token_reacquisition(
     assert report.glm_calls < report.numeric_state_established_count
     # The calendar wire stays a separate bounded budget (<=70, M-4).
     calendar = sum(
-        1 for path in _paths(wire)
-        if path.startswith("/api/v1/market-calendar/"))
+        1 for path in _paths(wire) if path.startswith("/api/v1/market-calendar/")
+    )
     assert calendar <= 70
     # Virtual full-session duration: the terminating tick sits one grid step
     # past the last open tick.
@@ -453,18 +573,22 @@ def test_ledger_admits_worst_shape_to_exactly_2310_and_refuses_2311th():
 # B-2: a non-green tick is an explicit STOP, never a success terminus.
 # ---------------------------------------------------------------------------
 
+
 def test_non_green_tick_stops_run_instead_of_reporting_success(tmp_path, monkeypatch):
     # The holdings path turns malformed from its third tick onward: the stage
     # writes a failed receipt and returns normally, and the per-tick green gate
     # must convert that into an explicit STOP.
     def holdings_body(count):
         if count >= 3:
-            return b"{\"result\": \"garbage\"}"
+            return b'{"result": "garbage"}'
         return _kr_holdings_body()
 
     report, _wire, _socket = _run(
-        tmp_path, monkeypatch, kr_calendar=_kr_window_body(10 * 300),
-        holdings_body=holdings_body)
+        tmp_path,
+        monkeypatch,
+        kr_calendar=_kr_window_body(10 * 300),
+        holdings_body=holdings_body,
+    )
 
     assert report.stop_reason == "data_tick_not_green"
     assert report.tick_count == 3
@@ -480,6 +604,7 @@ def test_non_green_tick_stops_run_instead_of_reporting_success(tmp_path, monkeyp
 # table, no resume, same-day rerun refused without approval.
 # ---------------------------------------------------------------------------
 
+
 def test_crash_mid_session_ends_incomplete_without_propagating(tmp_path, monkeypatch):
     boom = {"ticks": 0}
     clock = VirtualClock()
@@ -493,8 +618,12 @@ def test_crash_mid_session_ends_incomplete_without_propagating(tmp_path, monkeyp
         clock.advance(seconds)
 
     report, _wire, _socket = _run(
-        tmp_path, monkeypatch, clock=clock, sleeper=_sleeper,
-        kr_calendar=_kr_window_body(10 * 300))
+        tmp_path,
+        monkeypatch,
+        clock=clock,
+        sleeper=_sleeper,
+        kr_calendar=_kr_window_body(10 * 300),
+    )
 
     # No exception escaped: the run terminated itself as INCOMPLETE.
     assert report.incomplete is True
@@ -513,8 +642,8 @@ def test_crash_path_reconciles_production_mutation(tmp_path, monkeypatch):
     # B-3: a crash that coincides with a production-state mutation must not
     # report production_invariant_ok=True — the crash path re-measures.
     production_lock = (
-        tmp_path / ".local" / "share" / "tokmo-v3" / "ops" / "locks"
-        / "integrated.lock")
+        tmp_path / ".local" / "share" / "tokmo-v3" / "ops" / "locks" / "integrated.lock"
+    )
     boom = {"ticks": 0}
     clock = VirtualClock()
 
@@ -527,8 +656,12 @@ def test_crash_path_reconciles_production_mutation(tmp_path, monkeypatch):
         clock.advance(seconds)
 
     report, _wire, _socket = _run(
-        tmp_path, monkeypatch, clock=clock, sleeper=_sleeper,
-        kr_calendar=_kr_window_body(10 * 300))
+        tmp_path,
+        monkeypatch,
+        clock=clock,
+        sleeper=_sleeper,
+        kr_calendar=_kr_window_body(10 * 300),
+    )
 
     assert report.incomplete is True
     assert report.production_invariant_ok is False
@@ -550,8 +683,13 @@ def test_keyboard_interrupt_is_recorded_but_never_swallowed(tmp_path, monkeypatc
         clock.advance(seconds)
 
     with pytest.raises(KeyboardInterrupt):
-        _run(tmp_path, monkeypatch, clock=clock, sleeper=_sleeper,
-             kr_calendar=_kr_window_body(10 * 300))
+        _run(
+            tmp_path,
+            monkeypatch,
+            clock=clock,
+            sleeper=_sleeper,
+            kr_calendar=_kr_window_body(10 * 300),
+        )
     state = _read_state(tmp_path)
     assert state["status"] == "INCOMPLETE"
     assert state["exception_type"] == "KeyboardInterrupt"
@@ -563,8 +701,12 @@ def test_no_g2d_ticks_progress_table_and_no_resume_or_replay(tmp_path, monkeypat
     # imports sqlite3 (no connection of its own) and defines no DDL/table at all.
     source = inspect.getsource(g2d)
     tree = ast.parse(source)
-    imported = {alias.name for node in ast.walk(tree)
-                if isinstance(node, ast.Import) for alias in node.names}
+    imported = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    }
     assert "sqlite3" not in imported
     assert "CREATE TABLE" not in source
     root = shadow_root(tmp_path, UTC_DAY)
@@ -573,8 +715,10 @@ def test_no_g2d_ticks_progress_table_and_no_resume_or_replay(tmp_path, monkeypat
     connection = sqlite3.connect(root / "ops" / "ops_kernel.sqlite3")
     try:
         tables = {
-            row[0] for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'")
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
         }
     finally:
         connection.close()
@@ -594,26 +738,33 @@ def test_same_day_rerun_refuses_without_explicit_approval(tmp_path, monkeypatch)
 # M-1 (§10.4): bounded in-process token re-acquisition, ten TOTAL calls.
 # ---------------------------------------------------------------------------
 
+
 def test_token_expiry_reacquires_bounded_then_stops_incomplete(tmp_path, monkeypatch):
+    from tokmo.programs.g2a_shadow_runner import _private_dir
     from tokmo.programs.integrated_fake_cadence import RequestGateV1
     from tokmo.records.ops_kernel import OpsKernelStore
-    from tokmo.programs.g2a_shadow_runner import _private_dir
 
     _credential(tmp_path)
     _forbid_socket(monkeypatch, [])
     root = shadow_root(tmp_path, UTC_DAY)
     _private_dir(root / "ops")
     store = OpsKernelStore(root / "ops" / "ops_kernel.sqlite3")
-    from tokmo.values.ops_kernel import ProducerRole
     import secrets
-    store.reconcile_requests(ProducerRole.COLLECTOR,
-                             invocation_id=secrets.token_hex(16), now=START)
+
+    from tokmo.values.ops_kernel import ProducerRole
+
+    store.reconcile_requests(
+        ProducerRole.COLLECTOR, invocation_id=secrets.token_hex(16), now=START
+    )
 
     wire: list = []
     deps = build_g2d_live_deps(
-        project_root=tmp_path, clock=lambda: START,
-        glm_call=_glm_screen_all_none, sol_call=_sol_never,
-        https_handler_factory=_dispatch_handler(wire))
+        project_root=tmp_path,
+        clock=lambda: START,
+        glm_call=_glm_screen_all_none,
+        sol_call=_sol_never,
+        https_handler_factory=_dispatch_handler(wire),
+    )
     gate = RequestGateV1(store)
     token_acquire = g2d._token_acquire_for(deps)
     first = token_acquire(gate, START)
@@ -623,23 +774,29 @@ def test_token_expiry_reacquires_bounded_then_stops_incomplete(tmp_path, monkeyp
     second = token_acquire(gate, START + timedelta(hours=2))
     assert second
     token_rows = [
-        row for row in store.read_planned_requests(0, "HOLDINGS")
-        if row["operation"] == "TOKEN"]
+        row
+        for row in store.read_planned_requests(0, "HOLDINGS")
+        if row["operation"] == "TOKEN"
+    ]
     assert len(token_rows) == 2
     # Every further expiry mints one more durable call, up to ten TOTAL; the
     # eleventh is the terminal token_lost_incomplete STOP.
     for extra in range(8):
         assert token_acquire(gate, START + timedelta(hours=4 + 2 * extra))
     token_rows = [
-        row for row in store.read_planned_requests(0, "HOLDINGS")
-        if row["operation"] == "TOKEN"]
+        row
+        for row in store.read_planned_requests(0, "HOLDINGS")
+        if row["operation"] == "TOKEN"
+    ]
     assert len(token_rows) == 10
     with pytest.raises(G2AStopError, match="token_lost_incomplete"):
         token_acquire(gate, START + timedelta(hours=48))
     # The refused eleventh call never charged a durable row.
     token_rows = [
-        row for row in store.read_planned_requests(0, "HOLDINGS")
-        if row["operation"] == "TOKEN"]
+        row
+        for row in store.read_planned_requests(0, "HOLDINGS")
+        if row["operation"] == "TOKEN"
+    ]
     assert len(token_rows) == 10
 
 
@@ -647,9 +804,11 @@ def test_token_allowance_exhaustion_mid_session_is_incomplete(tmp_path, monkeypa
     # A 2100s bearer over 78 ticks needs an eleventh acquisition at tick 70:
     # the run must stop token_lost_incomplete with exactly ten durable calls.
     report, _wire, _socket = _run(
-        tmp_path, monkeypatch,
+        tmp_path,
+        monkeypatch,
         kr_calendar=_kr_window_body(FULL_SESSION_TICKS * 300),
-        token_expires_in=2100)
+        token_expires_in=2100,
+    )
 
     assert report.stop_reason == "token_lost_incomplete"
     assert report.incomplete is True
@@ -665,7 +824,10 @@ def test_token_allowance_exhaustion_mid_session_is_incomplete(tmp_path, monkeypa
 # T-N22 (§10.5): campaign data ceiling 2310, calendar (<=70) counted apart.
 # ---------------------------------------------------------------------------
 
-def test_campaign_data_ceiling_stops_before_exceeding_and_calendar_is_apart(tmp_path, monkeypatch):
+
+def test_campaign_data_ceiling_stops_before_exceeding_and_calendar_is_apart(
+    tmp_path, monkeypatch
+):
     # A small injected ceiling (just above one tick's 23 data upper bound) lets
     # exactly the first tick run, then the pre-tick gate trips before the second
     # tick would cross the campaign total; production default is the real 2310.
@@ -676,17 +838,22 @@ def test_campaign_data_ceiling_stops_before_exceeding_and_calendar_is_apart(tmp_
     assert 1 <= report.provider_started_count <= 25
     # The calendar wire is a separate budget (M-4): it is not part of the 2310
     # data counter, and the gate/prefetch calendars still occurred.
-    calendar = (_paths(wire).count("/api/v1/market-calendar/KR")
-                + _paths(wire).count("/api/v1/market-calendar/US"))
+    calendar = _paths(wire).count("/api/v1/market-calendar/KR") + _paths(wire).count(
+        "/api/v1/market-calendar/US"
+    )
     assert calendar >= 2
-    connection = sqlite3.connect(shadow_root(tmp_path, UTC_DAY) / "ops" / "ops_kernel.sqlite3")
+    connection = sqlite3.connect(
+        shadow_root(tmp_path, UTC_DAY) / "ops" / "ops_kernel.sqlite3"
+    )
     try:
         provider_counter = connection.execute(
             "SELECT provider_started_count FROM request_day_counters WHERE utc_day=?",
-            (UTC_DAY.isoformat(),)).fetchone()[0]
+            (UTC_DAY.isoformat(),),
+        ).fetchone()[0]
         calendar_started = connection.execute(
             "SELECT COUNT(*) FROM planned_requests WHERE started_at IS NOT NULL "
-            "AND operation LIKE 'CALENDAR_DAY_%'").fetchone()[0]
+            "AND operation LIKE 'CALENDAR_DAY_%'"
+        ).fetchone()[0]
     finally:
         connection.close()
     # The durable 3744-shaped counter excludes calendar entirely.
@@ -704,7 +871,8 @@ def test_tick_cap_reached_stops_after_one_hundred_ticks(tmp_path, monkeypatch):
     # A calendar whose close never arrives within the cap: the safety net stops
     # the loop at exactly 100 executed ticks, all green, ceiling never fired.
     report, _wire, _socket = _run(
-        tmp_path, monkeypatch, kr_calendar=_kr_window_body(140 * 300))
+        tmp_path, monkeypatch, kr_calendar=_kr_window_body(140 * 300)
+    )
 
     assert report.stop_reason == "tick_cap_reached"
     assert report.tick_count == G2D_MAX_TICKS
@@ -718,6 +886,7 @@ def test_tick_cap_reached_stops_after_one_hundred_ticks(tmp_path, monkeypatch):
 # Real 300s grid: injected wall-clock lag keeps tick identity coherent.
 # ---------------------------------------------------------------------------
 
+
 def test_lag_injection_keeps_tick_ids_on_the_300s_grid(tmp_path, monkeypatch):
     clock = VirtualClock()
 
@@ -729,8 +898,13 @@ def test_lag_injection_keeps_tick_ids_on_the_300s_grid(tmp_path, monkeypatch):
 
     metrics: list = []
     report, _wire, _socket = _run(
-        tmp_path, monkeypatch, clock=clock, sleeper=lag_sleeper,
-        kr_calendar=_kr_window_body(6 * 300), metrics_sink=metrics.append)
+        tmp_path,
+        monkeypatch,
+        clock=clock,
+        sleeper=lag_sleeper,
+        kr_calendar=_kr_window_body(6 * 300),
+        metrics_sink=metrics.append,
+    )
 
     assert report.stop_reason == "session_ended"
     assert report.tick_count == 6
@@ -749,6 +923,7 @@ def test_lag_injection_keeps_tick_ids_on_the_300s_grid(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 # M-2: zero-tick kr_not_open refusal never seals the day, reasons distinct.
 # ---------------------------------------------------------------------------
+
 
 def test_before_open_start_refuses_without_sealing_the_day(tmp_path, monkeypatch):
     early = VirtualClock(START - timedelta(minutes=20))
@@ -770,7 +945,8 @@ def test_before_open_start_refuses_without_sealing_the_day(tmp_path, monkeypatch
 
 def test_holiday_refusal_reason_is_distinct_from_before_open(tmp_path, monkeypatch):
     report, _wire, _socket = _run(
-        tmp_path, monkeypatch, kr_calendar=_kr_no_regular_body)
+        tmp_path, monkeypatch, kr_calendar=_kr_no_regular_body
+    )
 
     assert report.stop_reason == "kr_not_open_no_regular"
     assert report.tick_count == 0
@@ -792,10 +968,11 @@ def test_after_close_zero_tick_is_a_completed_terminus(tmp_path, monkeypatch):
 # M-2: real operational entry points with production-safe scripted stubs.
 # ---------------------------------------------------------------------------
 
+
 def test_cli_g2d_preflight_route_exists_and_refuses_cleanly(tmp_path, capsys):
-    code = composition.main([
-        "g2d", "--preflight",
-        "--home", str(tmp_path), "--project-root", str(tmp_path)])
+    code = composition.main(
+        ["g2d", "--preflight", "--home", str(tmp_path), "--project-root", str(tmp_path)]
+    )
     out = capsys.readouterr().out
     # No credential in the bare tmp home: the real preflight refuses, which
     # proves the route is wired to the real guard (and opens no socket).
@@ -803,7 +980,9 @@ def test_cli_g2d_preflight_route_exists_and_refuses_cleanly(tmp_path, capsys):
     assert "g2d preflight=refused" in out
 
 
-def test_cli_g2d_run_route_passes_scripted_stubs_and_rerun_flag(tmp_path, monkeypatch, capsys):
+def test_cli_g2d_run_route_passes_scripted_stubs_and_rerun_flag(
+    tmp_path, monkeypatch, capsys
+):
     recorded = {}
 
     def fake_build(**kwargs):
@@ -813,18 +992,33 @@ def test_cli_g2d_run_route_passes_scripted_stubs_and_rerun_flag(tmp_path, monkey
     def fake_run(**kwargs):
         recorded["run"] = kwargs
         return g2d.G2DReport(
-            run_id="g2d-a-2026-08-03", utc_day="2026-08-03", tick_count=0,
-            stop_reason="kr_not_open_before_open", provider_started_count=0,
-            wire_attempt_count=0, numeric_state_established_count=0,
-            trigger_counts={}, disposition_counts={},
-            production_invariant_ok=True, incomplete=False, duration_seconds=0.0)
+            run_id="g2d-a-2026-08-03",
+            utc_day="2026-08-03",
+            tick_count=0,
+            stop_reason="kr_not_open_before_open",
+            provider_started_count=0,
+            wire_attempt_count=0,
+            numeric_state_established_count=0,
+            trigger_counts={},
+            disposition_counts={},
+            production_invariant_ok=True,
+            incomplete=False,
+            duration_seconds=0.0,
+        )
 
     monkeypatch.setattr(composition, "build_g2d_live_deps", fake_build)
     monkeypatch.setattr(composition, "run_d_full_session", fake_run)
 
-    code = composition.main([
-        "g2d", "--run-d-full-session",
-        "--home", str(tmp_path), "--project-root", str(tmp_path)])
+    code = composition.main(
+        [
+            "g2d",
+            "--run-d-full-session",
+            "--home",
+            str(tmp_path),
+            "--project-root",
+            str(tmp_path),
+        ]
+    )
     assert code == 2
     assert recorded["run"]["approved_rerun"] is False
     # The CLI supplies the composition-owned deterministic scripted stubs — the
@@ -833,9 +1027,17 @@ def test_cli_g2d_run_route_passes_scripted_stubs_and_rerun_flag(tmp_path, monkey
     assert recorded["build"]["sol_call"] is g2d_scripted_sol_call
     assert recorded["build"]["https_handler_factory"] is None
 
-    code = composition.main([
-        "g2d", "--run-d-full-session", "--approved-rerun",
-        "--home", str(tmp_path), "--project-root", str(tmp_path)])
+    code = composition.main(
+        [
+            "g2d",
+            "--run-d-full-session",
+            "--approved-rerun",
+            "--home",
+            str(tmp_path),
+            "--project-root",
+            str(tmp_path),
+        ]
+    )
     assert code == 2
     assert recorded["run"]["approved_rerun"] is True
     out = capsys.readouterr().out
@@ -852,13 +1054,17 @@ def test_cli_usage_mentions_g2d_routes(capsys):
 
 
 def test_scripted_stubs_are_deterministic_and_local(tmp_path):
-    body = json.dumps({
-        "schema_version": 1, "instructions": [], "untrusted": [],
-        "candidates": [
-            {"candidate_id": "c1", "payload": {}},
-            {"candidate_id": "c2", "payload": {}},
-        ],
-    }).encode()
+    body = json.dumps(
+        {
+            "schema_version": 1,
+            "instructions": [],
+            "untrusted": [],
+            "candidates": [
+                {"candidate_id": "c1", "payload": {}},
+                {"candidate_id": "c2", "payload": {}},
+            ],
+        }
+    ).encode()
     first = g2d_scripted_glm_call(body)
     second = g2d_scripted_glm_call(body)
     assert first == second
@@ -866,20 +1072,25 @@ def test_scripted_stubs_are_deterministic_and_local(tmp_path):
     assert [row["candidate_id"] for row in annotations] == ["c1", "c2"]
     assert all(row["relevance"] == "NONE" for row in annotations)
     assert json.loads(g2d_scripted_sol_call(body)) == {
-        "schema_version": 1, "analyses": []}
+        "schema_version": 1,
+        "analyses": [],
+    }
 
 
 # ---------------------------------------------------------------------------
 # M-3: numeric-evidence instrumentation gaps are counted, never silent zeros.
 # ---------------------------------------------------------------------------
 
-def test_missing_numeric_evidence_is_counted_and_marks_incomplete(tmp_path, monkeypatch):
+
+def test_missing_numeric_evidence_is_counted_and_marks_incomplete(
+    tmp_path, monkeypatch
+):
     # If the analysis stage stops emitting the explicit per-tick numeric
     # metric, the report must expose the gap and refuse to look complete —
     # instrumentation failure and "no signal" are different facts.
     monkeypatch.setattr(
-        integrated_fake_cadence, "run_analysis_pipeline",
-        lambda **kwargs: None)
+        integrated_fake_cadence, "run_analysis_pipeline", lambda **kwargs: None
+    )
     report, _wire, _socket = _run(tmp_path, monkeypatch)
 
     assert report.numeric_evidence_missing_tick_count == 2
@@ -892,7 +1103,10 @@ def test_missing_numeric_evidence_is_counted_and_marks_incomplete(tmp_path, monk
 # T-N23 (§10.7): GLM/SOL slots are always caller-injected; real model calls = 0.
 # ---------------------------------------------------------------------------
 
-def test_model_slots_are_caller_injected_and_no_network_model_call(tmp_path, monkeypatch):
+
+def test_model_slots_are_caller_injected_and_no_network_model_call(
+    tmp_path, monkeypatch
+):
     glm_bodies, sol_bodies = [], []
 
     def glm(body):
@@ -925,20 +1139,31 @@ def test_model_slots_are_caller_injected_and_no_network_model_call(tmp_path, mon
 
 def test_runner_refuses_non_injected_model_slots(tmp_path, monkeypatch):
     import dataclasses
+
     _credential(tmp_path)
     _forbid_socket(monkeypatch, [])
     wire: list = []
     clock = VirtualClock()
     deps = build_g2d_live_deps(
-        project_root=tmp_path, clock=clock, glm_call=_glm_screen_all_none,
-        sol_call=_sol_never, https_handler_factory=_dispatch_handler(wire))
+        project_root=tmp_path,
+        clock=clock,
+        glm_call=_glm_screen_all_none,
+        sol_call=_sol_never,
+        https_handler_factory=_dispatch_handler(wire),
+    )
     # A raw (non-marker) model slot smuggled past composition must be rejected
     # at once, before any provider runs.
     tampered = dataclasses.replace(deps, glm_call=lambda body: b"{}")
     with pytest.raises(G2AStopError, match="glm_not_injected"):
         run_d_full_session(
-            home=tmp_path, utc_day=UTC_DAY, deps=tampered, credential_path=None,
-            clock=clock, sleeper=lambda _s: None, open_handle_probe=lambda _p: 0)
+            home=tmp_path,
+            utc_day=UTC_DAY,
+            deps=tampered,
+            credential_path=None,
+            clock=clock,
+            sleeper=lambda _s: None,
+            open_handle_probe=lambda _p: 0,
+        )
 
 
 def test_runner_and_composition_import_no_live_model_provider(tmp_path):
@@ -948,16 +1173,19 @@ def test_runner_and_composition_import_no_live_model_provider(tmp_path):
     tree = ast.parse(source)
     modules = {
         (node.module or "")
-        for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
     } | {
         alias.name
-        for node in ast.walk(tree) if isinstance(node, ast.Import)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
         for alias in node.names
     }
     assert not any("composition" in name for name in modules)
     assert not any("live" in name.lower() for name in modules)
-    assert not any(name.split(".")[0] in {"socket", "ssl", "http", "urllib"}
-                   for name in modules)
+    assert not any(
+        name.split(".")[0] in {"socket", "ssl", "http", "urllib"} for name in modules
+    )
 
 
 def test_glm_sol_are_required_injections_of_build_g2d_live_deps(tmp_path):

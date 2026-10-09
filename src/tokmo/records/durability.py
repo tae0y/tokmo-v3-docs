@@ -39,10 +39,14 @@ RESTORE_STAGE_BACKUP_PRESERVED = "backup_preserved"
 RESTORE_STAGE_COMPLETE = "complete"
 
 # Stages at or after which the target name may already point at the new bytes.
-_STAGES_AFTER_REPLACEMENT = frozenset({
-    RESTORE_STAGE_DIR_FSYNC, RESTORE_STAGE_POST_VERIFY,
-    RESTORE_STAGE_BACKUP_PRESERVED, RESTORE_STAGE_COMPLETE,
-})
+_STAGES_AFTER_REPLACEMENT = frozenset(
+    {
+        RESTORE_STAGE_DIR_FSYNC,
+        RESTORE_STAGE_POST_VERIFY,
+        RESTORE_STAGE_BACKUP_PRESERVED,
+        RESTORE_STAGE_COMPLETE,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -94,7 +98,8 @@ def durable_restore_from_backup(
         except OSError:
             pass
         return DurableRestoreOutcomeV1(
-            False, stage, stage in _STAGES_AFTER_REPLACEMENT, detail)
+            False, stage, stage in _STAGES_AFTER_REPLACEMENT, detail
+        )
 
     try:
         if not backup.exists():
@@ -102,7 +107,8 @@ def durable_restore_from_backup(
         payload = backup.read_bytes()
         if hashlib.sha256(payload).hexdigest() != expected_sha256:
             return failure(
-                RESTORE_STAGE_BACKUP_VERIFY, "backup_does_not_match_manifest")
+                RESTORE_STAGE_BACKUP_VERIFY, "backup_does_not_match_manifest"
+            )
     except OSError as error:
         return failure(RESTORE_STAGE_BACKUP_VERIFY, type(error).__name__)
 
@@ -118,15 +124,19 @@ def durable_restore_from_backup(
         finally:
             os.close(descriptor)
     except BaseException as error:  # noqa: BLE001 - stage must be reported
-        stage = (RESTORE_STAGE_FILE_FSYNC
-                 if isinstance(error, _FaultAt) and error.stage == RESTORE_STAGE_FILE_FSYNC
-                 else RESTORE_STAGE_TEMP_WRITE)
+        stage = (
+            RESTORE_STAGE_FILE_FSYNC
+            if isinstance(error, _FaultAt) and error.stage == RESTORE_STAGE_FILE_FSYNC
+            else RESTORE_STAGE_TEMP_WRITE
+        )
         return failure(stage, type(error).__name__)
 
     try:
         written = temporary.read_bytes()
-        if (len(written) != len(payload)
-                or hashlib.sha256(written).hexdigest() != expected_sha256):
+        if (
+            len(written) != len(payload)
+            or hashlib.sha256(written).hexdigest() != expected_sha256
+        ):
             return failure(RESTORE_STAGE_TEMP_VERIFY, "temp_copy_mismatch")
     except OSError as error:
         return failure(RESTORE_STAGE_TEMP_VERIFY, type(error).__name__)
@@ -143,27 +153,32 @@ def durable_restore_from_backup(
         fsync_directory(target.parent)
     except BaseException as error:  # noqa: BLE001
         return DurableRestoreOutcomeV1(
-            False, RESTORE_STAGE_DIR_FSYNC, True, type(error).__name__)
+            False, RESTORE_STAGE_DIR_FSYNC, True, type(error).__name__
+        )
 
     try:
         fault(RESTORE_STAGE_POST_VERIFY)
         if hashlib.sha256(target.read_bytes()).hexdigest() != expected_sha256:
             return DurableRestoreOutcomeV1(
-                False, RESTORE_STAGE_POST_VERIFY, True, "target_mismatch")
+                False, RESTORE_STAGE_POST_VERIFY, True, "target_mismatch"
+            )
     except BaseException as error:  # noqa: BLE001
         return DurableRestoreOutcomeV1(
-            False, RESTORE_STAGE_POST_VERIFY, True, type(error).__name__)
+            False, RESTORE_STAGE_POST_VERIFY, True, type(error).__name__
+        )
 
     try:
-        if (not backup.exists()
-                or hashlib.sha256(backup.read_bytes()).hexdigest()
-                != expected_sha256):
+        if (
+            not backup.exists()
+            or hashlib.sha256(backup.read_bytes()).hexdigest() != expected_sha256
+        ):
             return DurableRestoreOutcomeV1(
-                False, RESTORE_STAGE_BACKUP_PRESERVED, True,
-                "backup_did_not_survive")
+                False, RESTORE_STAGE_BACKUP_PRESERVED, True, "backup_did_not_survive"
+            )
     except OSError as error:
         return DurableRestoreOutcomeV1(
-            False, RESTORE_STAGE_BACKUP_PRESERVED, True, type(error).__name__)
+            False, RESTORE_STAGE_BACKUP_PRESERVED, True, type(error).__name__
+        )
 
     return DurableRestoreOutcomeV1(True, RESTORE_STAGE_COMPLETE, True)
 

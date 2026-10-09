@@ -69,6 +69,7 @@ def _hypothesis_spec(**overrides) -> ProgramLifecycleSpecV1:
 # LC-01: CORE spec with expires_at != None → ValueError
 # ==========================================================================
 
+
 def test_lc01_core_with_expires_at_rejects():
     with pytest.raises(ValueError):
         _core_spec(expires_at=ACTIVATED + timedelta(days=365))
@@ -77,6 +78,7 @@ def test_lc01_core_with_expires_at_rejects():
 # ==========================================================================
 # LC-02: HYPOTHESIS spec without expires_at → ValueError
 # ==========================================================================
+
 
 def test_lc02_hypothesis_without_expires_at_rejects():
     with pytest.raises(ValueError):
@@ -96,11 +98,12 @@ def test_lc02_hypothesis_without_expires_at_rejects():
 # LC-03: HYPOTHESIS activated >= review_due → ValueError
 # ==========================================================================
 
+
 def test_lc03_hypothesis_activated_gte_review_due_rejects():
     with pytest.raises(ValueError):
         _hypothesis_spec(
             activated_at=ACTIVATED,
-            review_due_at=ACTIVATED,           # equal → fail
+            review_due_at=ACTIVATED,  # equal → fail
             expires_at=ACTIVATED + timedelta(days=10),
         )
 
@@ -108,6 +111,7 @@ def test_lc03_hypothesis_activated_gte_review_due_rejects():
 # ==========================================================================
 # LC-04: HYPOTHESIS review_due >= expires_at → ValueError
 # ==========================================================================
+
 
 def test_lc04_hypothesis_review_gte_expires_rejects():
     with pytest.raises(ValueError):
@@ -121,6 +125,7 @@ def test_lc04_hypothesis_review_gte_expires_rejects():
 # ==========================================================================
 # LC-05: Naive activated_at → ValueError
 # ==========================================================================
+
 
 def test_lc05_naive_activated_at_rejects():
     with pytest.raises(ValueError):
@@ -140,12 +145,16 @@ def test_lc05_naive_activated_at_rejects():
 # LC-06: as_of < activated_at → SHADOW
 # ==========================================================================
 
+
 def test_lc06_shadow_before_activation():
     spec = _core_spec()
     as_of = ACTIVATED - timedelta(days=1)
     state = evaluate_lifecycle_status(
-        spec, as_of=as_of, last_evidence_at=None,
-        evidence_count=0, renewal_count=0,
+        spec,
+        as_of=as_of,
+        last_evidence_at=None,
+        evidence_count=0,
+        renewal_count=0,
     )
     assert state.status is ProgramLifecycleStatusV1.SHADOW
 
@@ -154,12 +163,16 @@ def test_lc06_shadow_before_activation():
 # LC-07: CORE as_of >= review_due_at → REVIEW_DUE, evaluation continues
 # ==========================================================================
 
+
 def test_lc07_review_due_when_past_review_date():
     spec = _core_spec()
     as_of = REVIEW_DUE_90 + timedelta(days=1)
     state = evaluate_lifecycle_status(
-        spec, as_of=as_of, last_evidence_at=as_of - timedelta(days=1),
-        evidence_count=5, renewal_count=0,
+        spec,
+        as_of=as_of,
+        last_evidence_at=as_of - timedelta(days=1),
+        evidence_count=5,
+        renewal_count=0,
     )
     assert state.status is ProgramLifecycleStatusV1.REVIEW_DUE
 
@@ -168,12 +181,16 @@ def test_lc07_review_due_when_past_review_date():
 # LC-08: HYPOTHESIS as_of >= expires_at → EXPIRED
 # ==========================================================================
 
+
 def test_lc08_expired_when_past_hypothesis_expiry():
     spec = _hypothesis_spec()
     as_of = ACTIVATED + timedelta(days=121)
     state = evaluate_lifecycle_status(
-        spec, as_of=as_of, last_evidence_at=None,
-        evidence_count=0, renewal_count=0,
+        spec,
+        as_of=as_of,
+        last_evidence_at=None,
+        evidence_count=0,
+        renewal_count=0,
     )
     assert state.status is ProgramLifecycleStatusV1.EXPIRED
 
@@ -181,6 +198,7 @@ def test_lc08_expired_when_past_hypothesis_expiry():
 # ==========================================================================
 # LC-09b: CORE spec + EXPIRED status construction → ValueError
 # ==========================================================================
+
 
 def test_lc09b_core_expired_state_construction_rejects():
     spec = _core_spec()
@@ -200,6 +218,7 @@ def test_lc09b_core_expired_state_construction_rejects():
 # LC-09c: same program_id, different version → different spec_digest
 # ==========================================================================
 
+
 def test_lc09c_version_distinctness_produces_different_digest():
     """LC-09c: two specs with same program_id but different version (and thus
     different spec_digest) construct as distinct valid specs. The spec_digest
@@ -215,6 +234,7 @@ def test_lc09c_version_distinctness_produces_different_digest():
 # LC-10: semantic drift changes spec_digest
 # ==========================================================================
 
+
 def test_lc10_semantic_drift_changes_digest():
     """LC-10: different spec text produces different spec_digest.
     Two specs with different spec_digest values are both valid but distinct."""
@@ -226,6 +246,7 @@ def test_lc10_semantic_drift_changes_digest():
 # ==========================================================================
 # LC-11: review_cadence_days = 0 → ValueError
 # ==========================================================================
+
 
 def test_lc11_review_cadence_zero_rejects():
     with pytest.raises(ValueError):
@@ -246,6 +267,7 @@ def test_lc11c_review_cadence_over_365_rejects():
 # LC-12: CORE AI-MACRO-001 exact spec — activated + 90d = review_due, no expiry
 # ==========================================================================
 
+
 def test_lc12_core_ai_macro_001_exact_spec():
     spec = _core_spec()
     assert spec.expires_at is None
@@ -256,6 +278,7 @@ def test_lc12_core_ai_macro_001_exact_spec():
 # ==========================================================================
 # Additional spec validation (§3.3)
 # ==========================================================================
+
 
 def test_program_id_empty_rejects():
     with pytest.raises(ValueError):
@@ -305,12 +328,16 @@ def test_naive_review_due_at_rejects():
 # State invariants (§3.4)
 # ==========================================================================
 
+
 def test_active_state_normal():
     spec = _core_spec()
     as_of = ACTIVATED + timedelta(days=30)
     state = evaluate_lifecycle_status(
-        spec, as_of=as_of, last_evidence_at=None,
-        evidence_count=0, renewal_count=0,
+        spec,
+        as_of=as_of,
+        last_evidence_at=None,
+        evidence_count=0,
+        renewal_count=0,
     )
     assert state.status is ProgramLifecycleStatusV1.ACTIVE
 
@@ -477,10 +504,16 @@ def test_active_status_at_or_after_review_rejects():
 # Status enum closed-set check (§3.2)
 # ==========================================================================
 
+
 def test_lifecycle_status_closed_set():
     members = {m.value for m in ProgramLifecycleStatusV1}
     assert members == {
-        "SHADOW", "ACTIVE", "REVIEW_DUE", "DORMANT", "RETIRED", "EXPIRED",
+        "SHADOW",
+        "ACTIVE",
+        "REVIEW_DUE",
+        "DORMANT",
+        "RETIRED",
+        "EXPIRED",
     }
 
 
@@ -492,13 +525,19 @@ def test_program_kind_closed_set():
 def test_lifecycle_reason_code_closed_set():
     members = {m.value for m in LifecycleReasonCode}
     assert members == {
-        "OK", "NOT_YET_ACTIVE", "REVIEW_DUE", "EXPIRED", "DORMANT", "RETIRED",
+        "OK",
+        "NOT_YET_ACTIVE",
+        "REVIEW_DUE",
+        "EXPIRED",
+        "DORMANT",
+        "RETIRED",
     }
 
 
 # ==========================================================================
 # frozen=True immutability
 # ==========================================================================
+
 
 def test_spec_is_frozen():
     spec = _core_spec()
@@ -510,8 +549,12 @@ def test_state_is_frozen():
     spec = _core_spec()
     as_of = ACTIVATED + timedelta(days=30)
     state = ProgramLifecycleStateV1(
-        spec=spec, status=ProgramLifecycleStatusV1.ACTIVE,
-        last_evidence_at=None, evidence_count=0, renewal_count=0, as_of=as_of,
+        spec=spec,
+        status=ProgramLifecycleStatusV1.ACTIVE,
+        last_evidence_at=None,
+        evidence_count=0,
+        renewal_count=0,
+        as_of=as_of,
     )
     with pytest.raises(Exception):
         state.status = ProgramLifecycleStatusV1.SHADOW  # type: ignore[misc]

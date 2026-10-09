@@ -87,12 +87,13 @@ invocation만 우회한다(내부 retry 없음).
 전부 read-only(유튜브 공개 데이터). 상태 갱신은 atomic write, mode 0600.
 레시피 정본: projects/tokmo-v3/.ai/BACKLOG.md EXT-YT-001 (2026-08-07 실측).
 """
+
 import argparse
 import errno
 import fcntl
 import hashlib
-import os
 import json
+import os
 import re
 import stat
 import sys
@@ -104,7 +105,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -186,7 +187,8 @@ def job_lock(timeout=None):
     fd = os.open(str(path), os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     try:
         deadline = time.monotonic() + (
-            _lock_timeout_seconds() if timeout is None else timeout)
+            _lock_timeout_seconds() if timeout is None else timeout
+        )
         while True:
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -230,7 +232,7 @@ class NetworkFetcher:
 
 def should_alert_failure(now=None):
     """Alert only from 14:30 KST; earlier polling failures stay silent."""
-    observed = datetime.now(timezone.utc) if now is None else now
+    observed = datetime.now(UTC) if now is None else now
     if observed.tzinfo is None or observed.utcoffset() is None:
         raise ValueError("aware_now_required")
     local = observed.astimezone(SEOUL)
@@ -246,7 +248,7 @@ def automatic_window_open(now):
 
 
 def _aware(now):
-    return datetime.now(timezone.utc) if now is None else now
+    return datetime.now(UTC) if now is None else now
 
 
 def kst_date(now):
@@ -254,8 +256,7 @@ def kst_date(now):
 
 
 SKIP_HOLIDAY_TYPES = frozenset({"public_holiday", "substitute_holiday"})
-VALID_HOLIDAY_TYPES = frozenset(
-    {"public_holiday", "substitute_holiday", "observance"})
+VALID_HOLIDAY_TYPES = frozenset({"public_holiday", "substitute_holiday", "observance"})
 # Task 0.2: 자동 producer(kasi 기본)가 쓰는 정확한 canonical source만 신뢰한다.
 KASI_CANONICAL_SOURCE = "KASI SpcdeInfoService/getRestDeInfo"
 
@@ -304,10 +305,12 @@ def _holiday_cache(today):
         if not isinstance(items, list) or not items:  # 비었으면 불건강
             return "unavailable", False
         for i in items:
-            if (not isinstance(i, dict)
-                    or not isinstance(i.get("name"), str)
-                    or not i.get("name")
-                    or i.get("type") not in VALID_HOLIDAY_TYPES):
+            if (
+                not isinstance(i, dict)
+                or not isinstance(i.get("name"), str)
+                or not i.get("name")
+                or i.get("type") not in VALID_HOLIDAY_TYPES
+            ):
                 return "unavailable", False
     items = holidays.get(today.isoformat())
     if items is None:
@@ -331,13 +334,14 @@ def holiday_preflight(now):
 # typed observations
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class Observation:
-    status: str                      # ALREADY_COLLECTED / TODAY_VIDEO_NOT_FOUND /
-                                     # TODAY_VIDEO_TITLE_MISMATCH /
-                                     # VIDEO_FOUND_CAPTIONS_PENDING /
-                                     # CAPTION_TRACK_FOUND_TRANSCRIPT_PENDING /
-                                     # TRANSCRIPT_READY / SOURCE_ERROR
+    status: str  # ALREADY_COLLECTED / TODAY_VIDEO_NOT_FOUND /
+    # TODAY_VIDEO_TITLE_MISMATCH /
+    # VIDEO_FOUND_CAPTIONS_PENDING /
+    # CAPTION_TRACK_FOUND_TRANSCRIPT_PENDING /
+    # TRANSCRIPT_READY / SOURCE_ERROR
     video_id: str = ""
     title: str = ""
     published: str = ""
@@ -348,9 +352,9 @@ class Observation:
     caption_language: str | None = None
     caption_kind: str | None = None
     caption_vss_id: str | None = None
-    stage: str = ""                  # SOURCE_ERROR 전용
-    error_category: str = ""         # SOURCE_ERROR 전용
-    error_detail: str = ""           # SOURCE_ERROR 전용(알림 본문 비노출)
+    stage: str = ""  # SOURCE_ERROR 전용
+    error_category: str = ""  # SOURCE_ERROR 전용
+    error_detail: str = ""  # SOURCE_ERROR 전용(알림 본문 비노출)
 
     @property
     def fingerprint(self):
@@ -364,16 +368,19 @@ REDACTED = "[redacted]"
 # 그대로 실어오면 secret이 detail에 남는다. 값 치환(원문·percent-encoded)과
 # 파라미터 단위 치환을 함께 건다 — 어느 한쪽만으로는 구멍이 남는다.
 _SECRET_QUERY_RE = re.compile(
-    r"([?&](?:key|api_?key|access_token|token|password)=)[^&\s\"'<>]+",
-    re.IGNORECASE)
+    r"([?&](?:key|api_?key|access_token|token|password)=)[^&\s\"'<>]+", re.IGNORECASE
+)
 
 
 def _redact(text, secret=None):
     """secret과 URL의 key 파라미터를 지운 문자열. 원문은 절대 반환하지 않는다."""
     out = str(text)
     if secret:
-        for form in (secret, urllib.parse.quote_plus(secret),
-                     urllib.parse.quote(secret, safe="")):
+        for form in (
+            secret,
+            urllib.parse.quote_plus(secret),
+            urllib.parse.quote(secret, safe=""),
+        ):
             if form:
                 out = out.replace(form, REDACTED)
     return _SECRET_QUERY_RE.sub(r"\1" + REDACTED, out)
@@ -389,8 +396,11 @@ def _classify_error(exc, stage, secret=None):
     else:
         category = type(exc).__name__
     return Observation(
-        status="SOURCE_ERROR", stage=stage, error_category=category,
-        error_detail=_redact(f"{type(exc).__name__}: {exc}", secret))
+        status="SOURCE_ERROR",
+        stage=stage,
+        error_category=category,
+        error_detail=_redact(f"{type(exc).__name__}: {exc}", secret),
+    )
 
 
 def _load_youtube_api_key():
@@ -412,9 +422,14 @@ def _load_youtube_api_key():
 
 
 def _discovery_url(key):
-    query = urllib.parse.urlencode({
-        "part": "snippet,contentDetails", "playlistId": PLAYLIST,
-        "maxResults": 10, "key": key})
+    query = urllib.parse.urlencode(
+        {
+            "part": "snippet,contentDetails",
+            "playlistId": PLAYLIST,
+            "maxResults": 10,
+            "key": key,
+        }
+    )
     return f"{DISCOVERY_API_URL}?{query}"
 
 
@@ -448,10 +463,12 @@ def _parse_discovery(json_bytes):
         if not isinstance(item, dict):
             raise ValueError("discovery_item_not_object")
         snippet = _optional_object(item, "snippet", "discovery_snippet_not_object")
-        resource = _optional_object(snippet, "resourceId",
-                                    "discovery_resource_id_not_object")
-        details = _optional_object(item, "contentDetails",
-                                   "discovery_content_details_not_object")
+        resource = _optional_object(
+            snippet, "resourceId", "discovery_resource_id_not_object"
+        )
+        details = _optional_object(
+            item, "contentDetails", "discovery_content_details_not_object"
+        )
         vid = resource.get("videoId")
         published = details.get("videoPublishedAt")
         if not isinstance(vid, str) or not isinstance(published, str):
@@ -459,9 +476,13 @@ def _parse_discovery(json_bytes):
         if not vid or not published:
             continue
         title = snippet.get("title")
-        entries.append({"id": vid,
-                        "title": title if isinstance(title, str) else "",
-                        "published": published})
+        entries.append(
+            {
+                "id": vid,
+                "title": title if isinstance(title, str) else "",
+                "published": published,
+            }
+        )
     return entries
 
 
@@ -515,46 +536,72 @@ def observe(fetcher, now=None, already_collected=False):
     today_any = _today_entries(entries, today)
     marker = _today_marker_entries(entries, today)
     if not marker:
-        status = ("TODAY_VIDEO_TITLE_MISMATCH" if today_any
-                  else "TODAY_VIDEO_NOT_FOUND")
+        status = "TODAY_VIDEO_TITLE_MISMATCH" if today_any else "TODAY_VIDEO_NOT_FOUND"
         return Observation(status=status, candidates=tuple(today_any))
-    entry = max(marker, key=lambda x: datetime.fromisoformat(
-        x["published"].replace("Z", "+00:00")))
+    entry = max(
+        marker,
+        key=lambda x: datetime.fromisoformat(x["published"].replace("Z", "+00:00")),
+    )
     vid = entry["id"]
     try:
         track = caption_track(vid, fetcher)
     except Exception as exc:  # noqa: BLE001
         return _classify_error(exc, "player")
     if not track or "baseUrl" not in track:
-        return Observation(status="VIDEO_FOUND_CAPTIONS_PENDING",
-                           video_id=vid, title=entry["title"],
-                           published=entry["published"])
+        return Observation(
+            status="VIDEO_FOUND_CAPTIONS_PENDING",
+            video_id=vid,
+            title=entry["title"],
+            published=entry["published"],
+        )
     try:
         text = transcript(track["baseUrl"], fetcher)
     except Exception as exc:  # noqa: BLE001
         return _classify_error(exc, "timedtext")
     if len(text) < TRANSCRIPT_MIN_CHARS:
-        return Observation(status="CAPTION_TRACK_FOUND_TRANSCRIPT_PENDING",
-                           video_id=vid, title=entry["title"],
-                           published=entry["published"])
-    return Observation(status="TRANSCRIPT_READY", video_id=vid,
-                       title=entry["title"], published=entry["published"],
-                       transcript=text, **_track_provenance(track))
+        return Observation(
+            status="CAPTION_TRACK_FOUND_TRANSCRIPT_PENDING",
+            video_id=vid,
+            title=entry["title"],
+            published=entry["published"],
+        )
+    return Observation(
+        status="TRANSCRIPT_READY",
+        video_id=vid,
+        title=entry["title"],
+        published=entry["published"],
+        transcript=text,
+        **_track_provenance(track),
+    )
 
 
 def caption_track(video_id, fetcher=None):
     fetcher = fetcher or NetworkFetcher()
-    body = json.dumps({
-        "context": {"client": {"clientName": "ANDROID",
-                               "clientVersion": "20.10.38",
-                               "androidSdkVersion": 30}},
-        "videoId": video_id}).encode()
-    d = json.loads(fetcher.fetch("https://www.youtube.com/youtubei/v1/player",
-                                 data=body,
-                                 headers={"Content-Type": "application/json"}))
-    tracks = (d.get("captions", {})
-               .get("playerCaptionsTracklistRenderer", {})
-               .get("captionTracks") or [])
+    body = json.dumps(
+        {
+            "context": {
+                "client": {
+                    "clientName": "ANDROID",
+                    "clientVersion": "20.10.38",
+                    "androidSdkVersion": 30,
+                }
+            },
+            "videoId": video_id,
+        }
+    ).encode()
+    d = json.loads(
+        fetcher.fetch(
+            "https://www.youtube.com/youtubei/v1/player",
+            data=body,
+            headers={"Content-Type": "application/json"},
+        )
+    )
+    tracks = (
+        d.get("captions", {})
+        .get("playerCaptionsTracklistRenderer", {})
+        .get("captionTracks")
+        or []
+    )
     ko = [t for t in tracks if t.get("languageCode") == "ko"]
     return (ko or tracks or [None])[0]
 
@@ -567,9 +614,11 @@ def _track_provenance(track):
     추론하거나 상수를 날조하지 않는다. baseUrl은 서명 파라미터가 실리므로
     절대 정체성/메타에 싣지 않는다."""
     out = {}
-    for field, key in (("caption_language", "languageCode"),
-                       ("caption_kind", "kind"),
-                       ("caption_vss_id", "vssId")):
+    for field, key in (
+        ("caption_language", "languageCode"),
+        ("caption_kind", "kind"),
+        ("caption_vss_id", "vssId"),
+    ):
         value = track.get(key)
         out[field] = value if isinstance(value, str) and value else None
     return out
@@ -609,19 +658,47 @@ EXTRACTION_ID = "innertube-android-srv3-v1"
 # meta는 절대 이 값을 생산하지 않으며, genuine legacy 판정과 migration
 # origin 증거 보존에만 쓴다.
 LEGACY_CAPTION_KIND = "ko-asr"
-LEGACY_META_FIELDS = frozenset({
-    "video_id", "url", "title", "published", "playlist_id", "channel_id",
-    "fetched_at", "transcript_sha256", "extraction", "caption_kind"})
+LEGACY_META_FIELDS = frozenset(
+    {
+        "video_id",
+        "url",
+        "title",
+        "published",
+        "playlist_id",
+        "channel_id",
+        "fetched_at",
+        "transcript_sha256",
+        "extraction",
+        "caption_kind",
+    }
+)
 MIGRATION_ORIGIN = {"schema": "pre-v2-12man-meta", "version": 1}
 ARCHIVE_IDENTITY_FIELDS = (
-    "meta_schema_version", "video_id", "url", "title", "published",
-    "playlist_id", "channel_id", "transcript_sha256", "extraction",
-    "caption_language", "caption_kind", "caption_vss_id")
+    "meta_schema_version",
+    "video_id",
+    "url",
+    "title",
+    "published",
+    "playlist_id",
+    "channel_id",
+    "transcript_sha256",
+    "extraction",
+    "caption_language",
+    "caption_kind",
+    "caption_vss_id",
+)
 
 
-def archive_identity(video_id, title, published, transcript_sha256, *,
-                     caption_language=None, caption_kind=None,
-                     caption_vss_id=None):
+def archive_identity(
+    video_id,
+    title,
+    published,
+    transcript_sha256,
+    *,
+    caption_language=None,
+    caption_kind=None,
+    caption_vss_id=None,
+):
     """canonical 불변 정체성 dict. published는 aware ISO 정책(naive 거부).
 
     수집(현재 관측)과 replay(영속 state)가 같은 인자 형태로 이 하나를
@@ -659,9 +736,12 @@ def archive_identity(video_id, title, published, transcript_sha256, *,
 def identity_digest(identity):
     """결정적 canonical 직렬화(정렬 key + 고정 separator) 위 SHA-256 —
     입력 dict의 key 삽입 순서와 무관하다."""
-    basis = json.dumps({k: identity[k] for k in ARCHIVE_IDENTITY_FIELDS},
-                       ensure_ascii=False, sort_keys=True,
-                       separators=(",", ":"))
+    basis = json.dumps(
+        {k: identity[k] for k in ARCHIVE_IDENTITY_FIELDS},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
     return hashlib.sha256(basis.encode("utf-8")).hexdigest()
 
 
@@ -671,8 +751,16 @@ def _is_genuine_legacy_meta(meta, identity):
     caption_kind, aware fetched_at. 그 외 형태는 전부 위조/변형으로 본다."""
     if set(meta) != LEGACY_META_FIELDS:
         return False
-    for field in ("video_id", "url", "title", "published", "playlist_id",
-                  "channel_id", "transcript_sha256", "extraction"):
+    for field in (
+        "video_id",
+        "url",
+        "title",
+        "published",
+        "playlist_id",
+        "channel_id",
+        "transcript_sha256",
+        "extraction",
+    ):
         if meta[field] != identity[field]:
             return False
     if meta["caption_kind"] != LEGACY_CAPTION_KIND:
@@ -721,9 +809,11 @@ def _migration_evidence(legacy_meta):
     구 writer가 관측 없이 기록한 caption_kind 상수 주장은 버리지 않고
     origin에 사실 그대로 보존한다(관측값으로 승격하지는 않는다)."""
     return {
-        "migration_origin": {**MIGRATION_ORIGIN,
-                             "legacy_caption_kind": legacy_meta["caption_kind"]},
-        "migrated_at": datetime.now(timezone.utc).isoformat(),
+        "migration_origin": {
+            **MIGRATION_ORIGIN,
+            "legacy_caption_kind": legacy_meta["caption_kind"],
+        },
+        "migrated_at": datetime.now(UTC).isoformat(),
     }
 
 
@@ -769,8 +859,7 @@ def _publish_bytes(path, data):
     _fsync_dir(path.parent)
 
 
-def _read_regular_file(path, missing_category, conflict_category,
-                       unreadable_category):
+def _read_regular_file(path, missing_category, conflict_category, unreadable_category):
     """(bytes|None, category|None). O_NOFOLLOW로 열어 fd 기준으로 정규
     단일링크만 신뢰한다 — symlink/hardlink/특수파일 교체 공격 fail-closed."""
     try:
@@ -833,10 +922,14 @@ def _archive_pair(entry, text):
     digest = hashlib.sha256(text.encode()).hexdigest()
     try:
         identity = archive_identity(
-            entry["id"], entry["title"], entry["published"], digest,
+            entry["id"],
+            entry["title"],
+            entry["published"],
+            digest,
             caption_language=entry.get("caption_language"),
             caption_kind=entry.get("caption_kind"),
-            caption_vss_id=entry.get("caption_vss_id"))
+            caption_vss_id=entry.get("caption_vss_id"),
+        )
     except ValueError:
         raise ArchiveConflict("archive_identity")
     txt_bytes = (text + "\n").encode("utf-8")
@@ -848,7 +941,8 @@ def _archive_pair(entry, text):
 
     # transcript 반쪽: 있으면 바이트 일치 필수(append-only), 없으면 발행.
     existing, err = _read_regular_file(
-        txt_path, "archive_missing", "archive_conflict", "archive_unreadable")
+        txt_path, "archive_missing", "archive_conflict", "archive_unreadable"
+    )
     if err == "archive_missing":
         _publish_bytes(txt_path, txt_bytes)
     elif err is not None:
@@ -863,11 +957,12 @@ def _archive_pair(entry, text):
     # digest 부재) → 전 source field 정확 일치일 때만 1회 migration, 그 외
     # 어떤 field 불일치·malformed digest도 전부 conflict fail-closed.
     raw, err = _read_regular_file(
-        meta_path, "archive_missing", "archive_conflict", "archive_unreadable")
+        meta_path, "archive_missing", "archive_conflict", "archive_unreadable"
+    )
     publish_meta = err == "archive_missing"
     if err is not None and err != "archive_missing":
         raise ArchiveConflict(err)
-    fetched_at = datetime.now(timezone.utc).isoformat()
+    fetched_at = datetime.now(UTC).isoformat()
     migration = None
     migrated = False
     if not publish_meta:
@@ -892,18 +987,19 @@ def _archive_pair(entry, text):
             else:
                 os.chmod(meta_path, 0o600)  # crash 잔재 모드 수리
     if publish_meta:
-        _publish_bytes(meta_path,
-                       _archive_meta_bytes(identity, fetched_at, migration))
+        _publish_bytes(meta_path, _archive_meta_bytes(identity, fetched_at, migration))
 
     # read-back 검증: 두 파일이 디스크에서 그대로 읽히고 transcript 바이트와
     # meta canonical 정체성 전체(digest 포함)가 일치해야 '수집 완료'다 — 이
     # 검증을 통과해야만 호출자가 COLLECTED를 영속한다.
     back_txt, err = _read_regular_file(
-        txt_path, "archive_conflict", "archive_conflict", "archive_unreadable")
+        txt_path, "archive_conflict", "archive_conflict", "archive_unreadable"
+    )
     if err is not None or back_txt != txt_bytes:
         raise ArchiveConflict(err or "archive_conflict")
     back_meta, err = _read_regular_file(
-        meta_path, "archive_conflict", "archive_conflict", "archive_unreadable")
+        meta_path, "archive_conflict", "archive_conflict", "archive_unreadable"
+    )
     if err is not None:
         raise ArchiveConflict(err)
     try:
@@ -987,8 +1083,12 @@ def _validate_state(data):
         return None
     try:
         _parse_aware_iso(published)
-        for field in ("collected_at", "analyzed_at", "delivered_at",
-                      "archive_meta_migrated_at"):
+        for field in (
+            "collected_at",
+            "analyzed_at",
+            "delivered_at",
+            "archive_meta_migrated_at",
+        ):
             if data.get(field) is not None:
                 _parse_aware_iso(data[field])
     except ValueError:
@@ -1015,8 +1115,9 @@ def _validate_state(data):
         "source_revision": revision,
         "transcript_sha256": sha,
         **caption,
-        "archive_stem": (stem if isinstance(stem, str) and stem
-                         else f"{published[:10]}_{video_id}"),
+        "archive_stem": (
+            stem if isinstance(stem, str) and stem else f"{published[:10]}_{video_id}"
+        ),
         "status": data["status"],
         "collected_at": data.get("collected_at"),
         "analyzed_at": data.get("analyzed_at"),
@@ -1074,8 +1175,14 @@ def _legacy_receipt(now):
         published_raw = prev["published"]
         published = _parse_aware_iso(published_raw)
         video_id = prev["id"]
-    except (OSError, UnicodeError, KeyError, TypeError, ValueError,
-            json.JSONDecodeError):
+    except (
+        OSError,
+        UnicodeError,
+        KeyError,
+        TypeError,
+        ValueError,
+        json.JSONDecodeError,
+    ):
         return None
     if not (isinstance(video_id, str) and video_id):
         return None
@@ -1083,11 +1190,11 @@ def _legacy_receipt(now):
         return None
     stem = f"{published_raw[:10]}_{video_id}"
     sha = None
-    caption = {"caption_language": None, "caption_kind": None,
-               "caption_vss_id": None}
+    caption = {"caption_language": None, "caption_kind": None, "caption_vss_id": None}
     try:
-        meta = json.loads((inbox_path() / f"{stem}.meta.json").read_text(
-            encoding="utf-8"))
+        meta = json.loads(
+            (inbox_path() / f"{stem}.meta.json").read_text(encoding="utf-8")
+        )
         if isinstance(meta, dict) and meta.get("video_id") == video_id:
             candidate = meta.get("transcript_sha256")
             if isinstance(candidate, str) and candidate:
@@ -1165,8 +1272,11 @@ def _cas_persist(state, prior_status):
     if corrupt:
         raise OSError(corrupt)
     new_rank = _STATUS_RANK[state["status"]]
-    if (disk is not None and disk["video_id"] == state["video_id"]
-            and disk["source_revision"] == state["source_revision"]):
+    if (
+        disk is not None
+        and disk["video_id"] == state["video_id"]
+        and disk["source_revision"] == state["source_revision"]
+    ):
         if _STATUS_RANK[disk["status"]] > new_rank:
             return "stale"
         if prior_status is None:
@@ -1181,7 +1291,7 @@ def _cas_persist(state, prior_status):
 
 
 def _persist_state_best_effort(state, prior_status):
-    """"written"|"stale"|"io_error". IO 실패가 tick을 죽이지 않는다(다음
+    """ "written"|"stale"|"io_error". IO 실패가 tick을 죽이지 않는다(다음
     tick 재시도) — 단 "stale"은 반드시 무출력으로 존중해야 한다."""
     try:
         return _cas_persist(state, prior_status)
@@ -1193,8 +1303,9 @@ def _record_attempt(state, now, kind, outcome, error=None):
     receipt = {"at": _aware(now).isoformat(), "kind": kind, "outcome": outcome}
     if error:
         receipt["error"] = error
-    state["attempts"] = (list(state.get("attempts") or [])
-                         + [receipt])[-MAX_ATTEMPT_RECEIPTS:]
+    state["attempts"] = (list(state.get("attempts") or []) + [receipt])[
+        -MAX_ATTEMPT_RECEIPTS:
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -1239,20 +1350,27 @@ def unresolved_gate_line(category):
     !ANALYZED typed 실패를 지우지 못하게 하는 근거가 된다(진실한 top-level
     status). 자막·경로·API 키·사용자명은 싣지 않고 typed category만 싣는다.
     """
-    return json.dumps({"wakeAgent": False, "unresolved": True,
-                       "detail": f"{UNRESOLVED_LIFECYCLE}:{category}"},
-                      separators=(",", ":"))
+    return json.dumps(
+        {
+            "wakeAgent": False,
+            "unresolved": True,
+            "detail": f"{UNRESOLVED_LIFECYCLE}:{category}",
+        },
+        separators=(",", ":"),
+    )
 
 
 def transcript_payload(video_id, title, published, transcript):
     """수집·replay가 공유하는 확정 stdout 계약 — byte 동일해야 admission
     후보 replay가 수렴한다."""
-    return ("STATUS: NEW_TRANSCRIPT\n"
-            f"VIDEO: https://www.youtube.com/watch?v={video_id}\n"
-            f"TITLE: {title}\n"
-            f"PUBLISHED: {published}\n"
-            "---TRANSCRIPT---\n"
-            f"{transcript}")
+    return (
+        "STATUS: NEW_TRANSCRIPT\n"
+        f"VIDEO: https://www.youtube.com/watch?v={video_id}\n"
+        f"TITLE: {title}\n"
+        f"PUBLISHED: {published}\n"
+        "---TRANSCRIPT---\n"
+        f"{transcript}"
+    )
 
 
 def _read_archive_transcript(state):
@@ -1271,11 +1389,13 @@ def _read_archive_transcript(state):
     txt_path = inbox_path() / f"{stem}.txt"
     meta_path = inbox_path() / f"{stem}.meta.json"
     raw_bytes, err = _read_regular_file(
-        txt_path, "archive_missing", "archive_conflict", "archive_unreadable")
+        txt_path, "archive_missing", "archive_conflict", "archive_unreadable"
+    )
     if err is not None:
         return None, err, False
     meta_bytes, err = _read_regular_file(
-        meta_path, "archive_missing", "archive_conflict", "archive_unreadable")
+        meta_path, "archive_missing", "archive_conflict", "archive_unreadable"
+    )
     if err is not None:
         return None, err, False
     try:
@@ -1283,16 +1403,20 @@ def _read_archive_transcript(state):
         meta = json.loads(meta_bytes.decode("utf-8"))
     except (UnicodeError, json.JSONDecodeError):
         return None, "archive_unreadable", False
-    text = raw[:-1] if raw.endswith("\n") else raw  # archive()가 붙인 개행 제거
+    text = raw.removesuffix("\n")  # archive()가 붙인 개행 제거
     digest = hashlib.sha256(text.encode()).hexdigest()
     if state["transcript_sha256"] is not None and state["transcript_sha256"] != digest:
         return None, "archive_conflict", False
     try:
         identity = archive_identity(
-            state["video_id"], state["title"], state["published"], digest,
+            state["video_id"],
+            state["title"],
+            state["published"],
+            digest,
             caption_language=state["caption_language"],
             caption_kind=state["caption_kind"],
-            caption_vss_id=state["caption_vss_id"])
+            caption_vss_id=state["caption_vss_id"],
+        )
     except ValueError:
         return None, "archive_conflict", False
     verdict = _validate_archive_meta(meta, identity)
@@ -1305,8 +1429,9 @@ def _read_archive_transcript(state):
             # 이미 1회 승격된 정체성에 digest-less legacy 재등장 — 되돌림/
             # 위조다. payload 근거로 재수용하지 않는다.
             return None, "archive_legacy_reverted", False
-        err = _migrate_legacy_archive(state, identity, meta, txt_path,
-                                      meta_path, digest)
+        err = _migrate_legacy_archive(
+            state, identity, meta, txt_path, meta_path, digest
+        )
         if err is not None:
             return None, err, False
         return text, None, True
@@ -1327,7 +1452,8 @@ def _migrate_legacy_archive(state, identity, meta, txt_path, meta_path, digest):
     if state["transcript_sha256"] != digest:  # None 포함 — 저장 해시 증거 필수
         return "archive_legacy_state"
     if state["source_revision"] != _source_revision(
-            state["video_id"], state["published"], digest):
+        state["video_id"], state["published"], digest
+    ):
         return "archive_legacy_state"
     if state["archive_stem"] != f"{state['published'][:10]}_{state['video_id']}":
         return "archive_legacy_state"
@@ -1336,17 +1462,24 @@ def _migrate_legacy_archive(state, identity, meta, txt_path, meta_path, digest):
             st = os.lstat(path)
         except OSError:
             return "archive_unreadable"
-        if (not stat.S_ISREG(st.st_mode) or st.st_nlink > 1
-                or stat.S_IMODE(st.st_mode) != 0o600):
+        if (
+            not stat.S_ISREG(st.st_mode)
+            or st.st_nlink > 1
+            or stat.S_IMODE(st.st_mode) != 0o600
+        ):
             return "archive_legacy_mode"
     try:
-        _publish_bytes(meta_path,
-                       _archive_meta_bytes(identity, meta["fetched_at"],
-                                           _migration_evidence(meta)))
+        _publish_bytes(
+            meta_path,
+            _archive_meta_bytes(
+                identity, meta["fetched_at"], _migration_evidence(meta)
+            ),
+        )
     except OSError:
         return "archive_io"
-    back, err = _read_regular_file(meta_path, "archive_conflict",
-                                   "archive_conflict", "archive_unreadable")
+    back, err = _read_regular_file(
+        meta_path, "archive_conflict", "archive_conflict", "archive_unreadable"
+    )
     if err is not None:
         return err
     try:
@@ -1382,8 +1515,12 @@ def load_model_fallback_policy():
     if not isinstance(data, dict) or data.get("schema_version") != 1:
         return default
     models = data.get("approved_models")
-    if not (isinstance(models, list) and len(models) == 1
-            and isinstance(models[0], str) and models[0]):
+    if not (
+        isinstance(models, list)
+        and len(models) == 1
+        and isinstance(models[0], str)
+        and models[0]
+    ):
         return default
     if data.get("enabled") is not True:
         return default
@@ -1451,8 +1588,9 @@ def _acknowledge(kind, video_id, revision, now):
         return 1, f"ACK_CONFLICT: {exc}"
     if outcome != "written":
         return 1, "ACK_CONFLICT: state_changed"
-    return 0, (f"ACK_OK: status={state['status']} video_id={video_id} "
-               f"revision={revision}")
+    return 0, (
+        f"ACK_OK: status={state['status']} video_id={video_id} revision={revision}"
+    )
 
 
 def _show_state(now):
@@ -1467,19 +1605,24 @@ def _show_state(now):
         print(json.dumps({"state": "ABSENT"}))
         return 0
     attempts = state.get("attempts") or []
-    print(json.dumps({
-        "schema_version": state["schema_version"],
-        "video_id": state["video_id"],
-        "source_revision": state["source_revision"],
-        "status": state["status"],
-        "published": state["published"],
-        "collected_at": state["collected_at"],
-        "analyzed_at": state["analyzed_at"],
-        "delivered_at": state["delivered_at"],
-        "migrated_from_legacy": state["migrated_from_legacy"],
-        "attempt_count": len(attempts),
-        "last_attempt": attempts[-1] if attempts else None,
-    }, ensure_ascii=False))
+    print(
+        json.dumps(
+            {
+                "schema_version": state["schema_version"],
+                "video_id": state["video_id"],
+                "source_revision": state["source_revision"],
+                "status": state["status"],
+                "published": state["published"],
+                "collected_at": state["collected_at"],
+                "analyzed_at": state["analyzed_at"],
+                "delivered_at": state["delivered_at"],
+                "migrated_from_legacy": state["migrated_from_legacy"],
+                "attempt_count": len(attempts),
+                "last_attempt": attempts[-1] if attempts else None,
+            },
+            ensure_ascii=False,
+        )
+    )
     return 0
 
 
@@ -1487,35 +1630,53 @@ def _show_state(now):
 # CLI / orchestration
 # ---------------------------------------------------------------------------
 
+
 def build_parser():
     parser = argparse.ArgumentParser(
         prog="tokmo_yt_12man_fetch.py",
         description="'12시에 만나요' 자막 수집 (지정 재생목록 공식 API, "
-                    "17:45 KST 자동 종료)",
-        add_help=True)
+        "17:45 KST 자동 종료)",
+        add_help=True,
+    )
     parser.add_argument(
-        "--force-once", action="store_true",
+        "--force-once",
+        action="store_true",
         help="17:45 KST cutoff를 정확히 이 한 invocation만 우회해 1사이클 수행"
-             "(내부 retry 없음, 자동 창 재개 없음)")
+        "(내부 retry 없음, 자동 창 재개 없음)",
+    )
     parser.add_argument(
-        "--ack-completed", metavar="VIDEO_ID", default=None,
+        "--ack-completed",
+        metavar="VIDEO_ID",
+        default=None,
         help="확인된 최종 전달 후 단일 원자 전이 →DELIVERED (--revision 필수, "
-             "idempotent). Hermes scheduler의 내구 delivery-receipt 통합이 "
-             "호출하는 운영 경로 — cron 프롬프트에 넣지 않는다")
+        "idempotent). Hermes scheduler의 내구 delivery-receipt 통합이 "
+        "호출하는 운영 경로 — cron 프롬프트에 넣지 않는다",
+    )
     parser.add_argument(
-        "--ack-analyzed", metavar="VIDEO_ID", default=None,
+        "--ack-analyzed",
+        metavar="VIDEO_ID",
+        default=None,
         help="[수동 진단 전용 — cron 프롬프트 금지] COLLECTED→ANALYZED 전이"
-             "(--revision 필수, idempotent, 정체성 불일치는 conflict)")
+        "(--revision 필수, idempotent, 정체성 불일치는 conflict)",
+    )
     parser.add_argument(
-        "--ack-delivered", metavar="VIDEO_ID", default=None,
+        "--ack-delivered",
+        metavar="VIDEO_ID",
+        default=None,
         help="[수동 진단 전용 — cron 프롬프트 금지] ANALYZED→DELIVERED 전이"
-             "(--revision 필수)")
+        "(--revision 필수)",
+    )
     parser.add_argument(
-        "--revision", metavar="SOURCE_REVISION", default=None,
-        help="ack 대상 source_revision (--show-state로 조회)")
+        "--revision",
+        metavar="SOURCE_REVISION",
+        default=None,
+        help="ack 대상 source_revision (--show-state로 조회)",
+    )
     parser.add_argument(
-        "--show-state", action="store_true",
-        help="lifecycle 상태 bounded JSON 출력(비밀/경로/자막 비노출)")
+        "--show-state",
+        action="store_true",
+        help="lifecycle 상태 bounded JSON 출력(비밀/경로/자막 비노출)",
+    )
     return parser
 
 
@@ -1524,12 +1685,14 @@ def parse_args(argv):
 
 
 # 알림 대상 typed 상태 (source error는 별도 임계치 정책)
-ALERTABLE_PENDING = frozenset({
-    "TODAY_VIDEO_NOT_FOUND",
-    "TODAY_VIDEO_TITLE_MISMATCH",
-    "VIDEO_FOUND_CAPTIONS_PENDING",
-    "CAPTION_TRACK_FOUND_TRANSCRIPT_PENDING",
-})
+ALERTABLE_PENDING = frozenset(
+    {
+        "TODAY_VIDEO_NOT_FOUND",
+        "TODAY_VIDEO_TITLE_MISMATCH",
+        "VIDEO_FOUND_CAPTIONS_PENDING",
+        "CAPTION_TRACK_FOUND_TRANSCRIPT_PENDING",
+    }
+)
 
 
 def alert_message(obs, today):
@@ -1542,8 +1705,10 @@ def alert_message(obs, today):
         head += f" · video_id={obs.video_id}"
     if obs.status == "TODAY_VIDEO_TITLE_MISMATCH" and obs.candidates:
         # 수동 RCA용 후보 메타데이터 요약(선택은 하지 않는다)
-        lines = [f"  후보 {i + 1}: {c['id']} | {c['title'][:80]} | {c['published']}"
-                 for i, c in enumerate(obs.candidates[:3])]
+        lines = [
+            f"  후보 {i + 1}: {c['id']} | {c['title'][:80]} | {c['published']}"
+            for i, c in enumerate(obs.candidates[:3])
+        ]
         head += "\n오늘 게시 영상 중 제목 마커 불일치:\n" + "\n".join(lines)
     if obs.status == "SOURCE_ERROR":
         head += f"\nstage: {obs.stage}\ncategory: {obs.error_category}"
@@ -1660,9 +1825,12 @@ def _alert_holiday_unavailable(obs, now, alerter):
 
 def _send_alert_via_system_bot(message):
     import subprocess
+
     delivered = subprocess.run(
         [str(hermes_home() / "scripts" / "send_system_alert.py"), message],
-        capture_output=True, text=True, timeout=20,
+        capture_output=True,
+        text=True,
+        timeout=20,
     )
     return delivered.returncode == 0
 
@@ -1684,8 +1852,9 @@ def _replay_tick(state, observed, alert, prior_status):
         state["archive_meta_migrated_at"] = _aware(observed).isoformat()
         _record_attempt(state, observed, "legacy_meta_migration", "ok")
     if error is None:
-        payload = transcript_payload(state["video_id"], state["title"],
-                                     state["published"], text)
+        payload = transcript_payload(
+            state["video_id"], state["title"], state["published"], text
+        )
         # 상한 초과는 아카이브 실패가 아니라 분석층의 typed 거절이다.
         error = analysis_input_refusal(payload)
     if error is None:
@@ -1700,11 +1869,16 @@ def _replay_tick(state, observed, alert, prior_status):
     _record_attempt(state, observed, "replay", "error", error)
     if _persist_state_best_effort(state, prior_status) == "stale":
         return 0
-    maybe_alert(Observation(status="SOURCE_ERROR",
-                            stage=("analysis" if error == INPUT_CAP_EXCEEDED
-                                   else "replay"),
-                            error_category=error, video_id=state["video_id"]),
-                observed, alert)
+    maybe_alert(
+        Observation(
+            status="SOURCE_ERROR",
+            stage=("analysis" if error == INPUT_CAP_EXCEEDED else "replay"),
+            error_category=error,
+            video_id=state["video_id"],
+        ),
+        observed,
+        alert,
+    )
     if error == INPUT_CAP_EXCEEDED:
         # 아카이브는 온전하고 분석층만 시작할 수 없는 경우다: 무음이되 거짓
         # 초록은 아니다 — 상태는 COLLECTED && !ANALYZED로 남는다. 아카이브
@@ -1721,9 +1895,13 @@ def _locked_tick(args, observed, net_fetcher, alert):
         # 기존 canonical 상태의 모든 이상은 CORRUPT — 부재가 아니다.
         # legacy migration/discovery/payload 전부 금지, 바이트 보존,
         # typed 알림은 14:30부터 fingerprint dedupe 1회 (fail-closed).
-        maybe_alert(Observation(status="SOURCE_ERROR", stage="state",
-                                error_category=state_corrupt),
-                    observed, alert)
+        maybe_alert(
+            Observation(
+                status="SOURCE_ERROR", stage="state", error_category=state_corrupt
+            ),
+            observed,
+            alert,
+        )
         return 0
     if state is not None:
         prior_status = state["status"] if origin == "v1" else None
@@ -1746,18 +1924,29 @@ def _locked_tick(args, observed, net_fetcher, alert):
     if obs.status == "TRANSCRIPT_READY":
         try:
             meta_migrated = archive(
-                {"id": obs.video_id, "title": obs.title,
-                 "published": obs.published,
-                 "caption_language": obs.caption_language,
-                 "caption_kind": obs.caption_kind,
-                 "caption_vss_id": obs.caption_vss_id}, obs.transcript)
+                {
+                    "id": obs.video_id,
+                    "title": obs.title,
+                    "published": obs.published,
+                    "caption_language": obs.caption_language,
+                    "caption_kind": obs.caption_kind,
+                    "caption_vss_id": obs.caption_vss_id,
+                },
+                obs.transcript,
+            )
         except ArchiveConflict as exc:
             # 쌍이 read-back 검증을 통과하지 못하면 COLLECTED를 선언하지
             # 않는다 — payload/legacy 영수증 없이 typed 알림 fail-closed.
-            maybe_alert(Observation(status="SOURCE_ERROR", stage="archive",
-                                    error_category=exc.category,
-                                    video_id=obs.video_id),
-                        observed, alert)
+            maybe_alert(
+                Observation(
+                    status="SOURCE_ERROR",
+                    stage="archive",
+                    error_category=exc.category,
+                    video_id=obs.video_id,
+                ),
+                observed,
+                alert,
+            )
             return 0
         digest = hashlib.sha256(obs.transcript.encode()).hexdigest()
         new_state = {
@@ -1765,8 +1954,7 @@ def _locked_tick(args, observed, net_fetcher, alert):
             "video_id": obs.video_id,
             "title": obs.title,
             "published": obs.published,
-            "source_revision": _source_revision(obs.video_id, obs.published,
-                                                digest),
+            "source_revision": _source_revision(obs.video_id, obs.published, digest),
             "transcript_sha256": digest,
             "caption_language": obs.caption_language,
             "caption_kind": obs.caption_kind,
@@ -1776,38 +1964,54 @@ def _locked_tick(args, observed, net_fetcher, alert):
             "collected_at": observed.isoformat(),
             "analyzed_at": None,
             "delivered_at": None,
-            "archive_meta_migrated_at": (observed.isoformat()
-                                         if meta_migrated else None),
+            "archive_meta_migrated_at": (
+                observed.isoformat() if meta_migrated else None
+            ),
             "migrated_from_legacy": False,
             "attempts": [],
         }
         if meta_migrated:
             _record_attempt(new_state, observed, "legacy_meta_migration", "ok")
-        payload = transcript_payload(obs.video_id, obs.title, obs.published,
-                                     obs.transcript)
+        payload = transcript_payload(
+            obs.video_id, obs.title, obs.published, obs.transcript
+        )
         # 분석 상한 초과: 수집은 성립했으므로 아카이브와 수집 영수증을 그대로
         # 남기되, transcript를 자르거나 분석 성공으로 기록하지 않는다.
         refusal = analysis_input_refusal(payload)
-        _record_attempt(new_state, observed, "collect",
-                        "ok" if refusal is None else "error", refusal)
+        _record_attempt(
+            new_state,
+            observed,
+            "collect",
+            "ok" if refusal is None else "error",
+            refusal,
+        )
         if _persist_state_best_effort(new_state, None) == "stale":
             return 0  # 같은 정체성이 이미 분석/전달됨 — 중복 payload 금지
         # legacy 포맷 영수증은 롤백 호환용으로 유지한다(의미: 수집 완료).
         # crash 복구 경로이기도 하다: v1 영속이 실패해도 다음 tick이
         # ENOENT+legacy migration으로 network 0 replay에 수렴한다.
         try:
-            _atomic_write_json(state_path(), {
-                "id": obs.video_id,
-                "title": obs.title,
-                "published": obs.published,
-            })
+            _atomic_write_json(
+                state_path(),
+                {
+                    "id": obs.video_id,
+                    "title": obs.title,
+                    "published": obs.published,
+                },
+            )
         except OSError:
             pass
         if refusal is not None:
-            maybe_alert(Observation(status="SOURCE_ERROR", stage="analysis",
-                                    error_category=refusal,
-                                    video_id=obs.video_id),
-                        observed, alert)
+            maybe_alert(
+                Observation(
+                    status="SOURCE_ERROR",
+                    stage="analysis",
+                    error_category=refusal,
+                    video_id=obs.video_id,
+                ),
+                observed,
+                alert,
+            )
             # 수집 영수증은 남았고 분석만 시작할 수 없다 — 같은 typed 근거를
             # scheduler에 넘겨 이 tick이 'ok'로 기록되지 않게 한다.
             print(unresolved_gate_line(refusal))
@@ -1834,10 +2038,15 @@ def run(argv=None, now=None, fetcher=None, alerter=None):
 
     if args.show_state:
         return _show_state(observed)
-    acks = [(kind, target) for kind, target in
-            (("analyzed", args.ack_analyzed),
-             ("delivered", args.ack_delivered),
-             ("completed", args.ack_completed)) if target]
+    acks = [
+        (kind, target)
+        for kind, target in (
+            ("analyzed", args.ack_analyzed),
+            ("delivered", args.ack_delivered),
+            ("completed", args.ack_completed),
+        )
+        if target
+    ]
     if acks:
         if len(acks) > 1:
             print("ACK_CONFLICT: choose_one_ack")
@@ -1859,9 +2068,15 @@ def run(argv=None, now=None, fetcher=None, alerter=None):
             return _locked_tick(args, observed, net_fetcher, alert)
     except StateLockTimeout:
         # 잠금 미획득 tick은 아무것도 변이/출력하지 않는다(fail-closed).
-        maybe_alert(Observation(status="SOURCE_ERROR", stage="state",
-                                error_category=StateLockTimeout.category),
-                    observed, alert)
+        maybe_alert(
+            Observation(
+                status="SOURCE_ERROR",
+                stage="state",
+                error_category=StateLockTimeout.category,
+            ),
+            observed,
+            alert,
+        )
         return 0
 
 
@@ -1881,6 +2096,7 @@ if __name__ == "__main__":
         if not should_alert_failure():
             sys.exit(0)
         import subprocess
+
         message = (
             "🚨 시스템 작업 오류\n"
             "작업: 12시에 만나요 자막 수집\n"

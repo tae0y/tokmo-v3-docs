@@ -83,8 +83,10 @@ def _count_revision_sightings(store, provenance) -> int:
     count = 0
     for row in store.read_open_hypotheses():
         for sighting in store.read_hypothesis_sightings(row.hypothesis_id):
-            if (sighting.source_ref == provenance.source_ref
-                    and sighting.revision == provenance.revision):
+            if (
+                sighting.source_ref == provenance.source_ref
+                and sighting.revision == provenance.revision
+            ):
                 count += 1
     return count
 
@@ -102,13 +104,19 @@ def admit_archived_report(store, *, meta, report_text) -> dict:
     provenance = provenance_from_archive_meta(meta)
     observed_at = observed_at_from_archive_meta(meta)
     parsed = parse_report_tracking_blocks(
-        report_text, source_ref=provenance.source_ref,
-        revision=provenance.revision, observed_at=observed_at,
+        report_text,
+        source_ref=provenance.source_ref,
+        revision=provenance.revision,
+        observed_at=observed_at,
     )
     totals = {
-        "created": 0, "revisions": 0, "semantic_sightings": 0,
-        "duplicates": 0, "admission_failures": 0,
-        "related_edges": 0, "merge_reviews": 0,
+        "created": 0,
+        "revisions": 0,
+        "semantic_sightings": 0,
+        "duplicates": 0,
+        "admission_failures": 0,
+        "related_edges": 0,
+        "merge_reviews": 0,
     }
     entries = []
     for candidate in parsed.candidates:
@@ -120,13 +128,18 @@ def admit_archived_report(store, *, meta, report_text) -> dict:
         totals["admission_failures"] += outcome.failures
         totals["related_edges"] += outcome.related_edges
         totals["merge_reviews"] += outcome.merge_reviews
-        entries.append({
-            "status": _candidate_status(outcome),
-            "statement_excerpt": candidate.statement[:_MAX_STATEMENT_EXCERPT],
-        })
+        entries.append(
+            {
+                "status": _candidate_status(outcome),
+                "statement_excerpt": candidate.statement[:_MAX_STATEMENT_EXCERPT],
+            }
+        )
     if parsed.failures:
         admit_report_candidates(
-            store, (), now=observed_at, failures=parsed.failures,
+            store,
+            (),
+            now=observed_at,
+            failures=parsed.failures,
         )
     failure_rows = store.read_candidate_failures(
         source_ref=provenance.source_ref,
@@ -150,8 +163,7 @@ def admit_archived_report(store, *, meta, report_text) -> dict:
         "read_back": {
             "sightings_for_revision": sightings_for_revision,
             "failure_records_for_revision": sum(
-                1 for row in failure_rows
-                if row.revision == provenance.revision
+                1 for row in failure_rows if row.revision == provenance.revision
             ),
             "source_revision_registered": sightings_for_revision > 0,
         },

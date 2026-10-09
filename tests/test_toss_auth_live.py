@@ -19,7 +19,11 @@ from tokmo.facts.toss import (
     build_auth_request,
 )
 from tokmo.facts.toss_auth_live import (
-    MAX_BODY_BYTES, TOKEN_PATH, TOSS_HOST, TossAuthLiveTransport, build_live_opener,
+    MAX_BODY_BYTES,
+    TOKEN_PATH,
+    TOSS_HOST,
+    TossAuthLiveTransport,
+    build_live_opener,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -72,6 +76,7 @@ def auth_request(**overrides):
 
 # --- the single authorized operation ----------------------------------------
 
+
 def test_the_only_wire_operation_is_the_official_token_endpoint():
     transport = transport_with()
 
@@ -115,10 +120,12 @@ def test_the_opener_registers_no_proxy_and_follows_no_redirect():
     from the handler chain is exactly the evidence that no proxy is consulted."""
     opener = build_live_opener()
 
-    assert not any(type(handler).__name__ == "ProxyHandler"
-                   for handler in opener.handlers)
-    redirect = next(h for h in opener.handlers
-                    if isinstance(h, urllib.request.HTTPRedirectHandler))
+    assert not any(
+        type(handler).__name__ == "ProxyHandler" for handler in opener.handlers
+    )
+    redirect = next(
+        h for h in opener.handlers if isinstance(h, urllib.request.HTTPRedirectHandler)
+    )
     assert redirect.redirect_request(None, None, 302, "", None, "https://evil") is None
     error = urllib.error.HTTPError("masked", 302, "masked", Message(), None)
     assert transport_with(error)(auth_request()).code == "redirect"
@@ -126,15 +133,19 @@ def test_the_opener_registers_no_proxy_and_follows_no_redirect():
 
 # --- pre-I/O refusals: nothing reaches the opener ----------------------------
 
-@pytest.mark.parametrize("overrides", [
-    {"client_id": ""},
-    {"client_secret": ""},
-    {"client_id": "with\ttab"},
-    {"client_secret": "line\nbreak"},
-    {"client_secret": "s" * 513},
-    {"client_id": None},
-    {"client_secret": 1234},
-])
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"client_id": ""},
+        {"client_secret": ""},
+        {"client_id": "with\ttab"},
+        {"client_secret": "line\nbreak"},
+        {"client_secret": "s" * 513},
+        {"client_id": None},
+        {"client_secret": 1234},
+    ],
+)
 def test_unusable_credentials_fail_before_any_wire_call(overrides):
     transport = transport_with()
 
@@ -144,16 +155,22 @@ def test_unusable_credentials_fail_before_any_wire_call(overrides):
     assert transport.opener.calls == []
 
 
-@pytest.mark.parametrize("request_kwargs", [
-    {"endpoint_id": "toss_orders"},
-    {"endpoint_id": "toss_accounts"},
-    {"endpoint_id": ""},
-    {"timeout_seconds": 600.0},
-])
+@pytest.mark.parametrize(
+    "request_kwargs",
+    [
+        {"endpoint_id": "toss_orders"},
+        {"endpoint_id": "toss_accounts"},
+        {"endpoint_id": ""},
+        {"timeout_seconds": 600.0},
+    ],
+)
 def test_any_request_identity_other_than_the_token_operation_is_refused(request_kwargs):
-    fields = dict(endpoint_id="toss_oauth_token",
-                  timeout_seconds=REQUEST_TIMEOUT_SECONDS,
-                  client_id=CLIENT_ID, client_secret=CLIENT_SECRET)
+    fields = dict(
+        endpoint_id="toss_oauth_token",
+        timeout_seconds=REQUEST_TIMEOUT_SECONDS,
+        client_id=CLIENT_ID,
+        client_secret=CLIENT_SECRET,
+    )
     fields.update(request_kwargs)
     transport = transport_with()
 
@@ -165,11 +182,21 @@ def test_any_request_identity_other_than_the_token_operation_is_refused(request_
 
 # --- closed failure mapping --------------------------------------------------
 
-@pytest.mark.parametrize("status,expected", [
-    (400, "bad_request"), (401, "auth_rejection"), (403, "forbidden"),
-    (404, "bad_request"), (500, "http_5xx"), (503, "http_5xx"),
-    (301, "redirect"), (302, "redirect"), (307, "redirect"),
-])
+
+@pytest.mark.parametrize(
+    "status,expected",
+    [
+        (400, "bad_request"),
+        (401, "auth_rejection"),
+        (403, "forbidden"),
+        (404, "bad_request"),
+        (500, "http_5xx"),
+        (503, "http_5xx"),
+        (301, "redirect"),
+        (302, "redirect"),
+        (307, "redirect"),
+    ],
+)
 def test_http_status_maps_to_a_closed_code(status, expected):
     error = urllib.error.HTTPError("masked", status, "masked", Message(), None)
 
@@ -194,7 +221,9 @@ def test_transport_faults_map_to_closed_codes():
 
     assert transport_with(timeout)(auth_request()).code == "timeout"
     assert transport_with(refused)(auth_request()).code == "connection_failure"
-    assert transport_with(RuntimeError("boom"))(auth_request()).code == "protocol_failure"
+    assert (
+        transport_with(RuntimeError("boom"))(auth_request()).code == "protocol_failure"
+    )
 
 
 def test_oversized_and_reencoded_token_bodies_are_refused():
@@ -203,7 +232,9 @@ def test_oversized_and_reencoded_token_bodies_are_refused():
     gzipped.headers["Content-Encoding"] = "gzip"
 
     assert transport_with(oversized)(auth_request()).code == "body_too_large"
-    assert transport_with(gzipped)(auth_request()).code == "unsupported_content_encoding"
+    assert (
+        transport_with(gzipped)(auth_request()).code == "unsupported_content_encoding"
+    )
 
 
 def test_non_200_success_status_is_a_protocol_failure():
@@ -215,10 +246,12 @@ def test_non_200_success_status_is_a_protocol_failure():
 
 # --- redaction ---------------------------------------------------------------
 
+
 def test_credentials_never_appear_in_request_or_failure_representations():
     request = auth_request()
     error = urllib.error.HTTPError(
-        TOKEN_URL, 401, '{"error":{"code":"expired-token"}}', Message(), None)
+        TOKEN_URL, 401, '{"error":{"code":"expired-token"}}', Message(), None
+    )
     failure = transport_with(error)(auth_request())
 
     for text in (repr(request), str(request), repr(failure), str(failure)):

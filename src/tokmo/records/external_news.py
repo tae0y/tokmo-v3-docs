@@ -1,24 +1,32 @@
 """N1 NEWS-only private SQLite store."""
 
 import hashlib
-from contextlib import contextmanager
 import json
 import os
-from pathlib import Path
 import posixpath
 import re
 import sqlite3
-from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 import uuid
+from contextlib import contextmanager
+from pathlib import Path
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
-from tokmo.records.private_sqlite import (
-    MIN_SQLITE_VERSION, acquire_immediate_transaction,
-    check_private_path_without_open, connect_private,
-    prepare_private_path, private_creation, table_is_strict, path_identity,
-)
 from tokmo.records import news_conflict_audit, news_revision_evidence
+from tokmo.records.private_sqlite import (
+    MIN_SQLITE_VERSION,
+    acquire_immediate_transaction,
+    check_private_path_without_open,
+    connect_private,
+    path_identity,
+    prepare_private_path,
+    private_creation,
+    table_is_strict,
+)
 from tokmo.values.external_news import (
-    NewsReceipt, NewsWrite, SaveOutcome, canonical_utc,
+    NewsReceipt,
+    NewsWrite,
+    SaveOutcome,
+    canonical_utc,
 )
 from tokmo.values.news_connectors import NewsConnectorSpec
 
@@ -107,10 +115,17 @@ CREATE INDEX news_documents_analysis_idx ON news_documents(analysis_state,first_
 CREATE INDEX news_documents_expiry_idx ON news_documents(expires_at) WHERE pinned=0 AND expires_at IS NOT NULL;
 """
 
-_EXPECTED_TABLES = frozenset({
-    "schema_meta", "source_families", "sources", "intake_requests",
-    "intake_receipts", "news_documents", "source_connectors",
-})
+_EXPECTED_TABLES = frozenset(
+    {
+        "schema_meta",
+        "source_families",
+        "sources",
+        "intake_requests",
+        "intake_receipts",
+        "news_documents",
+        "source_connectors",
+    }
+)
 
 _IDENTITY_SELECT = (
     "news_document_id,source_article_id,canonical_url,canonical_url_hash,"
@@ -119,10 +134,23 @@ _IDENTITY_SELECT = (
     "content_state,license_state,evidence_role,alert_eligible,time_interpretation,published_at"
 )
 _IDENTITY_FIELDS = (
-    "source_article_id", "canonical_url", "canonical_url_hash", "publisher_name",
-    "publisher_site_url", "content_mode", "title", "title_fingerprint",
-    "summary_text", "body_text", "content_hash", "content_state", "license_state",
-    "evidence_role", "alert_eligible", "time_interpretation", "published_at",
+    "source_article_id",
+    "canonical_url",
+    "canonical_url_hash",
+    "publisher_name",
+    "publisher_site_url",
+    "content_mode",
+    "title",
+    "title_fingerprint",
+    "summary_text",
+    "body_text",
+    "content_hash",
+    "content_state",
+    "license_state",
+    "evidence_role",
+    "alert_eligible",
+    "time_interpretation",
+    "published_at",
 )
 _FIELD_INDEXES = {name: index for index, name in enumerate(_IDENTITY_FIELDS)}
 _ARTICLE_ID_INDEX = _FIELD_INDEXES["source_article_id"]
@@ -135,8 +163,7 @@ def _ddl_sha256(connection: sqlite3.Connection) -> str:
         "WHERE sql IS NOT NULL ORDER BY type,name"
     ).fetchall()
     encoded = b"".join(
-        b"\0".join(field.encode("utf-8") for field in row) + b"\n"
-        for row in rows
+        b"\0".join(field.encode("utf-8") for field in row) + b"\n" for row in rows
     )
     return hashlib.sha256(encoded).hexdigest()
 
@@ -144,7 +171,8 @@ def _ddl_sha256(connection: sqlite3.Connection) -> str:
 def _validate_schema(connection: sqlite3.Connection) -> None:
     try:
         tables = {
-            row[0] for row in connection.execute(
+            row[0]
+            for row in connection.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
         }
@@ -162,9 +190,9 @@ def _validate_schema(connection: sqlite3.Connection) -> None:
             "SELECT family_key,display_name,adapter_key,record_type_key "
             "FROM source_families"
         ).fetchall()
-        if registry != [(
-            "NEWS", "News documents", "news_document_store", "news_document"
-        )]:
+        if registry != [
+            ("NEWS", "News documents", "news_document_store", "news_document")
+        ]:
             raise RuntimeError("schema_mismatch")
         if connection.execute("PRAGMA foreign_key_check").fetchone() is not None:
             raise RuntimeError("schema_mismatch")
@@ -264,7 +292,9 @@ class ExternalNewsStore:
         if batched and path_identity(self.path) != self._batch_identity:
             raise OSError("unsafe_path_swap")
         identity = self._batch_identity if batched else path_identity(self.path)
-        connection = self._batch_connection if batched else connect_private(self.path, mode="rw")
+        connection = (
+            self._batch_connection if batched else connect_private(self.path, mode="rw")
+        )
         try:
             # Validate without a write reservation. Bind the result to the
             # version BEFORE the scan: a commit during any validation query
@@ -325,8 +355,14 @@ class ExternalNewsStore:
                 connection.execute(statement)
             stamp = canonical_utc(now, "now")
             digest = _ddl_sha256(connection)
-            connection.execute("INSERT INTO schema_meta VALUES(1,5,5,'external-news-n5',?,?,NULL)", (digest, stamp))
-            connection.execute("INSERT INTO source_families VALUES('NEWS','News documents','news_document_store','news_document',1,?,NULL,'{}')", (stamp,))
+            connection.execute(
+                "INSERT INTO schema_meta VALUES(1,5,5,'external-news-n5',?,?,NULL)",
+                (digest, stamp),
+            )
+            connection.execute(
+                "INSERT INTO source_families VALUES('NEWS','News documents','news_document_store','news_document',1,?,NULL,'{}')",
+                (stamp,),
+            )
             for table in _EXPECTED_TABLES:
                 if not table_is_strict(connection, table):
                     raise RuntimeError("schema_mismatch")
@@ -362,32 +398,69 @@ class ExternalNewsStore:
         """Crash-test seam after private evidence durability."""
 
     def _complete_revision_receipt(
-        self, *, spec, source_id, stamp, target_ref, target_fingerprint,
-        idempotency_key, bytes_received, existing_id, stored, payload,
-        changed_names, revision_id,
+        self,
+        *,
+        spec,
+        source_id,
+        stamp,
+        target_ref,
+        target_fingerprint,
+        idempotency_key,
+        bytes_received,
+        existing_id,
+        stored,
+        payload,
+        changed_names,
+        revision_id,
     ) -> NewsReceipt:
         with self._connector_transaction() as connection:
             connection.execute(
                 "INSERT OR IGNORE INTO sources(source_id,family_key,source_native_key,display_name,canonical_url,created_at,updated_at) VALUES(?,'NEWS',?,?,?,?,?)",
-                (source_id, spec.source_native_key, spec.display_name,
-                 spec.canonical_url, stamp, stamp))
+                (
+                    source_id,
+                    spec.source_native_key,
+                    spec.display_name,
+                    spec.canonical_url,
+                    stamp,
+                    stamp,
+                ),
+            )
             source = connection.execute(
                 "SELECT source_native_key,display_name,canonical_url FROM sources WHERE source_id=?",
-                (source_id,)).fetchone()
-            if source != (spec.source_native_key, spec.display_name, spec.canonical_url):
+                (source_id,),
+            ).fetchone()
+            if source != (
+                spec.source_native_key,
+                spec.display_name,
+                spec.canonical_url,
+            ):
                 raise RuntimeError("source_identity_mismatch")
             connection.execute(
                 "INSERT OR IGNORE INTO source_connectors(connector_id,source_id,origin_kind,display_name,canonical_url,created_at) VALUES(?,?,?,?,?,?)",
-                (spec.connector_id, source_id, spec.origin_kind.value,
-                 spec.display_name, spec.canonical_url, stamp))
+                (
+                    spec.connector_id,
+                    source_id,
+                    spec.origin_kind.value,
+                    spec.display_name,
+                    spec.canonical_url,
+                    stamp,
+                ),
+            )
             connector = connection.execute(
                 "SELECT source_id,origin_kind,display_name,canonical_url FROM source_connectors WHERE connector_id=?",
-                (spec.connector_id,)).fetchone()
-            if connector != (source_id, spec.origin_kind.value, spec.display_name, spec.canonical_url):
+                (spec.connector_id,),
+            ).fetchone()
+            if connector != (
+                source_id,
+                spec.origin_kind.value,
+                spec.display_name,
+                spec.canonical_url,
+            ):
                 raise RuntimeError("connector_identity_mismatch")
             current = connection.execute(
                 f"SELECT {_IDENTITY_SELECT} FROM news_documents WHERE news_document_id=?",
-                (existing_id,)).fetchone()
+                (existing_id,),
+            ).fetchone()
             if current is None or tuple(current[1:]) != stored:
                 raise RuntimeError("revision_canonical_mismatch")
             # The evidence row is already durable; carrying the revised fields
@@ -398,68 +471,124 @@ class ExternalNewsStore:
             connection.execute(
                 f"UPDATE news_documents SET {assignments},last_seen_at=?,"
                 "revision_no=revision_no+1 WHERE news_document_id=?",
-                (*(payload[_FIELD_INDEXES[name]] for name in changed_names),
-                 stamp, existing_id),
+                (
+                    *(payload[_FIELD_INDEXES[name]] for name in changed_names),
+                    stamp,
+                    existing_id,
+                ),
             )
             prior = connection.execute(
                 "SELECT intake_request_id FROM intake_requests WHERE idempotency_key=?",
-                (idempotency_key,)).fetchone()
-            request_id = (prior[0] if prior is not None else
-                          _hash("v1", "intake-request", idempotency_key))
+                (idempotency_key,),
+            ).fetchone()
+            request_id = (
+                prior[0]
+                if prior is not None
+                else _hash("v1", "intake-request", idempotency_key)
+            )
             connection.execute(
                 "INSERT OR IGNORE INTO intake_requests(intake_request_id,origin_kind,connector_id,source_id,requested_by,intent,target_ref,target_fingerprint,requested_at,request_state,idempotency_key) VALUES(?,?,?,?, 'PROGRAM','SAVE_NEWS',?,?,?,'COMPLETED',?)",
-                (request_id, spec.origin_kind.value, spec.connector_id, source_id,
-                 target_ref, target_fingerprint, stamp, idempotency_key))
+                (
+                    request_id,
+                    spec.origin_kind.value,
+                    spec.connector_id,
+                    source_id,
+                    target_ref,
+                    target_fingerprint,
+                    stamp,
+                    idempotency_key,
+                ),
+            )
             request = connection.execute(
                 "SELECT origin_kind,connector_id,source_id,target_ref,target_fingerprint,idempotency_key FROM intake_requests WHERE intake_request_id=?",
-                (request_id,)).fetchone()
-            if request != (spec.origin_kind.value, spec.connector_id, source_id,
-                            target_ref, target_fingerprint, idempotency_key):
+                (request_id,),
+            ).fetchone()
+            if request != (
+                spec.origin_kind.value,
+                spec.connector_id,
+                source_id,
+                target_ref,
+                target_fingerprint,
+                idempotency_key,
+            ):
                 raise RuntimeError("request_identity_mismatch")
-            attempt_no = int(connection.execute(
-                "SELECT COALESCE(MAX(attempt_no),0)+1 FROM intake_receipts WHERE intake_request_id=?",
-                (request_id,)).fetchone()[0])
+            attempt_no = int(
+                connection.execute(
+                    "SELECT COALESCE(MAX(attempt_no),0)+1 FROM intake_receipts WHERE intake_request_id=?",
+                    (request_id,),
+                ).fetchone()[0]
+            )
             receipt_id = uuid.uuid4().hex
             connection.execute(
                 "INSERT INTO intake_receipts(intake_receipt_id,intake_request_id,attempt_no,started_at,finished_at,status,bytes_received,response_fingerprint,source_record_type,source_record_id) VALUES(?,?,?,?,?,'DUPLICATE',?,?,'news_document',?)",
-                (receipt_id, request_id, attempt_no, stamp, stamp, bytes_received,
-                 revision_id, existing_id))
+                (
+                    receipt_id,
+                    request_id,
+                    attempt_no,
+                    stamp,
+                    stamp,
+                    bytes_received,
+                    revision_id,
+                    existing_id,
+                ),
+            )
             connection.execute("COMMIT")
-            return NewsReceipt(SaveOutcome.DUPLICATE, existing_id, request_id,
-                               receipt_id, None, revision_id)
+            return NewsReceipt(
+                SaveOutcome.DUPLICATE,
+                existing_id,
+                request_id,
+                receipt_id,
+                None,
+                revision_id,
+            )
 
-    def _audit_conflict(self, *, connector_id: str | None, target_fingerprint: str,
-                        stamp: str, payload: tuple, matches_by_arm: tuple[list, list, list]) -> NewsReceipt:
+    def _audit_conflict(
+        self,
+        *,
+        connector_id: str | None,
+        target_fingerprint: str,
+        stamp: str,
+        payload: tuple,
+        matches_by_arm: tuple[list, list, list],
+    ) -> NewsReceipt:
         try:
             article_matches, url_matches, content_matches = matches_by_arm
             matches_by_id = {
-                row[0]: row
-                for row in article_matches + url_matches + content_matches
+                row[0]: row for row in article_matches + url_matches + content_matches
             }
             if not 1 <= len(matches_by_id) <= 3:
                 raise RuntimeError("invalid_match_count")
             ordered = [matches_by_id[key] for key in sorted(matches_by_id)]
             reference = ordered[0]
             matched_fingerprints = sorted(
-                _hash("v1", "matched-document", row[0]) for row in ordered)
+                _hash("v1", "matched-document", row[0]) for row in ordered
+            )
             changed = [
-                name for name, old, new
-                in zip(_IDENTITY_FIELDS, reference[1:], payload) if old != new
+                name
+                for name, old, new in zip(_IDENTITY_FIELDS, reference[1:], payload)
+                if old != new
             ]
             old_host = _normalized_host(reference[5])
             new_host = _normalized_host(payload[4])
             incoming_article_hash = (
                 _hash("v1", "incoming-article-id", payload[0])
-                if payload[0] is not None else None
+                if payload[0] is not None
+                else None
             )
             inputs = (
-                connector_id or "DIRECT_URL", target_fingerprint,
-                incoming_article_hash or "", payload[2], payload[7],
-                payload[10] or "", *matched_fingerprints, stamp,
+                connector_id or "DIRECT_URL",
+                target_fingerprint,
+                incoming_article_hash or "",
+                payload[2],
+                payload[7],
+                payload[10] or "",
+                *matched_fingerprints,
+                stamp,
             )
             conflict_id = _hash("v1", "news-conflict-id", *inputs)
             record = {
-                "conflict_id": conflict_id, "observed_at": stamp,
+                "conflict_id": conflict_id,
+                "observed_at": stamp,
                 "expires_at": news_conflict_audit.expiry_for(stamp),
                 "connector_id": connector_id,
                 "target_fingerprint": target_fingerprint,
@@ -468,17 +597,17 @@ class ExternalNewsStore:
                 "match_by_url_hash": int(bool(url_matches)),
                 "match_by_content_hash": int(bool(content_matches)),
                 "matched_document_fingerprints_json": json.dumps(
-                    matched_fingerprints, separators=(",", ":")),
-                "changed_fields_json": json.dumps(
-                    changed, separators=(",", ":")),
+                    matched_fingerprints, separators=(",", ":")
+                ),
+                "changed_fields_json": json.dumps(changed, separators=(",", ":")),
                 "old_published_at": reference[17],
                 "new_published_at": payload[16],
                 "old_publisher_host_hash": (
-                    _hash("v1", "publisher-host", old_host)
-                    if old_host else None),
+                    _hash("v1", "publisher-host", old_host) if old_host else None
+                ),
                 "new_publisher_host_hash": (
-                    _hash("v1", "publisher-host", new_host)
-                    if new_host else None),
+                    _hash("v1", "publisher-host", new_host) if new_host else None
+                ),
                 "old_title_fingerprint": reference[8],
                 "new_title_fingerprint": payload[7],
                 "incoming_article_id_hash": incoming_article_hash,
@@ -492,8 +621,11 @@ class ExternalNewsStore:
     def save_direct_url(self, value: NewsWrite) -> NewsReceipt:
         canonical_url, domain = _canonicalize_url(value.canonical_url)
         stamp = canonical_utc(value.observed_at, "observed_at")
-        published = (canonical_utc(value.published_at, "published_at")
-                     if value.published_at else None)
+        published = (
+            canonical_utc(value.published_at, "published_at")
+            if value.published_at
+            else None
+        )
         url_hash = _hash("v1", canonical_url)
         title_hash = _hash("v1", "NEWS", " ".join(value.title.casefold().split()))
         source_id = _hash("source", domain)
@@ -522,13 +654,26 @@ class ExternalNewsStore:
             document_id = uuid.uuid4().hex
             connection.execute(
                 "INSERT OR IGNORE INTO sources(source_id,family_key,source_native_key,display_name,canonical_url,created_at,updated_at) VALUES(?, 'NEWS', ?, ?, ?, ?, ?)",
-                (source_id, f"domain:{domain}", domain, f"https://{domain}/", stamp, stamp),
+                (
+                    source_id,
+                    f"domain:{domain}",
+                    domain,
+                    f"https://{domain}/",
+                    stamp,
+                    stamp,
+                ),
             )
             if prior is None:
                 connection.execute(
                     "INSERT INTO intake_requests(intake_request_id,origin_kind,connector_id,source_id,requested_by,intent,target_ref,target_fingerprint,requested_at,request_state,idempotency_key) VALUES(?,'DIRECT_URL',NULL,?,'PROGRAM','SAVE_NEWS',?,?,?,'COMPLETED',?)",
-                    (request_id, source_id, canonical_url, url_hash, stamp,
-                     idempotency_key),
+                    (
+                        request_id,
+                        source_id,
+                        canonical_url,
+                        url_hash,
+                        stamp,
+                        idempotency_key,
+                    ),
                 )
             article_matches = []
             if value.source_article_id is not None:
@@ -550,17 +695,29 @@ class ExternalNewsStore:
                     "WHERE source_id=? AND content_hash=?",
                     (source_id, value.content_hash),
                 ).fetchall()
-            matches_by_id = {row[0]: row for row in article_matches + url_matches + content_matches}
+            matches_by_id = {
+                row[0]: row for row in article_matches + url_matches + content_matches
+            }
             if matches_by_id:
                 existing = next(iter(matches_by_id.values()))
                 payload = (
-                    value.source_article_id, canonical_url, url_hash,
-                    value.publisher_name, value.publisher_site_url,
-                    value.content_mode.value, value.title, title_hash,
-                    value.summary_text, value.body_text, value.content_hash,
-                    value.content_state.value, value.license_state.value,
-                    value.evidence_role.value, int(value.alert_eligible),
-                    value.time_interpretation.value, published,
+                    value.source_article_id,
+                    canonical_url,
+                    url_hash,
+                    value.publisher_name,
+                    value.publisher_site_url,
+                    value.content_mode.value,
+                    value.title,
+                    title_hash,
+                    value.summary_text,
+                    value.body_text,
+                    value.content_hash,
+                    value.content_state.value,
+                    value.license_state.value,
+                    value.evidence_role.value,
+                    int(value.alert_eligible),
+                    value.time_interpretation.value,
+                    published,
                 )
                 stored = tuple(existing[1:])
                 if len(matches_by_id) == 1 and stored == payload:
@@ -572,24 +729,42 @@ class ExternalNewsStore:
                             (receipt_id, request_id, stamp, stamp, existing_id),
                         )
                     connection.execute("COMMIT")
-                    return NewsReceipt(SaveOutcome.DUPLICATE, existing_id,
-                                       request_id, receipt_id)
+                    return NewsReceipt(
+                        SaveOutcome.DUPLICATE, existing_id, request_id, receipt_id
+                    )
                 connection.execute("ROLLBACK")
                 return self._audit_conflict(
-                    connector_id=None, target_fingerprint=url_hash, stamp=stamp,
+                    connector_id=None,
+                    target_fingerprint=url_hash,
+                    stamp=stamp,
                     payload=payload,
                     matches_by_arm=(article_matches, url_matches, content_matches),
                 )
             connection.execute(
                 "INSERT INTO news_documents(news_document_id,source_id,source_article_id,canonical_url,canonical_url_hash,publisher_name,publisher_site_url,content_mode,title,title_fingerprint,summary_text,body_text,content_hash,content_state,license_state,evidence_role,alert_eligible,time_interpretation,published_at,first_seen_at,last_seen_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (document_id, source_id, value.source_article_id, canonical_url,
-                 url_hash, value.publisher_name, value.publisher_site_url,
-                 value.content_mode.value, value.title, title_hash,
-                 value.summary_text, value.body_text, value.content_hash,
-                 value.content_state.value, value.license_state.value,
-                 value.evidence_role.value, int(value.alert_eligible),
-                 value.time_interpretation.value, published,
-                 stamp, stamp),
+                (
+                    document_id,
+                    source_id,
+                    value.source_article_id,
+                    canonical_url,
+                    url_hash,
+                    value.publisher_name,
+                    value.publisher_site_url,
+                    value.content_mode.value,
+                    value.title,
+                    title_hash,
+                    value.summary_text,
+                    value.body_text,
+                    value.content_hash,
+                    value.content_state.value,
+                    value.license_state.value,
+                    value.evidence_role.value,
+                    int(value.alert_eligible),
+                    value.time_interpretation.value,
+                    published,
+                    stamp,
+                    stamp,
+                ),
             )
             receipt_id = uuid.uuid4().hex
             connection.execute(
@@ -597,7 +772,9 @@ class ExternalNewsStore:
                 (receipt_id, request_id, stamp, stamp, document_id),
             )
             connection.execute("COMMIT")
-            return NewsReceipt(SaveOutcome.INSERTED, document_id, request_id, receipt_id)
+            return NewsReceipt(
+                SaveOutcome.INSERTED, document_id, request_id, receipt_id
+            )
         except BaseException:
             if connection.in_transaction:
                 connection.execute("ROLLBACK")
@@ -606,69 +783,119 @@ class ExternalNewsStore:
             connection.close()
 
     def save_connector_news(
-        self, spec: NewsConnectorSpec, value: NewsWrite, *, target_ref: str,
+        self,
+        spec: NewsConnectorSpec,
+        value: NewsWrite,
+        *,
+        target_ref: str,
         bytes_received: int | None = None,
     ) -> NewsReceipt:
-        if (type(target_ref) is not str or not target_ref.strip()
-                or len(target_ref) > 500
-                or any(ord(ch) < 32 or ord(ch) == 127 for ch in target_ref)):
+        if (
+            type(target_ref) is not str
+            or not target_ref.strip()
+            or len(target_ref) > 500
+            or any(ord(ch) < 32 or ord(ch) == 127 for ch in target_ref)
+        ):
             raise ValueError("target_ref must be non-empty, bounded, and control-free")
-        if (bytes_received is not None
-                and (type(bytes_received) is not int or bytes_received < 0)):
+        if bytes_received is not None and (
+            type(bytes_received) is not int or bytes_received < 0
+        ):
             raise ValueError("bytes_received must be a non-negative integer")
         canonical_url, _domain = _canonicalize_url(value.canonical_url)
         stamp = canonical_utc(value.observed_at, "observed_at")
-        published = (canonical_utc(value.published_at, "published_at")
-                     if value.published_at else None)
+        published = (
+            canonical_utc(value.published_at, "published_at")
+            if value.published_at
+            else None
+        )
         url_hash = _hash("v1", canonical_url)
         title_hash = _hash("v1", "NEWS", " ".join(value.title.casefold().split()))
         source_id = _hash("source", spec.source_native_key)
         target_fingerprint = _hash("v1", target_ref)
         idempotency_key = _hash(
-            "v1", spec.origin_kind.value, spec.connector_id, source_id,
-            target_fingerprint, url_hash, "SAVE_NEWS",
+            "v1",
+            spec.origin_kind.value,
+            spec.connector_id,
+            source_id,
+            target_fingerprint,
+            url_hash,
+            "SAVE_NEWS",
         )
         with self._connector_transaction() as connection:
             connection.execute(
                 "INSERT OR IGNORE INTO sources(source_id,family_key,source_native_key,display_name,canonical_url,created_at,updated_at) VALUES(?,'NEWS',?,?,?,?,?)",
-                (source_id, spec.source_native_key, spec.display_name,
-                 spec.canonical_url, stamp, stamp),
+                (
+                    source_id,
+                    spec.source_native_key,
+                    spec.display_name,
+                    spec.canonical_url,
+                    stamp,
+                    stamp,
+                ),
             )
             source = connection.execute(
                 "SELECT source_native_key,display_name,canonical_url FROM sources "
-                "WHERE source_id=?", (source_id,),
+                "WHERE source_id=?",
+                (source_id,),
             ).fetchone()
-            if source != (spec.source_native_key, spec.display_name,
-                          spec.canonical_url):
+            if source != (
+                spec.source_native_key,
+                spec.display_name,
+                spec.canonical_url,
+            ):
                 raise RuntimeError("source_identity_mismatch")
             connection.execute(
                 "INSERT OR IGNORE INTO source_connectors(connector_id,source_id,origin_kind,display_name,canonical_url,created_at) VALUES(?,?,?,?,?,?)",
-                (spec.connector_id, source_id, spec.origin_kind.value,
-                 spec.display_name, spec.canonical_url, stamp),
+                (
+                    spec.connector_id,
+                    source_id,
+                    spec.origin_kind.value,
+                    spec.display_name,
+                    spec.canonical_url,
+                    stamp,
+                ),
             )
             connector = connection.execute(
                 "SELECT source_id,origin_kind,display_name,canonical_url "
                 "FROM source_connectors WHERE connector_id=?",
                 (spec.connector_id,),
             ).fetchone()
-            if connector != (source_id, spec.origin_kind.value, spec.display_name,
-                              spec.canonical_url):
+            if connector != (
+                source_id,
+                spec.origin_kind.value,
+                spec.display_name,
+                spec.canonical_url,
+            ):
                 raise RuntimeError("connector_identity_mismatch")
             prior = connection.execute(
                 "SELECT intake_request_id FROM intake_requests WHERE idempotency_key=?",
                 (idempotency_key,),
             ).fetchone()
             request_id = prior[0] if prior is not None else uuid.uuid4().hex
-            attempt_no = 1 if prior is None else int(connection.execute(
-                "SELECT COALESCE(MAX(attempt_no),0)+1 FROM intake_receipts "
-                "WHERE intake_request_id=?", (request_id,),
-            ).fetchone()[0])
+            attempt_no = (
+                1
+                if prior is None
+                else int(
+                    connection.execute(
+                        "SELECT COALESCE(MAX(attempt_no),0)+1 FROM intake_receipts "
+                        "WHERE intake_request_id=?",
+                        (request_id,),
+                    ).fetchone()[0]
+                )
+            )
             if prior is None:
                 connection.execute(
                     "INSERT INTO intake_requests(intake_request_id,origin_kind,connector_id,source_id,requested_by,intent,target_ref,target_fingerprint,requested_at,request_state,idempotency_key) VALUES(?,?,?,?, 'PROGRAM','SAVE_NEWS',?,?,?,'COMPLETED',?)",
-                    (request_id, spec.origin_kind.value, spec.connector_id,
-                     source_id, target_ref, target_fingerprint, stamp,
-                     idempotency_key),
+                    (
+                        request_id,
+                        spec.origin_kind.value,
+                        spec.connector_id,
+                        source_id,
+                        target_ref,
+                        target_fingerprint,
+                        stamp,
+                        idempotency_key,
+                    ),
                 )
             article_matches = []
             if value.source_article_id is not None:
@@ -689,15 +916,27 @@ class ExternalNewsStore:
                     "WHERE source_id=? AND content_hash=?",
                     (source_id, value.content_hash),
                 ).fetchall()
-            matches_by_id = {row[0]: row for row in article_matches + url_matches + content_matches}
+            matches_by_id = {
+                row[0]: row for row in article_matches + url_matches + content_matches
+            }
             payload = (
-                value.source_article_id, canonical_url, url_hash,
-                value.publisher_name, value.publisher_site_url,
-                value.content_mode.value, value.title, title_hash,
-                value.summary_text, value.body_text, value.content_hash,
-                value.content_state.value, value.license_state.value,
-                value.evidence_role.value, int(value.alert_eligible),
-                value.time_interpretation.value, published,
+                value.source_article_id,
+                canonical_url,
+                url_hash,
+                value.publisher_name,
+                value.publisher_site_url,
+                value.content_mode.value,
+                value.title,
+                title_hash,
+                value.summary_text,
+                value.body_text,
+                value.content_hash,
+                value.content_state.value,
+                value.license_state.value,
+                value.evidence_role.value,
+                int(value.alert_eligible),
+                value.time_interpretation.value,
+                published,
             )
             if matches_by_id:
                 existing = next(iter(matches_by_id.values()))
@@ -707,21 +946,33 @@ class ExternalNewsStore:
                     receipt_id = uuid.uuid4().hex
                     connection.execute(
                         "INSERT INTO intake_receipts(intake_receipt_id,intake_request_id,attempt_no,started_at,finished_at,status,bytes_received,source_record_type,source_record_id) VALUES(?,?,?,?,?,'DUPLICATE',?,'news_document',?)",
-                        (receipt_id, request_id, attempt_no, stamp, stamp,
-                         bytes_received, existing_id),
+                        (
+                            receipt_id,
+                            request_id,
+                            attempt_no,
+                            stamp,
+                            stamp,
+                            bytes_received,
+                            existing_id,
+                        ),
                     )
                     connection.execute("COMMIT")
-                    return NewsReceipt(SaveOutcome.DUPLICATE, existing_id,
-                                       request_id, receipt_id)
+                    return NewsReceipt(
+                        SaveOutcome.DUPLICATE, existing_id, request_id, receipt_id
+                    )
                 locator_refresh = (
                     len(matches_by_id) == 1
-                    and spec.connector_id in {
-                        "finnhub-company-news-v1", "finnhub-market-news-v1",
+                    and spec.connector_id
+                    in {
+                        "finnhub-company-news-v1",
+                        "finnhub-market-news-v1",
                     }
                     and value.source_article_id is not None
                     and existing[1] == value.source_article_id
-                    and (_is_finnhub_news_locator(existing[2])
-                         or _is_legacy_bare_finnhub_news_locator(existing[2]))
+                    and (
+                        _is_finnhub_news_locator(existing[2])
+                        or _is_legacy_bare_finnhub_news_locator(existing[2])
+                    )
                     and _is_finnhub_news_locator(canonical_url)
                     and tuple(existing[4:]) == payload[3:]
                 )
@@ -741,12 +992,21 @@ class ExternalNewsStore:
                         "response_fingerprint,source_record_type,source_record_id"
                         ") VALUES(?,?,?,?,?,'DUPLICATE',?,?,"
                         "'news_document',?)",
-                        (receipt_id, request_id, attempt_no, stamp, stamp,
-                         bytes_received, url_hash, existing_id),
+                        (
+                            receipt_id,
+                            request_id,
+                            attempt_no,
+                            stamp,
+                            stamp,
+                            bytes_received,
+                            url_hash,
+                            existing_id,
+                        ),
                     )
                     connection.execute("COMMIT")
-                    return NewsReceipt(SaveOutcome.DUPLICATE, existing_id,
-                                       request_id, receipt_id)
+                    return NewsReceipt(
+                        SaveOutcome.DUPLICATE, existing_id, request_id, receipt_id
+                    )
                 # The connector declares which fields it may revise; an empty
                 # declaration never takes the factual revision path. The
                 # canonical URL carries document identity, so a churning feed
@@ -755,13 +1015,15 @@ class ExternalNewsStore:
                     _FIELD_INDEXES[name] for name in spec.revisable_fields
                 )
                 changed_indexes = {
-                    index for index, (old, new) in enumerate(zip(stored, payload))
+                    index
+                    for index, (old, new) in enumerate(zip(stored, payload))
                     if old != new
                 }
-                identity_held = (
-                    stored[_URL_HASH_INDEX] == payload[_URL_HASH_INDEX]
-                    and (spec.identity_churns
-                         or stored[_ARTICLE_ID_INDEX] == payload[_ARTICLE_ID_INDEX])
+                identity_held = stored[_URL_HASH_INDEX] == payload[
+                    _URL_HASH_INDEX
+                ] and (
+                    spec.identity_churns
+                    or stored[_ARTICLE_ID_INDEX] == payload[_ARTICLE_ID_INDEX]
                 )
                 # A rotating GUID is identity, not content, so it is allowed on
                 # its own; every other changed field must be declared revisable.
@@ -776,32 +1038,50 @@ class ExternalNewsStore:
                 limits_ok = (
                     len(existing[7].encode("utf-8")) <= 4096
                     and len(value.title.encode("utf-8")) <= 4096
-                    and (existing[9] is None or len(existing[9].encode("utf-8")) <= 65536)
-                    and (value.summary_text is None or len(value.summary_text.encode("utf-8")) <= 65536)
+                    and (
+                        existing[9] is None or len(existing[9].encode("utf-8")) <= 65536
+                    )
+                    and (
+                        value.summary_text is None
+                        or len(value.summary_text.encode("utf-8")) <= 65536
+                    )
                 )
                 if revision_shaped and limits_ok:
                     existing_id = existing[0]
                     changed_names = sorted(
-                        _IDENTITY_FIELDS[index] for index in changed_indexes)
+                        _IDENTITY_FIELDS[index] for index in changed_indexes
+                    )
                     changed_json = json.dumps(changed_names, separators=(",", ":"))
                     old_summary_hash = _hash("v1", "summary", existing[9] or "")
                     new_summary_hash = _hash("v1", "summary", value.summary_text or "")
-                    document_fingerprint = _hash("v1", "canonical-document", existing_id)
-                    article_hash = _hash("v1", "source-article-id", value.source_article_id)
+                    document_fingerprint = _hash(
+                        "v1", "canonical-document", existing_id
+                    )
+                    article_hash = _hash(
+                        "v1", "source-article-id", value.source_article_id
+                    )
                     old_host = _normalized_host(existing[5])
                     new_host = _normalized_host(value.publisher_site_url)
                     semantic_parts = (
-                        "news-revision-evidence-published-revisable", spec.connector_id,
-                        document_fingerprint, article_hash, url_hash,
-                        existing[17] or "", published or "",
-                        existing[8], title_hash,
+                        "news-revision-evidence-published-revisable",
+                        spec.connector_id,
+                        document_fingerprint,
+                        article_hash,
+                        url_hash,
+                        existing[17] or "",
+                        published or "",
+                        existing[8],
+                        title_hash,
                         _hash("v1", "raw-title", existing[7]),
                         _hash("v1", "raw-title", value.title),
-                        old_summary_hash, new_summary_hash, changed_json,
+                        old_summary_hash,
+                        new_summary_hash,
+                        changed_json,
                     )
                     revision_id = _length_delimited_hash(semantic_parts)
                     record = {
-                        "revision_id": revision_id, "first_observed_at": stamp,
+                        "revision_id": revision_id,
+                        "first_observed_at": stamp,
                         "expires_at": news_revision_evidence.expiry_for(stamp),
                         "connector_id": spec.connector_id,
                         "canonical_document_fingerprint": document_fingerprint,
@@ -809,55 +1089,97 @@ class ExternalNewsStore:
                         "canonical_url_hash": url_hash,
                         "old_published_at": existing[17],
                         "new_published_at": published,
-                        "old_title": existing[7], "new_title": value.title,
+                        "old_title": existing[7],
+                        "new_title": value.title,
                         "old_title_fingerprint": existing[8],
                         "new_title_fingerprint": title_hash,
                         "old_summary_text": existing[9],
                         "new_summary_text": value.summary_text,
                         "old_summary_hash": old_summary_hash,
                         "new_summary_hash": new_summary_hash,
-                        "old_publisher_host_hash": (_hash("v1", "publisher-host", old_host) if old_host else None),
-                        "new_publisher_host_hash": (_hash("v1", "publisher-host", new_host) if new_host else None),
+                        "old_publisher_host_hash": (
+                            _hash("v1", "publisher-host", old_host)
+                            if old_host
+                            else None
+                        ),
+                        "new_publisher_host_hash": (
+                            _hash("v1", "publisher-host", new_host)
+                            if new_host
+                            else None
+                        ),
                         "changed_fields_json": changed_json,
                     }
                     connection.execute("ROLLBACK")
-                    evidence_id = news_revision_evidence.append_revision(self.path, record)
+                    evidence_id = news_revision_evidence.append_revision(
+                        self.path, record
+                    )
                     self._after_revision_append(evidence_id)
                     return self._complete_revision_receipt(
-                        spec=spec, source_id=source_id, stamp=stamp,
-                        target_ref=target_ref, target_fingerprint=target_fingerprint,
+                        spec=spec,
+                        source_id=source_id,
+                        stamp=stamp,
+                        target_ref=target_ref,
+                        target_fingerprint=target_fingerprint,
                         idempotency_key=idempotency_key,
-                        bytes_received=bytes_received, existing_id=existing_id,
-                        stored=stored, payload=payload,
-                        changed_names=changed_names, revision_id=evidence_id)
+                        bytes_received=bytes_received,
+                        existing_id=existing_id,
+                        stored=stored,
+                        payload=payload,
+                        changed_names=changed_names,
+                        revision_id=evidence_id,
+                    )
                 connection.execute("ROLLBACK")
                 return self._audit_conflict(
                     connector_id=spec.connector_id,
-                    target_fingerprint=target_fingerprint, stamp=stamp,
+                    target_fingerprint=target_fingerprint,
+                    stamp=stamp,
                     payload=payload,
                     matches_by_arm=(article_matches, url_matches, content_matches),
                 )
             document_id = uuid.uuid4().hex
             connection.execute(
                 "INSERT INTO news_documents(news_document_id,source_id,source_article_id,canonical_url,canonical_url_hash,publisher_name,publisher_site_url,content_mode,title,title_fingerprint,summary_text,body_text,content_hash,content_state,license_state,evidence_role,alert_eligible,time_interpretation,published_at,first_seen_at,last_seen_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (document_id, source_id, value.source_article_id, canonical_url,
-                 url_hash, value.publisher_name, value.publisher_site_url,
-                 value.content_mode.value, value.title, title_hash,
-                 value.summary_text, value.body_text, value.content_hash,
-                 value.content_state.value, value.license_state.value,
-                 value.evidence_role.value, int(value.alert_eligible),
-                 value.time_interpretation.value, published,
-                 stamp, stamp),
+                (
+                    document_id,
+                    source_id,
+                    value.source_article_id,
+                    canonical_url,
+                    url_hash,
+                    value.publisher_name,
+                    value.publisher_site_url,
+                    value.content_mode.value,
+                    value.title,
+                    title_hash,
+                    value.summary_text,
+                    value.body_text,
+                    value.content_hash,
+                    value.content_state.value,
+                    value.license_state.value,
+                    value.evidence_role.value,
+                    int(value.alert_eligible),
+                    value.time_interpretation.value,
+                    published,
+                    stamp,
+                    stamp,
+                ),
             )
             receipt_id = uuid.uuid4().hex
             connection.execute(
                 "INSERT INTO intake_receipts(intake_receipt_id,intake_request_id,attempt_no,started_at,finished_at,status,bytes_received,source_record_type,source_record_id) VALUES(?,?,?,?,?,'COLLECTED',?,'news_document',?)",
-                (receipt_id, request_id, attempt_no, stamp, stamp, bytes_received,
-                 document_id),
+                (
+                    receipt_id,
+                    request_id,
+                    attempt_no,
+                    stamp,
+                    stamp,
+                    bytes_received,
+                    document_id,
+                ),
             )
             connection.execute("COMMIT")
-            return NewsReceipt(SaveOutcome.INSERTED, document_id, request_id,
-                               receipt_id)
+            return NewsReceipt(
+                SaveOutcome.INSERTED, document_id, request_id, receipt_id
+            )
 
 
 def _is_legacy_bare_finnhub_news_locator(value: str) -> bool:
@@ -874,13 +1196,18 @@ def _is_legacy_bare_finnhub_news_locator(value: str) -> bool:
 def _is_finnhub_news_locator(value: str) -> bool:
     parsed = urlsplit(value)
     pairs = parse_qsl(parsed.query, keep_blank_values=True)
-    if (parsed.scheme != "https" or (parsed.hostname or "").lower() != "finnhub.io"
-            or parsed.path != "/api/news" or len(pairs) != 1
-            or pairs[0][0] != "id"):
+    if (
+        parsed.scheme != "https"
+        or (parsed.hostname or "").lower() != "finnhub.io"
+        or parsed.path != "/api/news"
+        or len(pairs) != 1
+        or pairs[0][0] != "id"
+    ):
         return False
     locator_id = pairs[0][1]
-    return (locator_id.isdigit()
-            or re.fullmatch(r"[0-9A-Fa-f]{64}", locator_id) is not None)
+    return (
+        locator_id.isdigit() or re.fullmatch(r"[0-9A-Fa-f]{64}", locator_id) is not None
+    )
 
 
 def _hash(*parts: str) -> str:
@@ -890,7 +1217,8 @@ def _hash(*parts: str) -> str:
 def _length_delimited_hash(parts: tuple[str, ...]) -> str:
     encoded = b"".join(
         len(value.encode("utf-8")).to_bytes(8, "big") + value.encode("utf-8")
-        for value in parts)
+        for value in parts
+    )
     return hashlib.sha256(encoded).hexdigest()
 
 
@@ -910,7 +1238,12 @@ def _canonicalize_url(raw: str) -> tuple[str, str]:
         raise ValueError("canonical_url must be an absolute HTTP(S) URL")
     host = parsed.hostname.encode("idna").decode("ascii").lower()
     port = parsed.port
-    netloc = host if port is None or (parsed.scheme.lower(), port) in {("http", 80), ("https", 443)} else f"{host}:{port}"
+    netloc = (
+        host
+        if port is None
+        or (parsed.scheme.lower(), port) in {("http", 80), ("https", 443)}
+        else f"{host}:{port}"
+    )
     raw_path = parsed.path or "/"
     normalized_path = posixpath.normpath(raw_path)
     if raw_path.endswith("/") and not normalized_path.endswith("/"):
@@ -920,9 +1253,13 @@ def _canonicalize_url(raw: str) -> tuple[str, str]:
     if host == "finnhub.io" and path == "/api/news":
         pairs = parse_qsl(parsed.query, keep_blank_values=True)
         ids = [value for key, value in pairs if key == "id"]
-        valid_id = (len(ids) == 1 and ids[0].isascii()
-                    and (ids[0].isdigit()
-                         or re.fullmatch(r"[0-9A-Fa-f]{64}", ids[0]) is not None))
+        valid_id = (
+            len(ids) == 1
+            and ids[0].isascii()
+            and (
+                ids[0].isdigit() or re.fullmatch(r"[0-9A-Fa-f]{64}", ids[0]) is not None
+            )
+        )
         if not ids or pairs != [("id", ids[0])]:
             valid_id = False
         if not valid_id:
@@ -930,11 +1267,30 @@ def _canonicalize_url(raw: str) -> tuple[str, str]:
         query = urlencode((("id", ids[0]),))
     canonical = urlunsplit((parsed.scheme.lower(), netloc, path, query, ""))
     labels = host.split(".")
-    public_suffix_labels = 2 if (
-        len(labels) >= 3 and len(labels[-1]) == 2
-        and labels[-2] in {"ac", "co", "com", "edu", "go", "gov", "ne", "net", "or", "org", "pe", "re"}
-    ) else 1
+    public_suffix_labels = (
+        2
+        if (
+            len(labels) >= 3
+            and len(labels[-1]) == 2
+            and labels[-2]
+            in {
+                "ac",
+                "co",
+                "com",
+                "edu",
+                "go",
+                "gov",
+                "ne",
+                "net",
+                "or",
+                "org",
+                "pe",
+                "re",
+            }
+        )
+        else 1
+    )
     if len(labels) <= public_suffix_labels:
         raise ValueError("canonical_url host has no registrable domain")
-    domain = ".".join(labels[-(public_suffix_labels + 1):])
+    domain = ".".join(labels[-(public_suffix_labels + 1) :])
     return canonical, domain

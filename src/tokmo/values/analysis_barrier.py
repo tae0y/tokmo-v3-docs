@@ -1,10 +1,10 @@
 """Frozen output values for the receipt-to-pack analysis barrier."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from types import MappingProxyType
-from typing import Mapping
 
 from tokmo.values.material_pack import JobKind
 from tokmo.values.session_gate import Market
@@ -51,7 +51,9 @@ class AnalysisBarrierResultV1:
             self, "market_readiness", MappingProxyType(dict(self.market_readiness))
         )
         object.__setattr__(self, "stale_jobs", MappingProxyType(dict(self.stale_jobs)))
-        object.__setattr__(self, "material_ticks", MappingProxyType(dict(self.material_ticks)))
+        object.__setattr__(
+            self, "material_ticks", MappingProxyType(dict(self.material_ticks))
+        )
 
 
 def _freeze(value):

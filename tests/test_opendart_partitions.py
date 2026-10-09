@@ -5,18 +5,20 @@ Contract: .ai/plans/2026-08-14_opendart-date-partition-retention-sds-v0.1.md
 """
 
 import json
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
 from tokmo.facts.opendart_bulk import Disclosure
 from tokmo.opendart_bulk_composition import execute_opendart_bulk
 from tokmo.programs.opendart_pilot import (
-    PilotError, retention_floor, run_operate,
+    PilotError,
+    retention_floor,
+    run_operate,
 )
 from tokmo.records.opendart_disclosures import DisclosureStore
 
-NOW = datetime(2026, 7, 10, 1, 0, tzinfo=timezone.utc)  # 10:00 KST
+NOW = datetime(2026, 7, 10, 1, 0, tzinfo=UTC)  # 10:00 KST
 
 EMPTY_BODY = json.dumps({"status": "013"}).encode()
 STOP_020 = json.dumps({"status": "020"}).encode()
@@ -34,9 +36,17 @@ def day_text(value):
 
 
 def wire_row(day, index):
-    return {"corp_code": "00126380", "corp_name": "Corp", "stock_code": "005930",
-            "corp_cls": "Y", "report_nm": "r", "rcept_no": f"{day}{index:06d}",
-            "flr_nm": "f", "rcept_dt": day, "rm": None}
+    return {
+        "corp_code": "00126380",
+        "corp_name": "Corp",
+        "stock_code": "005930",
+        "corp_cls": "Y",
+        "report_nm": "r",
+        "rcept_no": f"{day}{index:06d}",
+        "flr_nm": "f",
+        "rcept_dt": day,
+        "rm": None,
+    }
 
 
 def day_pages(day, total_pages, rows=None):
@@ -44,11 +54,22 @@ def day_pages(day, total_pages, rows=None):
         rows = [wire_row(day, index) for index in range(total_pages * 100)]
     pages = []
     for page_no in range(1, total_pages + 1):
-        chunk = rows[(page_no - 1) * 100:page_no * 100]
-        pages.append((page_no, json.dumps(
-            {"status": "000", "page_no": page_no, "page_count": 100,
-             "total_count": len(rows), "total_page": total_pages,
-             "list": chunk}).encode()))
+        chunk = rows[(page_no - 1) * 100 : page_no * 100]
+        pages.append(
+            (
+                page_no,
+                json.dumps(
+                    {
+                        "status": "000",
+                        "page_no": page_no,
+                        "page_count": 100,
+                        "total_count": len(rows),
+                        "total_page": total_pages,
+                        "list": chunk,
+                    }
+                ).encode(),
+            )
+        )
     return pages
 
 
@@ -89,27 +110,36 @@ class DayTransport:
 
 def tick(db, *, today, transport, now=NOW, deadline=None, clock=None):
     return run_operate(
-        db, today=today, api_key="x", transport=transport, now=now,
+        db,
+        today=today,
+        api_key="x",
+        transport=transport,
+        now=now,
         deadline=deadline or now + timedelta(hours=6),
-        clock=clock or (lambda: now))
+        clock=clock or (lambda: now),
+    )
 
 
 def partition(db, day):
     return db.connection.execute(
         "select status,next_page,plan_total_page,plan_total_count "
-        "from day_partitions where part_date=?", (day,)).fetchone()
+        "from day_partitions where part_date=?",
+        (day,),
+    ).fetchone()
 
 
 # ---------------------------------------------------------------------------
 # 1. No fixed page cap: multi-day shapes and one huge day
 # ---------------------------------------------------------------------------
 
+
 def test_two_days_of_66_pages_complete_without_any_fixed_cap(tmp_path):
     today = date(2026, 7, 3)
     db = open_store(tmp_path)
     db.migrate_partitions(today, NOW)
     db.connection.execute(
-        "update day_partitions set status='complete' where part_date='20260701'")
+        "update day_partitions set status='complete' where part_date='20260701'"
+    )
     tx = DayTransport()
     tx.put_day("20260703", 33)
     tx.put_day("20260702", 33)
@@ -119,10 +149,12 @@ def test_two_days_of_66_pages_complete_without_any_fixed_cap(tmp_path):
     assert result["status"] == "complete"
     assert partition(db, "20260702")[0] == "complete"
     assert partition(db, "20260703")[0] == "open"  # today is never final same-day
+    assert db.connection.execute("select count(*) from disclosures").fetchone() == (
+        6600,
+    )
     assert db.connection.execute(
-        "select count(*) from disclosures").fetchone() == (6600,)
-    assert db.connection.execute(
-        "select count(*) from runs where status!='complete'").fetchone() == (0,)
+        "select count(*) from runs where status!='complete'"
+    ).fetchone() == (0,)
 
 
 def test_single_150_page_day_completes_without_page_cap(tmp_path):
@@ -145,6 +177,7 @@ def test_single_150_page_day_completes_without_page_cap(tmp_path):
 # 2. Deadline partial + cursor resume (exact-equal plan identity)
 # ---------------------------------------------------------------------------
 
+
 def test_deadline_saves_cursor_and_next_tick_resumes_to_completion(tmp_path):
     today = date(2026, 7, 2)
     db = open_store(tmp_path)
@@ -154,8 +187,13 @@ def test_deadline_saves_cursor_and_next_tick_resumes_to_completion(tmp_path):
     tx.put(day_text(today), 1, EMPTY_BODY)
     tx.put_day("20260701", 150)
 
-    result = tick(db, today=today, transport=tx,
-                  deadline=NOW + timedelta(seconds=10 * 41), clock=time)
+    result = tick(
+        db,
+        today=today,
+        transport=tx,
+        deadline=NOW + timedelta(seconds=10 * 41),
+        clock=time,
+    )
     assert result["status"] == "complete"  # successful tick; durable partial resumes
 
     status, next_page, plan_page, plan_count = partition(db, "20260701")
@@ -169,8 +207,14 @@ def test_deadline_saves_cursor_and_next_tick_resumes_to_completion(tmp_path):
     later = NOW + timedelta(minutes=30)
     time2 = FakeTime(later)
     tx.time = time2
-    result = tick(db, today=today, transport=tx, now=later,
-                  deadline=later + timedelta(hours=6), clock=time2)
+    result = tick(
+        db,
+        today=today,
+        transport=tx,
+        now=later,
+        deadline=later + timedelta(hours=6),
+        clock=time2,
+    )
     assert result["status"] == "complete"
 
     assert partition(db, "20260701")[0] == "complete"
@@ -181,7 +225,9 @@ def test_deadline_saves_cursor_and_next_tick_resumes_to_completion(tmp_path):
     ).fetchone() == (15000,)
 
 
-def test_resume_with_changed_metadata_restarts_from_page_one_without_silent_skip(tmp_path):
+def test_resume_with_changed_metadata_restarts_from_page_one_without_silent_skip(
+    tmp_path,
+):
     today = date(2026, 7, 2)
     db = open_store(tmp_path)
     db.migrate_partitions(today, NOW)
@@ -193,8 +239,13 @@ def test_resume_with_changed_metadata_restarts_from_page_one_without_silent_skip
     tx = DayTransport(time=time, seconds_per_call=10)
     tx.put(day_text(today), 1, EMPTY_BODY)
     tx.put_day("20260701", 3, rows=original)
-    tick(db, today=today, transport=tx,
-         deadline=NOW + timedelta(seconds=10 * 3), clock=time)
+    tick(
+        db,
+        today=today,
+        transport=tx,
+        deadline=NOW + timedelta(seconds=10 * 3),
+        clock=time,
+    )
     assert partition(db, "20260701")[:2] == ("open", 3)
     first_tick_calls = len(tx.calls)
 
@@ -205,16 +256,22 @@ def test_resume_with_changed_metadata_restarts_from_page_one_without_silent_skip
     later = NOW + timedelta(minutes=30)
     time2 = FakeTime(later)
     tx.time = time2
-    tick(db, today=today, transport=tx, now=later,
-         deadline=later + timedelta(hours=6), clock=time2)
+    tick(
+        db,
+        today=today,
+        transport=tx,
+        now=later,
+        deadline=later + timedelta(hours=6),
+        clock=time2,
+    )
 
     assert partition(db, "20260701")[0] == "complete"
     assert db.connection.execute(
         "select count(*) from disclosures where rcept_dt='20260701'"
     ).fetchone() == (301,)
     assert db.connection.execute(
-        "select count(*) from disclosures where rcept_no=?",
-        (inserted["rcept_no"],)).fetchone() == (1,)
+        "select count(*) from disclosures where rcept_no=?", (inserted["rcept_no"],)
+    ).fetchone() == (1,)
     restarted = [key for key in tx.calls[first_tick_calls:] if key[0] == "20260701"]
     assert restarted[0] == ("20260701", 3)  # probe at the stored cursor
     assert restarted[1:] == [("20260701", page) for page in range(1, 5)]
@@ -223,6 +280,7 @@ def test_resume_with_changed_metadata_restarts_from_page_one_without_silent_skip
 # ---------------------------------------------------------------------------
 # 3. today first, seed-forward gap fill, oldest backlog order
 # ---------------------------------------------------------------------------
+
 
 def test_seed_forward_today_first_and_oldest_backlog_order(tmp_path):
     db = open_store(tmp_path)
@@ -234,8 +292,12 @@ def test_seed_forward_today_first_and_oldest_backlog_order(tmp_path):
 
     tick(db, today=today, transport=tx)
 
-    assert tx.calls == [("20260704", 1), ("20260701", 1),
-                        ("20260702", 1), ("20260703", 1)]
+    assert tx.calls == [
+        ("20260704", 1),
+        ("20260701", 1),
+        ("20260702", 1),
+        ("20260703", 1),
+    ]
     for day in ("20260701", "20260702", "20260703"):
         assert partition(db, day)[0] == "complete"
     assert partition(db, "20260704")[0] == "open"
@@ -246,39 +308,64 @@ def test_empty_day_finalizes_only_after_settle_window(tmp_path):
     db = open_store(tmp_path)
     db.migrate_partitions(today, NOW)
     tx = DayTransport()
-    for day in ("20260701", "20260702", "20260703", "20260704",
-                "20260705", "20260706"):
+    for day in ("20260701", "20260702", "20260703", "20260704", "20260705", "20260706"):
         tx.put(day, 1, EMPTY_BODY)
 
     tick(db, today=today, transport=tx)
 
     assert partition(db, "20260701")[0] == "complete"
     assert partition(db, "20260703")[0] == "complete"  # boundary: today-3
-    assert partition(db, "20260704")[0] == "open"      # D-2 reconfirms later
-    assert partition(db, "20260705")[0] == "open"      # D-1
-    assert partition(db, "20260706")[0] == "open"      # today
+    assert partition(db, "20260704")[0] == "open"  # D-2 reconfirms later
+    assert partition(db, "20260705")[0] == "open"  # D-1
+    assert partition(db, "20260706")[0] == "open"  # today
     assert db.connection.execute(
-        "select count(*) from runs where status!='complete'").fetchone() == (0,)
+        "select count(*) from runs where status!='complete'"
+    ).fetchone() == (0,)
 
 
 # ---------------------------------------------------------------------------
 # 4. Completion gates and fail-closed stops
 # ---------------------------------------------------------------------------
 
+
 def test_completion_requires_conflict_zero(tmp_path):
     today = date(2026, 7, 2)
     db = open_store(tmp_path)
     db.migrate_partitions(today, NOW)
     seeded = db.claim("partition", "20260701", "20260701", NOW)
-    db.observe(seeded, Disclosure("00126380", "Corp", "005930", "Y", "r",
-                                  "20260701000001", "f", "20260701", None), NOW)
+    db.observe(
+        seeded,
+        Disclosure(
+            "00126380",
+            "Corp",
+            "005930",
+            "Y",
+            "r",
+            "20260701000001",
+            "f",
+            "20260701",
+            None,
+        ),
+        NOW,
+    )
     db.finish(seeded.run_id, "complete", NOW)
     impostor = dict(wire_row("20260701", 1), corp_code="99999999")
     tx = DayTransport()
     tx.put(day_text(today), 1, EMPTY_BODY)
-    tx.put("20260701", 1, json.dumps(
-        {"status": "000", "page_no": 1, "page_count": 100, "total_count": 1,
-         "total_page": 1, "list": [impostor]}).encode())
+    tx.put(
+        "20260701",
+        1,
+        json.dumps(
+            {
+                "status": "000",
+                "page_no": 1,
+                "page_count": 100,
+                "total_count": 1,
+                "total_page": 1,
+                "list": [impostor],
+            }
+        ).encode(),
+    )
 
     tick(db, today=today, transport=tx)
 
@@ -320,6 +407,7 @@ def test_provider_stop_fails_closed_and_failed_dates_retry_after_open_backlog(tm
 # 5. Retention floor + double-guard prune
 # ---------------------------------------------------------------------------
 
+
 def test_retention_floor_is_first_day_of_month_18_months_back():
     assert retention_floor(date(2026, 8, 14)) == date(2025, 2, 1)
     assert retention_floor(date(2027, 3, 31)) == date(2025, 9, 1)
@@ -328,15 +416,16 @@ def test_retention_floor_is_first_day_of_month_18_months_back():
 
 
 def make_disclosure(rcept_no, rcept_dt):
-    return Disclosure("00126380", "Corp", "005930", "Y", "r", rcept_no, "f",
-                      rcept_dt, None)
+    return Disclosure(
+        "00126380", "Corp", "005930", "Y", "r", rcept_no, "f", rcept_dt, None
+    )
 
 
 def test_prune_uses_double_guard_and_preserves_ledger(tmp_path):
     db = open_store(tmp_path)
     db.migrate_partitions(date(2026, 7, 1), NOW)
     floor = date(2025, 2, 1)
-    old_now = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    old_now = datetime(2025, 1, 1, tzinfo=UTC)
     old_run = db.claim("partition", "20250101", "20250101", old_now)
     db.start_attempt(old_run.run_id, 1, old_now)
     for rcept_no, rcept_dt in (
@@ -346,37 +435,46 @@ def test_prune_uses_double_guard_and_preserves_ledger(tmp_path):
         ("20250101000003", "20250101"),  # below floor but conflicted -> kept
     ):
         db.observe(old_run, make_disclosure(rcept_no, rcept_dt), NOW)
-    db.observe(old_run, Disclosure("99999999", "X", None, "Y", "r",
-                                   "20250101000003", "f", "20250101", None), NOW)
+    db.observe(
+        old_run,
+        Disclosure(
+            "99999999", "X", None, "Y", "r", "20250101000003", "f", "20250101", None
+        ),
+        NOW,
+    )
     db.finish(old_run.run_id, "complete", old_now)
     db.connection.execute(
         "insert into dart_revisions(rcept_no,previous_payload_hash,"
         "observed_payload_hash,observed_at,run_id,evidence_fingerprint) "
-        "values('20250101000001','a','b','t',?,'fp1')", (old_run.run_id,))
+        "values('20250101000001','a','b','t',?,'fp1')",
+        (old_run.run_id,),
+    )
     recent_run = db.claim("partition", "20260701", "20260701", NOW)
     db.start_attempt(recent_run.run_id, 1, NOW)
     db.finish(recent_run.run_id, "complete", NOW)
     db.connection.execute(
         "insert into day_partitions(part_date,status,next_page,updated_at) "
-        "values('20250101','complete',1,'t')")
+        "values('20250101','complete',1,'t')"
+    )
 
     summary = db.prune(floor, NOW)
 
-    remaining = {value for (value,) in db.connection.execute(
-        "select rcept_no from disclosures")}
+    remaining = {
+        value for (value,) in db.connection.execute("select rcept_no from disclosures")
+    }
     assert remaining == {"20250215000001", "20250115000002", "20250101000003"}
     assert (summary["disclosures"], summary["revisions"]) == (1, 1)
-    assert db.connection.execute(
-        "select count(*) from dart_revisions").fetchone() == (0,)
-    assert db.connection.execute(
-        "select count(*) from conflicts").fetchone() == (1,)
+    assert db.connection.execute("select count(*) from dart_revisions").fetchone() == (
+        0,
+    )
+    assert db.connection.execute("select count(*) from conflicts").fetchone() == (1,)
     assert db.connection.execute("select count(*) from runs").fetchone() == (2,)
     assert db.connection.execute(
-        "select count(*) from attempts where run_id=?",
-        (old_run.run_id,)).fetchone() == (0,)
+        "select count(*) from attempts where run_id=?", (old_run.run_id,)
+    ).fetchone() == (0,)
     assert db.connection.execute(
-        "select count(*) from attempts where run_id=?",
-        (recent_run.run_id,)).fetchone() == (1,)
+        "select count(*) from attempts where run_id=?", (recent_run.run_id,)
+    ).fetchone() == (1,)
     assert db.connection.execute(
         "select count(*) from day_partitions where part_date<'20250201'"
     ).fetchone() == (0,)
@@ -384,13 +482,18 @@ def test_prune_uses_double_guard_and_preserves_ledger(tmp_path):
     assert summary["integrity"] == "ok"
 
     again = db.prune(floor, NOW)
-    assert (again["disclosures"], again["revisions"], again["attempts"],
-            again["partitions"]) == (0, 0, 0, 0)
+    assert (
+        again["disclosures"],
+        again["revisions"],
+        again["attempts"],
+        again["partitions"],
+    ) == (0, 0, 0, 0)
 
 
 # ---------------------------------------------------------------------------
 # 6. Read-only status, explicit migrate/backfill-seed, stale recovery
 # ---------------------------------------------------------------------------
+
 
 def test_status_and_integrity_are_read_only_and_absent_safe(tmp_path):
     home = tmp_path / "home"
@@ -412,7 +515,9 @@ def test_status_and_integrity_are_read_only_and_absent_safe(tmp_path):
     assert db_path.stat().st_mtime_ns == before_mtime
 
 
-def test_migrate_and_backfill_seed_are_idempotent_and_operate_fails_closed_before_migrate(tmp_path):
+def test_migrate_and_backfill_seed_are_idempotent_and_operate_fails_closed_before_migrate(
+    tmp_path,
+):
     db = open_store(tmp_path)
     tx = DayTransport()
     with pytest.raises(PilotError, match="migration_required"):
@@ -427,8 +532,11 @@ def test_migrate_and_backfill_seed_are_idempotent_and_operate_fails_closed_befor
     seeded = db.backfill_seed(floor, NOW)
     assert seeded == (date(2026, 7, 1) - floor).days
     assert db.backfill_seed(floor, NOW) == 0
-    statuses = dict(db.connection.execute(
-        "select status,count(*) from day_partitions group by status"))
+    statuses = dict(
+        db.connection.execute(
+            "select status,count(*) from day_partitions group by status"
+        )
+    )
     assert statuses == {"open": first + seeded}
 
 
@@ -438,13 +546,20 @@ def test_stale_claimed_run_is_recovered_and_cursor_preserved(tmp_path):
     db.migrate_partitions(today, NOW)
     stale_now = NOW - timedelta(hours=2)
     stale = db.claim("partition", "20260701", "20260701", stale_now)
-    db.set_partition("20260701", status="in_progress", next_page=3,
-                     plan=(5, 500), run_id=stale.run_id, now=stale_now)
+    db.set_partition(
+        "20260701",
+        status="in_progress",
+        next_page=3,
+        plan=(5, 500),
+        run_id=stale.run_id,
+        now=stale_now,
+    )
 
     tx = DayTransport()
     tx.put(day_text(today), 1, EMPTY_BODY)
-    tx.put_day("20260701", 5, rows=[wire_row("20260701", index)
-                                    for index in range(500)])
+    tx.put_day(
+        "20260701", 5, rows=[wire_row("20260701", index) for index in range(500)]
+    )
     tick(db, today=today, transport=tx)
 
     assert db.receipt(stale.run_id).status == "failed"
@@ -457,8 +572,7 @@ def test_live_claim_blocks_tick_with_single_skip_row_and_no_transport(tmp_path):
     today = date(2026, 7, 2)
     db = open_store(tmp_path)
     db.migrate_partitions(today, NOW)
-    live = db.claim("partition", "20260701", "20260701",
-                    NOW - timedelta(minutes=10))
+    live = db.claim("partition", "20260701", "20260701", NOW - timedelta(minutes=10))
     tx = DayTransport()
 
     result = tick(db, today=today, transport=tx)

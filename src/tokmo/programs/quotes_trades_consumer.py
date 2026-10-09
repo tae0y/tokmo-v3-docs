@@ -16,8 +16,6 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from tokmo.records.latest_quotes import LatestQuoteStore
     from tokmo.records.trade_ledger_store import TradeLedgerStore
-    from tokmo.values.market_observations import TossCurrentPriceFact
-    from tokmo.values.trade_ledger import TradeLedgerEvent
 
 
 def read_latest_quotes_for_consumer(
@@ -69,8 +67,7 @@ def read_ledger_delta_for_consumer(
     not "zero executions."
     """
     if not source or not account_scope:
-        raise ValueError(
-            "source and account_scope are mandatory for ledger delta read")
+        raise ValueError("source and account_scope are mandatory for ledger delta read")
 
     return store.read_stored_window(
         source=source,

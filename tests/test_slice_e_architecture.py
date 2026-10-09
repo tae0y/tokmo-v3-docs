@@ -15,9 +15,7 @@ def test_analysis_contracts_reexports_kernel_audit_types_without_records_depende
     contracts_path = Path("src/tokmo/values/analysis_contracts.py")
     tree = ast.parse(contracts_path.read_text())
     imports = {
-        node.module or ""
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom)
+        node.module or "" for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)
     }
     imports.update(
         alias.name
@@ -25,7 +23,9 @@ def test_analysis_contracts_reexports_kernel_audit_types_without_records_depende
         if isinstance(node, ast.Import)
         for alias in node.names
     )
-    assert not any(name == "tokmo.records" or name.startswith("tokmo.records.") for name in imports)
+    assert not any(
+        name == "tokmo.records" or name.startswith("tokmo.records.") for name in imports
+    )
 
 
 def test_slice_e_pipeline_has_no_external_or_forbidden_operational_imports():
@@ -41,7 +41,12 @@ def test_slice_e_pipeline_has_no_external_or_forbidden_operational_imports():
         if isinstance(node, ast.ImportFrom)
     }
     assert not imports & {
-        "socket", "ssl", "http", "urllib", "requests", "subprocess",
+        "socket",
+        "ssl",
+        "http",
+        "urllib",
+        "requests",
+        "subprocess",
     }
     source = PIPELINE.read_text()
     assert "tokmo.composition" not in source
@@ -54,11 +59,14 @@ def test_slice_e_pipeline_has_no_external_or_forbidden_operational_imports():
 def test_run_lock_is_the_only_pipeline_filesystem_open():
     tree = ast.parse(PIPELINE.read_text())
     calls = [
-        node for node in ast.walk(tree)
+        node
+        for node in ast.walk(tree)
         if isinstance(node, ast.Call)
         and (
-            isinstance(node.func, ast.Name) and node.func.id == "open"
-            or isinstance(node.func, ast.Attribute) and node.func.attr == "open"
+            isinstance(node.func, ast.Name)
+            and node.func.id == "open"
+            or isinstance(node.func, ast.Attribute)
+            and node.func.attr == "open"
         )
     ]
     assert len(calls) == 1
@@ -87,9 +95,12 @@ def test_all_slice_e_modules_have_no_logging_print_or_external_imports():
 
 def test_core_slice_e_tests_use_public_entrypoint_not_kernel_writers():
     forbidden = {
-        "create_manifest_with_baselines", "plan_analysis_batches",
-        "start_analysis_batch", "settle_analysis_batch",
-        "reconcile_analysis_batches", "upsert_deferred",
+        "create_manifest_with_baselines",
+        "plan_analysis_batches",
+        "start_analysis_batch",
+        "settle_analysis_batch",
+        "reconcile_analysis_batches",
+        "upsert_deferred",
         "record_disposition_with_outbox",
     }
     for name in ("test_analysis_pipeline.py", "test_analysis_cadence.py"):
@@ -101,13 +112,24 @@ def test_core_slice_e_tests_use_public_entrypoint_not_kernel_writers():
         }
         assert not called & forbidden
         core = [
-            node for node in tree.body
+            node
+            for node in tree.body
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
             and node.name.startswith("test_")
-            and any(token in node.name for token in (
-                "te7_", "te8b_", "te12_", "crash", "replay", "cadence",
-                "rate_limited", "auth_fail", "failure_streak",
-            ))
+            and any(
+                token in node.name
+                for token in (
+                    "te7_",
+                    "te8b_",
+                    "te12_",
+                    "crash",
+                    "replay",
+                    "cadence",
+                    "rate_limited",
+                    "auth_fail",
+                    "failure_streak",
+                )
+            )
         ]
         assert core, name
         wrappers = {
@@ -123,12 +145,12 @@ def test_core_slice_e_tests_use_public_entrypoint_not_kernel_writers():
         }
         for function in core:
             public_calls = [
-                node for node in ast.walk(function)
+                node
+                for node in ast.walk(function)
                 if isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Name)
                 and (
-                    node.func.id == "run_analysis_pipeline"
-                    or node.func.id in wrappers
+                    node.func.id == "run_analysis_pipeline" or node.func.id in wrappers
                 )
             ]
             assert public_calls, f"{name}:{function.name}"
@@ -138,9 +160,12 @@ def test_core_slice_e_tests_use_public_entrypoint_not_kernel_writers():
                 if isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Name)
                 and node.func.id.startswith("_")
-                and node.func.id in {
-                    "_decision", "_settle_unknown_candidates",
-                    "_settle_carryover", "_reconstruct_deferred",
+                and node.func.id
+                in {
+                    "_decision",
+                    "_settle_unknown_candidates",
+                    "_settle_carryover",
+                    "_reconstruct_deferred",
                     "_record_failure_aggregates",
                 }
             }

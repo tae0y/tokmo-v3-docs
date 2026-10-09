@@ -7,10 +7,10 @@ values. Changing a limit means changing this declaration and rerunning the
 contract tests.
 """
 
-from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
 import hashlib
 import re
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, timedelta
 from types import MappingProxyType
 
 from tokmo.values.material_pack import canonical_encode
@@ -36,22 +36,36 @@ class TickRequestLimitsV1:
 
     def __post_init__(self):
         values = (
-            self.total_wire_starts, self.token_starts, self.calendar_starts,
-            self.holdings_starts, self.quote_starts, self.trades_starts,
-            self.daily_candle_starts, self.market_daily_candle_starts,
-            self.quant_daily_candle_starts, self.membership_starts,
+            self.total_wire_starts,
+            self.token_starts,
+            self.calendar_starts,
+            self.holdings_starts,
+            self.quote_starts,
+            self.trades_starts,
+            self.daily_candle_starts,
+            self.market_daily_candle_starts,
+            self.quant_daily_candle_starts,
+            self.membership_starts,
             self.conditional_order_starts,
         )
         if any(type(value) is not int or value < 0 for value in values):
             raise ValueError("tick request limits must be non-negative ints")
-        group_sum = (self.token_starts + self.calendar_starts + self.holdings_starts
-                     + self.quote_starts + self.trades_starts
-                     + self.daily_candle_starts + self.membership_starts
-                     + self.conditional_order_starts)
+        group_sum = (
+            self.token_starts
+            + self.calendar_starts
+            + self.holdings_starts
+            + self.quote_starts
+            + self.trades_starts
+            + self.daily_candle_starts
+            + self.membership_starts
+            + self.conditional_order_starts
+        )
         if group_sum > self.total_wire_starts:
             raise ValueError("group limits exceed total wire starts")
-        if (self.market_daily_candle_starts + self.quant_daily_candle_starts
-                != self.daily_candle_starts):
+        if (
+            self.market_daily_candle_starts + self.quant_daily_candle_starts
+            != self.daily_candle_starts
+        ):
             raise ValueError("daily candle lanes must equal daily candle starts")
 
 
@@ -71,14 +85,19 @@ class CadencePolicyV1:
         if type(self.policy_version) is not str or not self.policy_version:
             raise ValueError("invalid policy version")
         durations = (
-            self.cadence_seconds, self.max_start_lag_seconds,
-            self.child_timeout_seconds, self.termination_margin_seconds,
+            self.cadence_seconds,
+            self.max_start_lag_seconds,
+            self.child_timeout_seconds,
+            self.termination_margin_seconds,
         )
         if any(type(value) is not int or value < 0 for value in durations):
             raise ValueError("cadence durations must be non-negative ints")
         if self.cadence_seconds <= 0:
             raise ValueError("cadence must be positive")
-        if self.child_timeout_seconds + self.termination_margin_seconds > self.cadence_seconds:
+        if (
+            self.child_timeout_seconds + self.termination_margin_seconds
+            > self.cadence_seconds
+        ):
             raise ValueError("child timeout plus termination margin exceeds cadence")
         if not isinstance(self.request_limits, TickRequestLimitsV1):
             raise ValueError("invalid request limits")
@@ -87,10 +106,12 @@ class CadencePolicyV1:
 CADENCE_POLICY_V1 = CadencePolicyV1()
 CADENCE_CORE_SHADOW_POLICY_V1 = CadencePolicyV1(
     policy_version="cadence-300s-core-shadow-v1",
-    request_limits=TickRequestLimitsV1(total_wire_starts=44,
-                                       daily_candle_starts=17,
-                                       market_daily_candle_starts=17,
-                                       quant_daily_candle_starts=0),
+    request_limits=TickRequestLimitsV1(
+        total_wire_starts=44,
+        daily_candle_starts=17,
+        market_daily_candle_starts=17,
+        quant_daily_candle_starts=0,
+    ),
 )
 # Market Regime portfolio drain (portfolio-expansion Plan §4.1): V1 plus a
 # daily-candle budget of exactly 3 per tick, total 27 + 3. Every other group
@@ -138,16 +159,15 @@ CADENCE_QUANT_PROFILES_SHADOW_POLICY_V1 = CadencePolicyV1(
 # Closed registry of activatable cadence policies (SDS §7.1/§7.3). A new
 # policy version (e.g. a 60-second cadence) is added here through review,
 # never invented at a call site.
-CADENCE_POLICY_REGISTRY = MappingProxyType({
-    CADENCE_POLICY_V1.policy_version: CADENCE_POLICY_V1,
-    CADENCE_CORE_SHADOW_POLICY_V1.policy_version: CADENCE_CORE_SHADOW_POLICY_V1,
-    CADENCE_MARKET_PORTFOLIO_POLICY_V1.policy_version:
-        CADENCE_MARKET_PORTFOLIO_POLICY_V1,
-    CADENCE_QUANT_SHADOW_POLICY_V1.policy_version:
-        CADENCE_QUANT_SHADOW_POLICY_V1,
-    CADENCE_QUANT_PROFILES_SHADOW_POLICY_V1.policy_version:
-        CADENCE_QUANT_PROFILES_SHADOW_POLICY_V1,
-})
+CADENCE_POLICY_REGISTRY = MappingProxyType(
+    {
+        CADENCE_POLICY_V1.policy_version: CADENCE_POLICY_V1,
+        CADENCE_CORE_SHADOW_POLICY_V1.policy_version: CADENCE_CORE_SHADOW_POLICY_V1,
+        CADENCE_MARKET_PORTFOLIO_POLICY_V1.policy_version: CADENCE_MARKET_PORTFOLIO_POLICY_V1,
+        CADENCE_QUANT_SHADOW_POLICY_V1.policy_version: CADENCE_QUANT_SHADOW_POLICY_V1,
+        CADENCE_QUANT_PROFILES_SHADOW_POLICY_V1.policy_version: CADENCE_QUANT_PROFILES_SHADOW_POLICY_V1,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -171,15 +191,21 @@ class CadenceTickV1:
         if policy is None:
             raise ValueError("unknown cadence policy version")
         slot = self.scheduled_for_utc
-        if (not isinstance(slot, datetime) or slot.tzinfo is None
-                or slot.utcoffset() != timedelta(0)):
+        if (
+            not isinstance(slot, datetime)
+            or slot.tzinfo is None
+            or slot.utcoffset() != timedelta(0)
+        ):
             raise ValueError("scheduled_for_utc must be aware UTC")
         if slot.microsecond != 0:
             raise ValueError("scheduled_for_utc must be a whole second")
         epoch = int(slot.timestamp())
         if epoch % policy.cadence_seconds != 0:
             raise ValueError("scheduled slot is not aligned to the policy cadence")
-        if type(self.tick_id) is not int or self.tick_id != epoch // policy.cadence_seconds:
+        if (
+            type(self.tick_id) is not int
+            or self.tick_id != epoch // policy.cadence_seconds
+        ):
             raise ValueError("tick_id must derive from policy and scheduled slot")
 
     @property
@@ -192,16 +218,20 @@ def cadence_tick_v1(policy_version: str, scheduled_for_utc: datetime) -> Cadence
     policy = CADENCE_POLICY_REGISTRY.get(policy_version)
     if policy is None:
         raise ValueError("unknown cadence policy version")
-    if (not isinstance(scheduled_for_utc, datetime)
-            or scheduled_for_utc.tzinfo is None
-            or scheduled_for_utc.utcoffset() != timedelta(0)
-            or scheduled_for_utc.microsecond != 0):
+    if (
+        not isinstance(scheduled_for_utc, datetime)
+        or scheduled_for_utc.tzinfo is None
+        or scheduled_for_utc.utcoffset() != timedelta(0)
+        or scheduled_for_utc.microsecond != 0
+    ):
         raise ValueError("scheduled_for_utc must be aware UTC")
     epoch = int(scheduled_for_utc.timestamp())
     if epoch % policy.cadence_seconds != 0:
         raise ValueError("scheduled slot is not aligned to the policy cadence")
     return CadenceTickV1(
-        policy_version, scheduled_for_utc, epoch // policy.cadence_seconds,
+        policy_version,
+        scheduled_for_utc,
+        epoch // policy.cadence_seconds,
     )
 
 
@@ -221,16 +251,18 @@ class TradesChildLimitsV1:
 TRADES_CHILD_LIMITS_V1 = TradesChildLimitsV1()
 
 # Named operation group -> owning field of TickRequestLimitsV1.
-GROUP_LIMIT_FIELDS = MappingProxyType({
-    "TOKEN": "token_starts",
-    "CALENDAR": "calendar_starts",
-    "HOLDINGS": "holdings_starts",
-    "QUOTES": "quote_starts",
-    "TRADES": "trades_starts",
-    "DAILY_CANDLES": "daily_candle_starts",
-    "MEMBERSHIP": "membership_starts",
-    "CONDITIONAL_ORDER_HISTORY": "conditional_order_starts",
-})
+GROUP_LIMIT_FIELDS = MappingProxyType(
+    {
+        "TOKEN": "token_starts",
+        "CALENDAR": "calendar_starts",
+        "HOLDINGS": "holdings_starts",
+        "QUOTES": "quote_starts",
+        "TRADES": "trades_starts",
+        "DAILY_CANDLES": "daily_candle_starts",
+        "MEMBERSHIP": "membership_starts",
+        "CONDITIONAL_ORDER_HISTORY": "conditional_order_starts",
+    }
+)
 
 # Provider batch cardinality of one PRICE_BATCH wire call (SDS §7.2). The
 # quotes group ceiling admits calls; this bounds symbols per admitted call.
@@ -244,66 +276,70 @@ CALENDAR_ATTEMPT_MAX = len(CALENDAR_RETRY_DELAY_MINUTES) + 1
 # Closed cadence operation enum (SDS §7.2/§7.3): every provider wire start is
 # one of these operations, owned by exactly one admission group. No other
 # operation string may plan or start a cadence wire row.
-CADENCE_OPERATIONS = MappingProxyType({
-    "TOKEN": "TOKEN",
-    "CALENDAR_DAY_KR": "CALENDAR",
-    "CALENDAR_DAY_US": "CALENDAR",
-    "ACCOUNTS": "HOLDINGS",
-    "ACCOUNT_HOLDINGS": "HOLDINGS",
-    "PRICE_BATCH": "QUOTES",
-    "ORDERS_PAGE": "TRADES",
-    "ORDER_DETAIL": "TRADES",
-    "STOCK_CANDLES_DAILY": "DAILY_CANDLES",
-    "MEMBERSHIP_NASDAQ_LISTED": "MEMBERSHIP",
-    "MEMBERSHIP_OTHER_LISTED": "MEMBERSHIP",
-    "MEMBERSHIP_SEC_REGISTRY": "MEMBERSHIP",
-    "MEMBERSHIP_SEC_ISSUER": "MEMBERSHIP",
-    # KR profile membership: exactly one Toss STOCKS batch per session date
-    # (Plan/SDS 2026-08-22 §5.1).
-    "MEMBERSHIP_TOSS_STOCKS": "MEMBERSHIP",
-    # Conditional-order SDS v0.4 §4.4: Pulse-lane fast-alert scan; the 300s
-    # lane never plans it (its pinned snapshots carry a structural zero
-    # budget for this group).
-    "CONDITIONAL_ORDERS": "CONDITIONAL_ORDER_HISTORY",
-})
+CADENCE_OPERATIONS = MappingProxyType(
+    {
+        "TOKEN": "TOKEN",
+        "CALENDAR_DAY_KR": "CALENDAR",
+        "CALENDAR_DAY_US": "CALENDAR",
+        "ACCOUNTS": "HOLDINGS",
+        "ACCOUNT_HOLDINGS": "HOLDINGS",
+        "PRICE_BATCH": "QUOTES",
+        "ORDERS_PAGE": "TRADES",
+        "ORDER_DETAIL": "TRADES",
+        "STOCK_CANDLES_DAILY": "DAILY_CANDLES",
+        "MEMBERSHIP_NASDAQ_LISTED": "MEMBERSHIP",
+        "MEMBERSHIP_OTHER_LISTED": "MEMBERSHIP",
+        "MEMBERSHIP_SEC_REGISTRY": "MEMBERSHIP",
+        "MEMBERSHIP_SEC_ISSUER": "MEMBERSHIP",
+        # KR profile membership: exactly one Toss STOCKS batch per session date
+        # (Plan/SDS 2026-08-22 §5.1).
+        "MEMBERSHIP_TOSS_STOCKS": "MEMBERSHIP",
+        # Conditional-order SDS v0.4 §4.4: Pulse-lane fast-alert scan; the 300s
+        # lane never plans it (its pinned snapshots carry a structural zero
+        # budget for this group).
+        "CONDITIONAL_ORDERS": "CONDITIONAL_ORDER_HISTORY",
+    }
+)
 
 # Child operations of the trades group -> owning field of TradesChildLimitsV1.
-CADENCE_CHILD_LIMIT_FIELDS = MappingProxyType({
-    "ORDERS_PAGE": "orders_page_starts",
-    "ORDER_DETAIL": "order_detail_starts",
-})
+CADENCE_CHILD_LIMIT_FIELDS = MappingProxyType(
+    {
+        "ORDERS_PAGE": "orders_page_starts",
+        "ORDER_DETAIL": "order_detail_starts",
+    }
+)
 
 # Canonical native-identity shape per closed operation. Native identity
 # supports dedup only; it never replaces the mandatory versioned tick binding.
-_CADENCE_IDENTITY_PATTERNS = MappingProxyType({
-    "TOKEN": re.compile(r"token:tick0"),
-    "CALENDAR_DAY_KR": re.compile(r"calendar:KR:\d{4}-\d{2}-\d{2}:[0-5]"),
-    "CALENDAR_DAY_US": re.compile(r"calendar:US:\d{4}-\d{2}-\d{2}:[0-5]"),
-    "ACCOUNTS": re.compile(r"accounts:tick0"),
-    "ACCOUNT_HOLDINGS": re.compile(r"holdings:[1-5]"),
-    "PRICE_BATCH": re.compile(r"quotes:(?:0|[1-9]\d{0,2})"),
-    "ORDERS_PAGE": re.compile(r"orders:[0-9]"),
-    "ORDER_DETAIL": re.compile(r"detail:[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}"),
-    "STOCK_CANDLES_DAILY": re.compile(
-        r"candles:(mr|qt):(KR|US):[A-Z0-9._-]{1,32}:\d{4}-\d{2}-\d{2}:[12]"
-    ),
-    "MEMBERSHIP_NASDAQ_LISTED": re.compile(
-        r"membership:nasdaqlisted:\d{4}-\d{2}-\d{2}"
-    ),
-    "MEMBERSHIP_OTHER_LISTED": re.compile(
-        r"membership:otherlisted:\d{4}-\d{2}-\d{2}"
-    ),
-    "MEMBERSHIP_SEC_REGISTRY": re.compile(
-        r"membership:registry:\d{4}-\d{2}-\d{2}"
-    ),
-    "MEMBERSHIP_SEC_ISSUER": re.compile(
-        r"membership:issuer:\d{4}-\d{2}-\d{2}:[A-Z0-9._-]{1,32}"
-    ),
-    "MEMBERSHIP_TOSS_STOCKS": re.compile(
-        r"membership:toss-stocks:\d{4}-\d{2}-\d{2}"
-    ),
-    "CONDITIONAL_ORDERS": re.compile(r"conditional:(OPEN|CLOSED):[0-9]"),
-})
+_CADENCE_IDENTITY_PATTERNS = MappingProxyType(
+    {
+        "TOKEN": re.compile(r"token:tick0"),
+        "CALENDAR_DAY_KR": re.compile(r"calendar:KR:\d{4}-\d{2}-\d{2}:[0-5]"),
+        "CALENDAR_DAY_US": re.compile(r"calendar:US:\d{4}-\d{2}-\d{2}:[0-5]"),
+        "ACCOUNTS": re.compile(r"accounts:tick0"),
+        "ACCOUNT_HOLDINGS": re.compile(r"holdings:[1-5]"),
+        "PRICE_BATCH": re.compile(r"quotes:(?:0|[1-9]\d{0,2})"),
+        "ORDERS_PAGE": re.compile(r"orders:[0-9]"),
+        "ORDER_DETAIL": re.compile(r"detail:[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}"),
+        "STOCK_CANDLES_DAILY": re.compile(
+            r"candles:(mr|qt):(KR|US):[A-Z0-9._-]{1,32}:\d{4}-\d{2}-\d{2}:[12]"
+        ),
+        "MEMBERSHIP_NASDAQ_LISTED": re.compile(
+            r"membership:nasdaqlisted:\d{4}-\d{2}-\d{2}"
+        ),
+        "MEMBERSHIP_OTHER_LISTED": re.compile(
+            r"membership:otherlisted:\d{4}-\d{2}-\d{2}"
+        ),
+        "MEMBERSHIP_SEC_REGISTRY": re.compile(r"membership:registry:\d{4}-\d{2}-\d{2}"),
+        "MEMBERSHIP_SEC_ISSUER": re.compile(
+            r"membership:issuer:\d{4}-\d{2}-\d{2}:[A-Z0-9._-]{1,32}"
+        ),
+        "MEMBERSHIP_TOSS_STOCKS": re.compile(
+            r"membership:toss-stocks:\d{4}-\d{2}-\d{2}"
+        ),
+        "CONDITIONAL_ORDERS": re.compile(r"conditional:(OPEN|CLOSED):[0-9]"),
+    }
+)
 
 
 def validate_cadence_operation(operation, native_identity) -> str:
@@ -346,8 +382,10 @@ def policy_snapshot(policy: CadencePolicyV1, child_limits: TradesChildLimitsV1) 
         raise ValueError("invalid cadence policy")
     if not isinstance(child_limits, TradesChildLimitsV1):
         raise ValueError("invalid trades child limits")
-    if (child_limits.orders_page_starts + child_limits.order_detail_starts
-            > policy.request_limits.trades_starts):
+    if (
+        child_limits.orders_page_starts + child_limits.order_detail_starts
+        > policy.request_limits.trades_starts
+    ):
         raise ValueError("trades child limits exceed trades group limit")
     limits = policy.request_limits
     return {
@@ -382,26 +420,33 @@ def policy_digest(policy: CadencePolicyV1, child_limits: TradesChildLimitsV1) ->
 # Targeted one-shot lane (G2, delta Plan/SDS v0.2 §15.1): zero trades
 # children so the pinned snapshot stays feasible with trades_starts=0.
 TARGETED_ONESHOT_CHILD_LIMITS_V1 = TradesChildLimitsV1(
-    orders_page_starts=0, order_detail_starts=0,
+    orders_page_starts=0,
+    order_detail_starts=0,
 )
 
 CADENCE_TARGETED_ONESHOT_POLICY_V1 = CadencePolicyV1(
     policy_version="cadence-300s-targeted-oneshot-v1",
     request_limits=TickRequestLimitsV1(
-        total_wire_starts=2, token_starts=1, calendar_starts=0,
-        holdings_starts=0, quote_starts=0, trades_starts=0,
+        total_wire_starts=2,
+        token_starts=1,
+        calendar_starts=0,
+        holdings_starts=0,
+        quote_starts=0,
+        trades_starts=0,
         daily_candle_starts=1,
-        market_daily_candle_starts=1, quant_daily_candle_starts=0,
+        market_daily_candle_starts=1,
+        quant_daily_candle_starts=0,
     ),
 )
 
 # One-shot 전용 폐쇄 registry. CADENCE_POLICY_REGISTRY에는 절대 넣지 않는다:
 # 그래야 run_production_cadence_once / cadence_tick_v1 / CadenceTickV1 이
 # 이 policy_version을 구조적으로 거부하여 recurring 활성화가 불가능하다.
-TARGETED_ONESHOT_POLICY_REGISTRY = MappingProxyType({
-    CADENCE_TARGETED_ONESHOT_POLICY_V1.policy_version:
-        CADENCE_TARGETED_ONESHOT_POLICY_V1,
-})
+TARGETED_ONESHOT_POLICY_REGISTRY = MappingProxyType(
+    {
+        CADENCE_TARGETED_ONESHOT_POLICY_V1.policy_version: CADENCE_TARGETED_ONESHOT_POLICY_V1,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -420,8 +465,11 @@ class TargetedOneShotSlotV1:
         if policy is None:
             raise ValueError("unknown targeted one-shot policy version")
         slot = self.scheduled_for_utc
-        if (not isinstance(slot, datetime) or slot.tzinfo is None
-                or slot.utcoffset() != timedelta(0)):
+        if (
+            not isinstance(slot, datetime)
+            or slot.tzinfo is None
+            or slot.utcoffset() != timedelta(0)
+        ):
             raise ValueError("scheduled_for_utc must be aware UTC")
         if slot.microsecond != 0:
             raise ValueError("scheduled_for_utc must be a whole second")
@@ -429,17 +477,19 @@ class TargetedOneShotSlotV1:
             raise ValueError("scheduled slot is not aligned to the policy cadence")
 
 
-def targeted_oneshot_slot(policy_version: str,
-                          observed_now_utc: datetime) -> TargetedOneShotSlotV1:
+def targeted_oneshot_slot(
+    policy_version: str, observed_now_utc: datetime
+) -> TargetedOneShotSlotV1:
     """Floor observed now onto the registered targeted policy's grid."""
     policy = TARGETED_ONESHOT_POLICY_REGISTRY.get(policy_version)
     if policy is None:
         raise ValueError("unknown targeted one-shot policy version")
-    if (not isinstance(observed_now_utc, datetime)
-            or observed_now_utc.tzinfo is None
-            or observed_now_utc.utcoffset() is None):
+    if (
+        not isinstance(observed_now_utc, datetime)
+        or observed_now_utc.tzinfo is None
+        or observed_now_utc.utcoffset() is None
+    ):
         raise ValueError("observed_now_utc must be an aware datetime")
     epoch = int(observed_now_utc.timestamp())
-    slot = datetime.fromtimestamp(epoch - epoch % policy.cadence_seconds,
-                                  tz=timezone.utc)
+    slot = datetime.fromtimestamp(epoch - epoch % policy.cadence_seconds, tz=UTC)
     return TargetedOneShotSlotV1(policy_version, slot)

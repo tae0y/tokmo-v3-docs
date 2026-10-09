@@ -12,14 +12,14 @@ imports no transport. A transport failure is swallowed: lifecycle delivery
 may never fail or mutate the harness.
 """
 
-from dataclasses import dataclass
-from datetime import datetime, timedelta
 import json
 import os
-from pathlib import Path
 import re
-from typing import Callable, Mapping
 import urllib.parse
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from pathlib import Path
 
 HARNESS_EVENT_KINDS = frozenset({"START", "FATAL", "STALLED", "FINISH"})
 _SIGNATURE_KINDS = frozenset({"FATAL", "STALLED"})
@@ -53,18 +53,20 @@ class HarnessLifecycleEventV1:
             raise ValueError("unknown harness lifecycle kind")
         if type(self.label) is not str or not _TOKEN.fullmatch(self.label):
             raise ValueError("invalid lifecycle label")
-        if (not isinstance(self.at, datetime) or self.at.tzinfo is None
-                or self.at.utcoffset() is None):
+        if (
+            not isinstance(self.at, datetime)
+            or self.at.tzinfo is None
+            or self.at.utcoffset() is None
+        ):
             raise ValueError("lifecycle event time must be aware")
         if self.kind in _SIGNATURE_KINDS:
-            if (type(self.signature) is not str
-                    or not _TOKEN.fullmatch(self.signature)):
+            if type(self.signature) is not str or not _TOKEN.fullmatch(self.signature):
                 raise ValueError("FATAL/STALLED require a dedup signature")
         elif self.signature is not None:
             raise ValueError("signature is only for FATAL/STALLED")
         if self.detail is not None and (
-                type(self.detail) is not str
-                or not _TOKEN.fullmatch(self.detail)):
+            type(self.detail) is not str or not _TOKEN.fullmatch(self.detail)
+        ):
             raise ValueError("lifecycle detail must be token-shaped")
 
 
@@ -96,16 +98,25 @@ def _atomic_write_private(path: Path, payload: bytes) -> None:
 class LifecycleDeduperV1:
     """Durable START-once / FINISH-once / per-signature cooldown gate."""
 
-    def __init__(self, path: Path, *, clock: Callable[[], datetime],
-                 cooldown_seconds: int = DEFAULT_COOLDOWN_SECONDS):
+    def __init__(
+        self,
+        path: Path,
+        *,
+        clock: Callable[[], datetime],
+        cooldown_seconds: int = DEFAULT_COOLDOWN_SECONDS,
+    ):
         self.path = Path(path)
         self._clock = clock
         self._cooldown = timedelta(seconds=cooldown_seconds)
 
     def _read(self) -> dict:
         if not self.path.exists():
-            return {"schema": DEDUP_SCHEMA, "start_sent": None,
-                    "finish_sent": None, "signatures": {}}
+            return {
+                "schema": DEDUP_SCHEMA,
+                "start_sent": None,
+                "finish_sent": None,
+                "signatures": {},
+            }
         state = json.loads(self.path.read_text())
         if state.get("schema") != DEDUP_SCHEMA:
             raise ValueError("unknown lifecycle dedup schema")
@@ -126,11 +137,13 @@ class LifecycleDeduperV1:
         else:
             last = state["signatures"].get(event.signature)
             if last is not None and (
-                    now - datetime.fromisoformat(last) < self._cooldown):
+                now - datetime.fromisoformat(last) < self._cooldown
+            ):
                 return False
             state["signatures"][event.signature] = now.isoformat()
         _atomic_write_private(
-            self.path, json.dumps(state, sort_keys=True).encode(),
+            self.path,
+            json.dumps(state, sort_keys=True).encode(),
         )
         return True
 
@@ -143,11 +156,16 @@ class DryRunLifecycleSink:
 
     def __call__(self, event: HarnessLifecycleEventV1) -> None:
         self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        line = json.dumps({
-            "kind": event.kind, "label": event.label,
-            "at": event.at.isoformat(), "signature": event.signature,
-            "detail": event.detail,
-        }, sort_keys=True)
+        line = json.dumps(
+            {
+                "kind": event.kind,
+                "label": event.label,
+                "at": event.at.isoformat(),
+                "signature": event.signature,
+                "detail": event.detail,
+            },
+            sort_keys=True,
+        )
         flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
         if hasattr(os, "O_NOFOLLOW"):
             flags |= os.O_NOFOLLOW
@@ -169,8 +187,7 @@ class TelegramStockBotSender:
     transport import. Send failures are swallowed.
     """
 
-    def __init__(self, *, environ: Mapping, opener: Callable,
-                 timeout: float = 10.0):
+    def __init__(self, *, environ: Mapping, opener: Callable, timeout: float = 10.0):
         token = environ.get(ENV_TELEGRAM_TOKEN)
         chat_id = environ.get(ENV_TELEGRAM_CHAT_ID)
         if not token or not chat_id:
@@ -209,10 +226,15 @@ class TelegramStockBotSender:
             pass  # lifecycle delivery may never fail the harness
 
 
-def build_lifecycle_sink(mode: str, *, state_dir: Path | None,
-                         clock: Callable[[], datetime], environ: Mapping,
-                         cooldown_seconds: int = DEFAULT_COOLDOWN_SECONDS,
-                         opener: Callable | None = None) -> Callable:
+def build_lifecycle_sink(
+    mode: str,
+    *,
+    state_dir: Path | None,
+    clock: Callable[[], datetime],
+    environ: Mapping,
+    cooldown_seconds: int = DEFAULT_COOLDOWN_SECONDS,
+    opener: Callable | None = None,
+) -> Callable:
     """Compose deduper plus transport for one closed lifecycle mode."""
     if mode == "dry-run":
         transport = DryRunLifecycleSink(Path(state_dir) / "lifecycle_log.jsonl")
@@ -221,9 +243,11 @@ def build_lifecycle_sink(mode: str, *, state_dir: Path | None,
     else:
         raise ValueError("unknown lifecycle sink mode")
     deduper = LifecycleDeduperV1(
-        Path(state_dir) / "lifecycle_dedup.json" if state_dir is not None
+        Path(state_dir) / "lifecycle_dedup.json"
+        if state_dir is not None
         else Path("lifecycle_dedup.json"),
-        clock=clock, cooldown_seconds=cooldown_seconds,
+        clock=clock,
+        cooldown_seconds=cooldown_seconds,
     )
 
     def sink(event: HarnessLifecycleEventV1) -> None:

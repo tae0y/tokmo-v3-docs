@@ -5,6 +5,7 @@ for the fundamental material implementation layer.
 """
 
 import ast
+from datetime import UTC
 from pathlib import Path
 
 import pytest
@@ -43,6 +44,7 @@ class TestG1AFrozenDataclasses:
 
     def test_official_material_is_frozen(self):
         import inspect
+
         from tokmo.values.fundamental_materials import OfficialFundamentalMaterialV1
 
         # Check that the class is decorated with @dataclass(frozen=True).
@@ -55,7 +57,6 @@ class TestG1AFrozenDataclasses:
         assert fields.frozen is True
 
     def test_metric_evidence_is_frozen(self):
-        import inspect
         from tokmo.values.fundamental_materials import MetricEvidence
 
         fields = getattr(MetricEvidence, "__dataclass_params__", None)
@@ -190,12 +191,12 @@ class TestG1ACompositionSeamEffectZero:
     def test_construction_creates_no_directory_or_file(self, tmp_path):
         """Calling build_fundamental_materialization_deps must NOT create
         any directory or file under home."""
-        import os
+
+        from datetime import datetime
 
         from tokmo.programs.fundamental_materialization import (
             build_fundamental_materialization_deps,
         )
-        from datetime import datetime, timezone
 
         home = tmp_path / "fake_home"
         home.mkdir()
@@ -206,7 +207,7 @@ class TestG1ACompositionSeamEffectZero:
         # B3 fix: leaf builder takes injected transport factories (stubs).
         deps = build_fundamental_materialization_deps(
             home=home,
-            clock=lambda: datetime(2026, 1, 1, tzinfo=timezone.utc),
+            clock=lambda: datetime(2026, 1, 1, tzinfo=UTC),
             sec_transport_factory=lambda: "stub_sec",
             opendart_transport_factory=lambda: "stub_opendart",
         )
@@ -219,17 +220,18 @@ class TestG1ACompositionSeamEffectZero:
 
     def test_deps_are_immutable_mapping(self, tmp_path):
         import types as _types
+        from datetime import datetime
+
         from tokmo.programs.fundamental_materialization import (
             build_fundamental_materialization_deps,
         )
-        from datetime import datetime, timezone
 
         home = tmp_path / "fake_home"
         home.mkdir()
 
         deps = build_fundamental_materialization_deps(
             home=home,
-            clock=lambda: datetime(2026, 1, 1, tzinfo=timezone.utc),
+            clock=lambda: datetime(2026, 1, 1, tzinfo=UTC),
             sec_transport_factory=lambda: "stub_sec",
             opendart_transport_factory=lambda: "stub_opendart",
         )
@@ -243,17 +245,18 @@ class TestG1ACompositionSeamEffectZero:
             pass
 
     def test_deps_contain_store_path_and_factory_not_instance(self, tmp_path):
+        from datetime import datetime
+
         from tokmo.programs.fundamental_materialization import (
             build_fundamental_materialization_deps,
         )
-        from datetime import datetime, timezone
 
         home = tmp_path / "fake_home"
         home.mkdir()
 
         deps = build_fundamental_materialization_deps(
             home=home,
-            clock=lambda: datetime(2026, 1, 1, tzinfo=timezone.utc),
+            clock=lambda: datetime(2026, 1, 1, tzinfo=UTC),
             sec_transport_factory=lambda: "stub_sec",
             opendart_transport_factory=lambda: "stub_opendart",
         )
@@ -268,19 +271,19 @@ class TestG1ACompositionSeamEffectZero:
     def test_store_factory_creates_dir_and_store_only_on_invocation(self, tmp_path):
         """The store factory creates the private dir + SQLite store only
         when explicitly invoked, not during construction."""
-        import os
+
+        from datetime import datetime
 
         from tokmo.programs.fundamental_materialization import (
             build_fundamental_materialization_deps,
         )
-        from datetime import datetime, timezone
 
         home = tmp_path / "fake_home"
         home.mkdir()
 
         deps = build_fundamental_materialization_deps(
             home=home,
-            clock=lambda: datetime(2026, 1, 1, tzinfo=timezone.utc),
+            clock=lambda: datetime(2026, 1, 1, tzinfo=UTC),
             sec_transport_factory=lambda: "stub_sec",
             opendart_transport_factory=lambda: "stub_opendart",
         )
@@ -309,6 +312,7 @@ class TestG1ACompositionWrapperBehavior:
         """B3: programs/fundamental_materialization.py must not import
         any LIVE_TRANSPORT_MODULES."""
         import ast
+
         path = SRC_ROOT / "programs" / "fundamental_materialization.py"
         tree = ast.parse(path.read_text())
         imports: list[str] = []
@@ -329,14 +333,17 @@ class TestG1ACompositionWrapperBehavior:
 
     def test_composition_wrapper_passes_factories(self, tmp_path):
         """m8: composition wrapper delegates to leaf builder with factories."""
-        from datetime import datetime, timezone
-        from tokmo.composition import build_fundamental_materialization_deps as comp_build
+        from datetime import datetime
+
+        from tokmo.composition import (
+            build_fundamental_materialization_deps as comp_build,
+        )
 
         home = tmp_path / "fake_home"
         home.mkdir()
         deps = comp_build(
             home=home,
-            clock=lambda: datetime(2026, 1, 1, tzinfo=timezone.utc),
+            clock=lambda: datetime(2026, 1, 1, tzinfo=UTC),
         )
         # Verify transport instances exist (constructed by composition via factories).
         assert "sec_transport" in deps
@@ -346,15 +353,18 @@ class TestG1ACompositionWrapperBehavior:
 
     def test_deps_from_composition_have_no_files(self, tmp_path):
         """m8: construction through composition must be effect-zero."""
-        from datetime import datetime, timezone
-        from tokmo.composition import build_fundamental_materialization_deps as comp_build
+        from datetime import datetime
+
+        from tokmo.composition import (
+            build_fundamental_materialization_deps as comp_build,
+        )
 
         home = tmp_path / "fake_home"
         home.mkdir()
         before = sorted(str(p) for p in home.rglob("*"))
         deps = comp_build(
             home=home,
-            clock=lambda: datetime(2026, 1, 1, tzinfo=timezone.utc),
+            clock=lambda: datetime(2026, 1, 1, tzinfo=UTC),
         )
         after = sorted(str(p) for p in home.rglob("*"))
         assert before == after
@@ -395,7 +405,8 @@ class TestG1ACompositionWrapperIsSelfContained:
 
         pyproject = (Path(__file__).parents[1] / "pyproject.toml").read_text()
         declared = [
-            line for line in pyproject.splitlines()
+            line
+            for line in pyproject.splitlines()
             if line.strip().startswith("requires-python")
         ]
         assert declared, "pyproject.toml must declare requires-python"
@@ -449,7 +460,8 @@ class TestG1ACompositionWrapperIsSelfContained:
         assert leaf_names, "wrapper must import the leaf builder"
 
         delegations = [
-            call for call in ast.walk(node)
+            call
+            for call in ast.walk(node)
             if isinstance(call, ast.Call)
             and isinstance(call.func, ast.Name)
             and call.func.id in leaf_names
@@ -459,30 +471,45 @@ class TestG1ACompositionWrapperIsSelfContained:
             kw.arg: kw.value for kw in delegations[0].keywords if kw.arg is not None
         }
         assert set(kwargs) == {
-            "home", "clock", "sec_transport_factory", "opendart_transport_factory",
+            "home",
+            "clock",
+            "sec_transport_factory",
+            "opendart_transport_factory",
         }
         sec_factory = kwargs["sec_transport_factory"]
         opendart_factory = kwargs["opendart_transport_factory"]
         assert isinstance(sec_factory, ast.Name)
         assert isinstance(opendart_factory, ast.Name)
         assert sec_factory.id in imported_aliases["tokmo.facts.sec_fundamentals_live"]
-        assert opendart_factory.id in (
-            imported_aliases["tokmo.facts.opendart_fundamentals_live"]
+        assert (
+            opendart_factory.id
+            in (imported_aliases["tokmo.facts.opendart_fundamentals_live"])
         )
 
     def test_wrapper_body_has_no_io_or_cadence_calls(self):
         """SDS §12 15d: construction-time mkdir/SQLite/network/cadence = 0."""
         node = _composition_wrapper_node()
         forbidden = {
-            "mkdir", "open", "connect", "write_text", "write_bytes", "touch",
-            "urlopen", "socket", "register", "schedule", "start",
+            "mkdir",
+            "open",
+            "connect",
+            "write_text",
+            "write_bytes",
+            "touch",
+            "urlopen",
+            "socket",
+            "register",
+            "schedule",
+            "start",
         }
         for child in ast.walk(node):
             if isinstance(child, ast.Call):
                 func = child.func
                 name = (
-                    func.attr if isinstance(func, ast.Attribute)
-                    else func.id if isinstance(func, ast.Name)
+                    func.attr
+                    if isinstance(func, ast.Attribute)
+                    else func.id
+                    if isinstance(func, ast.Name)
                     else ""
                 )
                 assert name not in forbidden, (
@@ -509,7 +536,7 @@ class TestG1ACompositionWrapperIsSelfContained:
         return namespace[WRAPPER_NAME]
 
     def test_wrapper_bytes_build_real_live_transports(self, tmp_path):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from tokmo.facts.opendart_fundamentals_live import (
             OpenDartFundamentalsLiveTransport,
@@ -519,31 +546,27 @@ class TestG1ACompositionWrapperIsSelfContained:
         wrapper = self._exec_wrapper()
         home = tmp_path / "fake_home"
         home.mkdir()
-        clock = lambda: datetime(2026, 1, 1, tzinfo=timezone.utc)
+        clock = lambda: datetime(2026, 1, 1, tzinfo=UTC)
         deps = wrapper(home=home, clock=clock)
 
         import types as _types
 
         assert isinstance(deps, _types.MappingProxyType)
         assert isinstance(deps["sec_transport"], SECCompanyFactsLiveTransport)
-        assert isinstance(
-            deps["opendart_transport"], OpenDartFundamentalsLiveTransport
-        )
+        assert isinstance(deps["opendart_transport"], OpenDartFundamentalsLiveTransport)
         assert deps["clock"] is clock
         assert "store_path" in deps and "store_factory" in deps
         assert "store" not in deps
         assert callable(deps["store_factory"])
 
     def test_wrapper_bytes_are_effect_zero(self, tmp_path):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         wrapper = self._exec_wrapper()
         home = tmp_path / "fake_home"
         home.mkdir()
         before = sorted(str(p) for p in home.rglob("*"))
-        deps = wrapper(
-            home=home, clock=lambda: datetime(2026, 1, 1, tzinfo=timezone.utc)
-        )
+        deps = wrapper(home=home, clock=lambda: datetime(2026, 1, 1, tzinfo=UTC))
         after = sorted(str(p) for p in home.rglob("*"))
         assert before == after
         assert not deps["store_path"].exists()

@@ -6,7 +6,7 @@ negative/adversarial scenarios, metamorphic properties, and replay parity.
 
 import hashlib
 import json
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -15,7 +15,6 @@ import pytest
 from tokmo.programs.macro_divergence_analyzer import evaluate_macro_divergence
 from tokmo.values.macro_divergence import (
     FORMULA_VERSION,
-    MacroDivergenceComponent,
     MacroDivergenceState,
 )
 from tokmo.values.macro_observations import (
@@ -35,14 +34,14 @@ from tokmo.values.signal_program_lifecycle import (
 )
 
 KST = timezone(timedelta(hours=9))
-UTC = timezone.utc
+UTC = UTC
 
 # ==========================================================================
 # Fixture builders — synthetic data with exact threshold control
 # ==========================================================================
 
+
 def _digest(text: str = "canonical-spec-text") -> str:
-    import hashlib
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
@@ -59,35 +58,56 @@ def _core_lifecycle(as_of: datetime, status=None) -> ProgramLifecycleStateV1:
     )
     if status is not None:
         return ProgramLifecycleStateV1(
-            spec=spec, status=status,
-            last_evidence_at=None, evidence_count=0,
-            renewal_count=0, as_of=as_of,
+            spec=spec,
+            status=status,
+            last_evidence_at=None,
+            evidence_count=0,
+            renewal_count=0,
+            as_of=as_of,
         )
     return evaluate_lifecycle_status(
-        spec, as_of=as_of, last_evidence_at=None,
-        evidence_count=0, renewal_count=0,
+        spec,
+        as_of=as_of,
+        last_evidence_at=None,
+        evidence_count=0,
+        renewal_count=0,
     )
 
 
 def _make_candle(d: date, close: str, currency="KRW") -> MacroCandleObservation:
-    obs = datetime.combine(d, datetime.min.time(), tzinfo=KST).replace(hour=15, minute=30)
+    obs = datetime.combine(d, datetime.min.time(), tzinfo=KST).replace(
+        hour=15, minute=30
+    )
     return MacroCandleObservation(
-        session_date=d, observed_at=obs, available_at=obs + timedelta(minutes=5),
-        open_price=close, high_price=close, low_price=close,
-        close_price=close, volume="100000", currency=currency,
+        session_date=d,
+        observed_at=obs,
+        available_at=obs + timedelta(minutes=5),
+        open_price=close,
+        high_price=close,
+        low_price=close,
+        close_price=close,
+        volume="100000",
+        currency=currency,
     )
 
 
 def _make_investor(d: date, foreign_net: str) -> MacroInvestorObservation:
-    obs = datetime.combine(d, datetime.min.time(), tzinfo=KST).replace(hour=15, minute=30)
+    obs = datetime.combine(d, datetime.min.time(), tzinfo=KST).replace(
+        hour=15, minute=30
+    )
     net = Decimal(foreign_net)
     buy = str(abs(net)) if net >= 0 else "0"
     sell = str(abs(net)) if net < 0 else "0"
     return MacroInvestorObservation(
-        session_date=d, observed_at=obs, available_at=obs + timedelta(minutes=5),
-        foreign_buy=buy, foreign_sell=sell,
-        individual_buy="0", individual_sell="0",
-        institution_buy="0", institution_sell="0",
+        session_date=d,
+        observed_at=obs,
+        available_at=obs + timedelta(minutes=5),
+        foreign_buy=buy,
+        foreign_sell=sell,
+        individual_buy="0",
+        individual_sell="0",
+        institution_buy="0",
+        institution_sell="0",
     )
 
 
@@ -115,22 +135,31 @@ def _build_bundle(
         as_of=as_of,
         source_refs=(
             MacroSourceRefV1(
-                operation="INDICATOR_CANDLES", symbol="KOSPI", interval="1d",
-                requested_count=200, returned_count=len(kospi),
+                operation="INDICATOR_CANDLES",
+                symbol="KOSPI",
+                interval="1d",
+                requested_count=200,
+                returned_count=len(kospi),
                 date_range_start=kospi[0].session_date if kospi else None,
                 date_range_end=kospi[-1].session_date if kospi else None,
                 series_digest=compute_series_digest(tuple(kospi)),
             ),
             MacroSourceRefV1(
-                operation="STOCK_CANDLES", symbol="261240", interval="1d",
-                requested_count=200, returned_count=len(proxy),
+                operation="STOCK_CANDLES",
+                symbol="261240",
+                interval="1d",
+                requested_count=200,
+                returned_count=len(proxy),
                 date_range_start=proxy[0].session_date if proxy else None,
                 date_range_end=proxy[-1].session_date if proxy else None,
                 series_digest=compute_series_digest(tuple(proxy)),
             ),
             MacroSourceRefV1(
-                operation="INDICATOR_INVESTOR_TRADING", symbol="KOSPI", interval="1d",
-                requested_count=100, returned_count=len(investor),
+                operation="INDICATOR_INVESTOR_TRADING",
+                symbol="KOSPI",
+                interval="1d",
+                requested_count=100,
+                returned_count=len(investor),
                 date_range_start=investor[0].session_date if investor else None,
                 date_range_end=investor[-1].session_date if investor else None,
                 series_digest=compute_series_digest(tuple(investor)),
@@ -142,6 +171,7 @@ def _build_bundle(
 # --------------------------------------------------------------------------
 # T1 fixture builder — INDEX_HIGH_FX_PROXY_HIGH
 # --------------------------------------------------------------------------
+
 
 def _t1_bundle() -> tuple[MacroObservationSeriesV1, datetime]:
     end = date(2026, 6, 18)
@@ -170,6 +200,7 @@ def _t1_bundle() -> tuple[MacroObservationSeriesV1, datetime]:
 # --------------------------------------------------------------------------
 # T2 fixture builder — FOREIGN_OUTFLOW_CONFIRMATION
 # --------------------------------------------------------------------------
+
 
 def _t2_bundle() -> tuple[MacroObservationSeriesV1, datetime]:
     end = date(2026, 6, 10)
@@ -204,6 +235,7 @@ def _t2_bundle() -> tuple[MacroObservationSeriesV1, datetime]:
 # T3 fixture builder — OUTFLOW_EXHAUSTION_FX_PROXY_REVERSAL
 # --------------------------------------------------------------------------
 
+
 def _t3_bundle() -> tuple[MacroObservationSeriesV1, datetime]:
     end = date(2026, 8, 7)
     as_of = datetime(2026, 8, 7, 16, 30, tzinfo=KST)
@@ -213,19 +245,19 @@ def _t3_bundle() -> tuple[MacroObservationSeriesV1, datetime]:
     proxy = [_make_candle(d, "1465") for d in dates]
     # Override last 8 proxy closes for -3.3% return: 1465 → ~1417
     # return = (1417 - 1465) / 1465 = -0.0328
-    base = Decimal("1465")
+    base = Decimal(1465)
     for i in range(92, 100):
         # Linear drop from 1465 to 1417
         frac = (i - 92) / 7
-        close = base + (Decimal("1417") - base) * Decimal(str(frac))
+        close = base + (Decimal(1417) - base) * Decimal(str(frac))
         proxy[i] = _make_candle(dates[i], str(close))
     # Investor: [T-39, T-20] = prior 20 sum <= -40조
     #          [T-19, T] = current 20 sum > -20조 and >= prior*0.5
     investor = [_make_investor(d, "0") for d in dates]
-    prior_total = Decimal("-40300000000000")  # -40.3조
+    prior_total = Decimal(-40300000000000)  # -40.3조
     for i in range(60, 80):  # positions T-39..T-20
         investor[i] = _make_investor(dates[i], str(prior_total / 20))
-    current_total = Decimal("-4700000000000")  # -4.7조
+    current_total = Decimal(-4700000000000)  # -4.7조
     for i in range(80, 100):  # positions T-19..T
         investor[i] = _make_investor(dates[i], str(current_total / 20))
     return _build_bundle(kospi, proxy, investor, as_of), as_of
@@ -234,6 +266,7 @@ def _t3_bundle() -> tuple[MacroObservationSeriesV1, datetime]:
 # --------------------------------------------------------------------------
 # MUST_NOT_FIRE fixture
 # --------------------------------------------------------------------------
+
 
 def _must_not_fire_bundle() -> tuple[MacroObservationSeriesV1, datetime]:
     end = date(2026, 6, 18)
@@ -269,6 +302,7 @@ def _must_not_fire_bundle() -> tuple[MacroObservationSeriesV1, datetime]:
 # AN-01: T1 fixture → INDEX_HIGH_FX_PROXY_HIGH
 # ==========================================================================
 
+
 def test_an01_t1_index_high():
     bundle, as_of = _t1_bundle()
     lifecycle = _core_lifecycle(as_of)
@@ -282,6 +316,7 @@ def test_an01_t1_index_high():
 # ==========================================================================
 # AN-02: T2 fixture → FOREIGN_OUTFLOW_CONFIRMATION
 # ==========================================================================
+
 
 def test_an02_t2_foreign_outflow():
     bundle, as_of = _t2_bundle()
@@ -297,17 +332,22 @@ def test_an02_t2_foreign_outflow():
 # AN-03: T3 fixture → OUTFLOW_EXHAUSTION_FX_PROXY_REVERSAL
 # ==========================================================================
 
+
 def test_an03_t3_exhaustion_reversal():
     bundle, as_of = _t3_bundle()
     lifecycle = _core_lifecycle(as_of)
     pack = evaluate_macro_divergence(bundle, lifecycle=lifecycle)
-    assert pack.primary_state == MacroDivergenceState.OUTFLOW_EXHAUSTION_FX_PROXY_REVERSAL.value
+    assert (
+        pack.primary_state
+        == MacroDivergenceState.OUTFLOW_EXHAUSTION_FX_PROXY_REVERSAL.value
+    )
     assert pack.components[2].fired is True
 
 
 # ==========================================================================
 # AN-04: MUST_NOT_FIRE → NO_MATERIAL_DIVERGENCE
 # ==========================================================================
+
 
 def test_an04_must_not_fire():
     bundle, as_of = _must_not_fire_bundle()
@@ -320,6 +360,7 @@ def test_an04_must_not_fire():
 # ==========================================================================
 # AN-05: NEG_INSUFFICIENT_COUNT_KOSPI → INSUFFICIENT_DATA
 # ==========================================================================
+
 
 def test_an05_insufficient_count_kospi():
     end = date(2026, 6, 18)
@@ -342,6 +383,7 @@ def test_an05_insufficient_count_kospi():
 # AN-06: NEG_STALE_LATEST_SESSION → INSUFFICIENT_DATA
 # ==========================================================================
 
+
 def test_an06_stale_latest_session():
     end = date(2026, 6, 10)  # 8 days before as_of
     as_of = datetime(2026, 6, 18, 16, 30, tzinfo=KST)
@@ -362,6 +404,7 @@ def test_an06_stale_latest_session():
 # AN-07: NEG_FUTURE_LEAKAGE → ValueError
 # ==========================================================================
 
+
 def test_an07_future_leakage():
     end = date(2026, 6, 18)
     as_of = datetime(2026, 6, 18, 16, 30, tzinfo=KST)
@@ -373,9 +416,12 @@ def test_an07_future_leakage():
         session_date=last.session_date,
         observed_at=last.observed_at,
         available_at=as_of + timedelta(days=1),  # future!
-        open_price=last.open_price, high_price=last.high_price,
-        low_price=last.low_price, close_price=last.close_price,
-        volume=last.volume, currency=last.currency,
+        open_price=last.open_price,
+        high_price=last.high_price,
+        low_price=last.low_price,
+        close_price=last.close_price,
+        volume=last.volume,
+        currency=last.currency,
     )
     proxy = [_make_candle(d, "1400") for d in dates]
     investor = [_make_investor(d, "0") for d in dates]
@@ -389,6 +435,7 @@ def test_an07_future_leakage():
 # AN-08: NEG_TIMEZONE_NAIVE → ValueError
 # ==========================================================================
 
+
 def test_an08_timezone_naive():
     """Naive observed_at is rejected at MacroCandleObservation construction."""
     with pytest.raises(ValueError):
@@ -396,8 +443,12 @@ def test_an08_timezone_naive():
             session_date=date(2026, 3, 10),
             observed_at=datetime(2026, 3, 10, 15, 30),  # naive!
             available_at=datetime(2026, 3, 10, 15, 35),  # naive!
-            open_price="3000", high_price="3000", low_price="3000",
-            close_price="3000", volume="100000", currency="KRW",
+            open_price="3000",
+            high_price="3000",
+            low_price="3000",
+            close_price="3000",
+            volume="100000",
+            currency="KRW",
         )
 
 
@@ -422,6 +473,7 @@ def test_an08b_naive_at_analyzer_level():
 # ==========================================================================
 # AN-09: NEG_PRECEDENCE — INDEX_HIGH + OUTFLOW → primary = OUTFLOW
 # ==========================================================================
+
 
 def test_an09_precedence_index_plus_outflow():
     end = date(2026, 6, 18)
@@ -449,6 +501,7 @@ def test_an09_precedence_index_plus_outflow():
 # AN-10: EXHAUSTION + INDEX → primary = EXHAUSTION
 # ==========================================================================
 
+
 def test_an10_precedence_exhaustion_plus_index():
     end = date(2026, 8, 7)
     as_of = datetime(2026, 8, 7, 16, 30, tzinfo=KST)
@@ -462,28 +515,32 @@ def test_an10_precedence_exhaustion_plus_index():
     for i in range(10):
         proxy[99 - i] = _make_candle(dates[99 - i], "1523")
     # But also need rapid fall in last 8 for exhaustion
-    base = Decimal("1465")
+    base = Decimal(1465)
     for i in range(92, 100):
         frac = (i - 92) / 7
-        close = base + (Decimal("1417") - base) * Decimal(str(frac))
+        close = base + (Decimal(1417) - base) * Decimal(str(frac))
         proxy[i] = _make_candle(dates[i], str(close))
     # Foreign: exhaustion pattern
     investor = [_make_investor(d, "0") for d in dates]
-    prior_total = Decimal("-40300000000000")
+    prior_total = Decimal(-40300000000000)
     for i in range(60, 80):
         investor[i] = _make_investor(dates[i], str(prior_total / 20))
-    current_total = Decimal("-4700000000000")
+    current_total = Decimal(-4700000000000)
     for i in range(80, 100):
         investor[i] = _make_investor(dates[i], str(current_total / 20))
     bundle = _build_bundle(kospi, proxy, investor, as_of)
     lifecycle = _core_lifecycle(as_of)
     pack = evaluate_macro_divergence(bundle, lifecycle=lifecycle)
-    assert pack.primary_state == MacroDivergenceState.OUTFLOW_EXHAUSTION_FX_PROXY_REVERSAL.value
+    assert (
+        pack.primary_state
+        == MacroDivergenceState.OUTFLOW_EXHAUSTION_FX_PROXY_REVERSAL.value
+    )
 
 
 # ==========================================================================
 # AN-11: roll discontinuity → NO_MATERIAL_DIVERGENCE
 # ==========================================================================
+
 
 def test_an11_roll_discontinuity():
     end = date(2026, 6, 18)
@@ -505,6 +562,7 @@ def test_an11_roll_discontinuity():
 # AN-12: holiday gap → INSUFFICIENT_DATA (STALE)
 # ==========================================================================
 
+
 def test_an12_holiday_gap():
     end = date(2026, 6, 12)  # 6 calendar days before as_of (June 18)
     as_of = datetime(2026, 6, 18, 16, 30, tzinfo=KST)
@@ -525,6 +583,7 @@ def test_an12_holiday_gap():
 # Lifecycle blocking tests (§3.7, LC-09a)
 # ==========================================================================
 
+
 def test_lc09a_retired_blocks_evaluation():
     bundle, as_of = _t1_bundle()
     lifecycle = _core_lifecycle(as_of, status=ProgramLifecycleStatusV1.RETIRED)
@@ -539,17 +598,22 @@ def test_shadow_blocks_evaluation():
     # SHADOW: as_of < activated_at
     bundle, as_of = _must_not_fire_bundle()
     spec = ProgramLifecycleSpecV1(
-        program_id="AI-MACRO-001", version="1.0.0",
+        program_id="AI-MACRO-001",
+        version="1.0.0",
         kind=ProgramKindV1.CORE_ANALYZER,
         activated_at=as_of + timedelta(days=1),  # future activation
         review_due_at=as_of + timedelta(days=91),
-        expires_at=None, review_cadence_days=90,
+        expires_at=None,
+        review_cadence_days=90,
         spec_digest=_digest(),
     )
     state = ProgramLifecycleStateV1(
-        spec=spec, status=ProgramLifecycleStatusV1.SHADOW,
-        last_evidence_at=None, evidence_count=0,
-        renewal_count=0, as_of=as_of,
+        spec=spec,
+        status=ProgramLifecycleStatusV1.SHADOW,
+        last_evidence_at=None,
+        evidence_count=0,
+        renewal_count=0,
+        as_of=as_of,
     )
     pack = evaluate_macro_divergence(bundle, lifecycle=state)
     assert pack.primary_state == MacroDivergenceState.INSUFFICIENT_DATA.value
@@ -570,6 +634,7 @@ def test_dormant_blocks_evaluation():
 # as_of mismatch test (§3.9 step 2)
 # ==========================================================================
 
+
 def test_as_of_mismatch_rejects():
     bundle, as_of = _t1_bundle()
     different_as_of = as_of + timedelta(hours=1)
@@ -581,6 +646,7 @@ def test_as_of_mismatch_rejects():
 # ==========================================================================
 # Structural validation tests
 # ==========================================================================
+
 
 def test_duplicate_session_date_rejects():
     end = date(2026, 6, 18)
@@ -651,6 +717,7 @@ def test_empty_proxy_series():
 # F-11: byte-identical digest determinism
 # ==========================================================================
 
+
 def test_f11_same_input_same_digest():
     bundle, as_of = _t1_bundle()
     lifecycle = _core_lifecycle(as_of)
@@ -664,6 +731,7 @@ def test_f11_same_input_same_digest():
 # REPLAY-01: same normalized bundle, same as_of → same digest
 # ==========================================================================
 
+
 def test_replay01_same_bundle_same_digest():
     bundle, as_of = _t1_bundle()
     lifecycle = _core_lifecycle(as_of)
@@ -675,6 +743,7 @@ def test_replay01_same_bundle_same_digest():
 # ==========================================================================
 # REPLAY-03: future as_of within staleness ceiling → same result
 # ==========================================================================
+
 
 def test_replay03_future_as_of_within_ceiling():
     bundle, as_of = _t1_bundle()
@@ -695,6 +764,7 @@ def test_replay03_future_as_of_within_ceiling():
 # REPLAY-04: as_of before latest observation → ValueError
 # ==========================================================================
 
+
 def test_replay04_as_of_before_latest_observation():
     bundle, as_of = _t1_bundle()
     early_as_of = as_of - timedelta(days=1)
@@ -712,6 +782,7 @@ def test_replay04_as_of_before_latest_observation():
 # ==========================================================================
 # REPLAY-06: as_of > 4 calendar days after latest common session → STALE
 # ==========================================================================
+
 
 def test_replay06_beyond_ceiling_stale():
     end = date(2026, 6, 10)
@@ -731,6 +802,7 @@ def test_replay06_beyond_ceiling_stale():
 # ==========================================================================
 # MM-01: adding 1 non-overlapping session before window → same primary
 # ==========================================================================
+
 
 def test_mm01_add_session_before_window():
     bundle, as_of = _t1_bundle()
@@ -753,6 +825,7 @@ def test_mm01_add_session_before_window():
 # MM-03: doubling all prices → same percentile rank
 # ==========================================================================
 
+
 def test_mm03_scale_invariance():
     bundle, as_of = _must_not_fire_bundle()
     lifecycle = _core_lifecycle(as_of)
@@ -760,25 +833,29 @@ def test_mm03_scale_invariance():
 
     kospi = [
         MacroCandleObservation(
-            session_date=c.session_date, observed_at=c.observed_at,
+            session_date=c.session_date,
+            observed_at=c.observed_at,
             available_at=c.available_at,
             open_price=str(Decimal(c.open_price) * 2),
             high_price=str(Decimal(c.high_price) * 2),
             low_price=str(Decimal(c.low_price) * 2),
             close_price=str(Decimal(c.close_price) * 2),
-            volume=c.volume, currency=c.currency,
+            volume=c.volume,
+            currency=c.currency,
         )
         for c in bundle.kospi_candles
     ]
     proxy = [
         MacroCandleObservation(
-            session_date=c.session_date, observed_at=c.observed_at,
+            session_date=c.session_date,
+            observed_at=c.observed_at,
             available_at=c.available_at,
             open_price=str(Decimal(c.open_price) * 2),
             high_price=str(Decimal(c.high_price) * 2),
             low_price=str(Decimal(c.low_price) * 2),
             close_price=str(Decimal(c.close_price) * 2),
-            volume=c.volume, currency=c.currency,
+            volume=c.volume,
+            currency=c.currency,
         )
         for c in bundle.proxy_candles
     ]
@@ -791,6 +868,7 @@ def test_mm03_scale_invariance():
 # ==========================================================================
 # Pack structure checks
 # ==========================================================================
+
 
 def test_pack_has_all_fields():
     bundle, as_of = _t1_bundle()
@@ -819,6 +897,7 @@ def test_pack_digest_is_64_hex():
     lifecycle = _core_lifecycle(as_of)
     pack = evaluate_macro_divergence(bundle, lifecycle=lifecycle)
     import re
+
     assert re.match(r"^[0-9a-f]{64}$", pack.pack_digest)
 
 
@@ -826,17 +905,22 @@ def test_review_due_proceeds_normally():
     """REVIEW_DUE does not block evaluation (§3.6)."""
     bundle, as_of = _t1_bundle()
     spec = ProgramLifecycleSpecV1(
-        program_id="AI-MACRO-001", version="1.0.0",
+        program_id="AI-MACRO-001",
+        version="1.0.0",
         kind=ProgramKindV1.CORE_ANALYZER,
         activated_at=as_of - timedelta(days=100),
         review_due_at=as_of - timedelta(days=10),  # review was due 10 days ago
-        expires_at=None, review_cadence_days=90,
+        expires_at=None,
+        review_cadence_days=90,
         spec_digest=_digest(),
     )
     state = ProgramLifecycleStateV1(
-        spec=spec, status=ProgramLifecycleStatusV1.REVIEW_DUE,
-        last_evidence_at=None, evidence_count=0,
-        renewal_count=0, as_of=as_of,
+        spec=spec,
+        status=ProgramLifecycleStatusV1.REVIEW_DUE,
+        last_evidence_at=None,
+        evidence_count=0,
+        renewal_count=0,
+        as_of=as_of,
     )
     pack = evaluate_macro_divergence(bundle, lifecycle=state)
     assert pack.lifecycle_reason == "REVIEW_DUE"
@@ -846,6 +930,7 @@ def test_review_due_proceeds_normally():
 # ==========================================================================
 # MM-02: reordering fields in JSON → same pack (canonical serialization)
 # ==========================================================================
+
 
 def test_mm02_in_memory_replay_same_digest():
     """REPLAY-01 duplicate: same in-memory bundle → same digest."""
@@ -860,6 +945,7 @@ def test_mm02_in_memory_replay_same_digest():
 # MM-04: shifting all dates by +7 days, same as_of shift → same primary
 # ==========================================================================
 
+
 def test_mm04_date_shift_same_primary():
     bundle, as_of = _t1_bundle()
     lifecycle = _core_lifecycle(as_of)
@@ -868,36 +954,53 @@ def test_mm04_date_shift_same_primary():
     # Shift all dates by +7 days
     shifted_kospi = []
     for c in bundle.kospi_candles:
-        shifted_kospi.append(MacroCandleObservation(
-            session_date=c.session_date + timedelta(days=7),
-            observed_at=c.observed_at + timedelta(days=7),
-            available_at=c.available_at + timedelta(days=7),
-            open_price=c.open_price, high_price=c.high_price,
-            low_price=c.low_price, close_price=c.close_price,
-            volume=c.volume, currency=c.currency,
-        ))
+        shifted_kospi.append(
+            MacroCandleObservation(
+                session_date=c.session_date + timedelta(days=7),
+                observed_at=c.observed_at + timedelta(days=7),
+                available_at=c.available_at + timedelta(days=7),
+                open_price=c.open_price,
+                high_price=c.high_price,
+                low_price=c.low_price,
+                close_price=c.close_price,
+                volume=c.volume,
+                currency=c.currency,
+            )
+        )
     shifted_proxy = []
     for c in bundle.proxy_candles:
-        shifted_proxy.append(MacroCandleObservation(
-            session_date=c.session_date + timedelta(days=7),
-            observed_at=c.observed_at + timedelta(days=7),
-            available_at=c.available_at + timedelta(days=7),
-            open_price=c.open_price, high_price=c.high_price,
-            low_price=c.low_price, close_price=c.close_price,
-            volume=c.volume, currency=c.currency,
-        ))
+        shifted_proxy.append(
+            MacroCandleObservation(
+                session_date=c.session_date + timedelta(days=7),
+                observed_at=c.observed_at + timedelta(days=7),
+                available_at=c.available_at + timedelta(days=7),
+                open_price=c.open_price,
+                high_price=c.high_price,
+                low_price=c.low_price,
+                close_price=c.close_price,
+                volume=c.volume,
+                currency=c.currency,
+            )
+        )
     shifted_investor = []
     for r in bundle.investor_records:
-        shifted_investor.append(MacroInvestorObservation(
-            session_date=r.session_date + timedelta(days=7),
-            observed_at=r.observed_at + timedelta(days=7),
-            available_at=r.available_at + timedelta(days=7),
-            foreign_buy=r.foreign_buy, foreign_sell=r.foreign_sell,
-            individual_buy=r.individual_buy, individual_sell=r.individual_sell,
-            institution_buy=r.institution_buy, institution_sell=r.institution_sell,
-        ))
+        shifted_investor.append(
+            MacroInvestorObservation(
+                session_date=r.session_date + timedelta(days=7),
+                observed_at=r.observed_at + timedelta(days=7),
+                available_at=r.available_at + timedelta(days=7),
+                foreign_buy=r.foreign_buy,
+                foreign_sell=r.foreign_sell,
+                individual_buy=r.individual_buy,
+                individual_sell=r.individual_sell,
+                institution_buy=r.institution_buy,
+                institution_sell=r.institution_sell,
+            )
+        )
     shifted_as_of = as_of + timedelta(days=7)
-    shifted_bundle = _build_bundle(shifted_kospi, shifted_proxy, shifted_investor, shifted_as_of)
+    shifted_bundle = _build_bundle(
+        shifted_kospi, shifted_proxy, shifted_investor, shifted_as_of
+    )
     shifted_lifecycle = _core_lifecycle(shifted_as_of)
     p2 = evaluate_macro_divergence(shifted_bundle, lifecycle=shifted_lifecycle)
     assert p1.primary_state == p2.primary_state
@@ -907,10 +1010,10 @@ def test_mm04_date_shift_same_primary():
 # REPLAY-02: live vs replay normalization (same data) → same digest
 # ==========================================================================
 
+
 def test_replay02_same_data_different_available_at_same_digest():
     """REPLAY-02: series_digest excludes available_at, so same economic data
     with different fetch times produces the same series_digest and pack_digest."""
-    from tokmo.values.macro_observations import compute_series_digest
 
     bundle, as_of = _t1_bundle()
     lifecycle = _core_lifecycle(as_of)
@@ -920,37 +1023,57 @@ def test_replay02_same_data_different_available_at_same_digest():
     # (to keep available_at <= as_of valid while proving the digest doesn't change)
     kospi_2 = []
     for c in bundle.kospi_candles:
-        kospi_2.append(MacroCandleObservation(
-            session_date=c.session_date, observed_at=c.observed_at,
-            available_at=c.observed_at,  # different available_at (= observed)
-            open_price=c.open_price, high_price=c.high_price,
-            low_price=c.low_price, close_price=c.close_price,
-            volume=c.volume, currency=c.currency,
-        ))
+        kospi_2.append(
+            MacroCandleObservation(
+                session_date=c.session_date,
+                observed_at=c.observed_at,
+                available_at=c.observed_at,  # different available_at (= observed)
+                open_price=c.open_price,
+                high_price=c.high_price,
+                low_price=c.low_price,
+                close_price=c.close_price,
+                volume=c.volume,
+                currency=c.currency,
+            )
+        )
     proxy_2 = []
     for c in bundle.proxy_candles:
-        proxy_2.append(MacroCandleObservation(
-            session_date=c.session_date, observed_at=c.observed_at,
-            available_at=c.observed_at,
-            open_price=c.open_price, high_price=c.high_price,
-            low_price=c.low_price, close_price=c.close_price,
-            volume=c.volume, currency=c.currency,
-        ))
+        proxy_2.append(
+            MacroCandleObservation(
+                session_date=c.session_date,
+                observed_at=c.observed_at,
+                available_at=c.observed_at,
+                open_price=c.open_price,
+                high_price=c.high_price,
+                low_price=c.low_price,
+                close_price=c.close_price,
+                volume=c.volume,
+                currency=c.currency,
+            )
+        )
     investor_2 = []
     for r in bundle.investor_records:
-        investor_2.append(MacroInvestorObservation(
-            session_date=r.session_date, observed_at=r.observed_at,
-            available_at=r.observed_at,
-            foreign_buy=r.foreign_buy, foreign_sell=r.foreign_sell,
-            individual_buy=r.individual_buy, individual_sell=r.individual_sell,
-            institution_buy=r.institution_buy, institution_sell=r.institution_sell,
-        ))
+        investor_2.append(
+            MacroInvestorObservation(
+                session_date=r.session_date,
+                observed_at=r.observed_at,
+                available_at=r.observed_at,
+                foreign_buy=r.foreign_buy,
+                foreign_sell=r.foreign_sell,
+                individual_buy=r.individual_buy,
+                individual_sell=r.individual_sell,
+                institution_buy=r.institution_buy,
+                institution_sell=r.institution_sell,
+            )
+        )
     bundle_2 = _build_bundle(kospi_2, proxy_2, investor_2, as_of)
     p2 = evaluate_macro_divergence(bundle_2, lifecycle=lifecycle)
 
     # series_digests should match (available_at excluded)
     for i in range(3):
-        assert bundle.source_refs[i].series_digest == bundle_2.source_refs[i].series_digest
+        assert (
+            bundle.source_refs[i].series_digest == bundle_2.source_refs[i].series_digest
+        )
     # pack_digests should match
     assert p1.pack_digest == p2.pack_digest
 
@@ -958,6 +1081,7 @@ def test_replay02_same_data_different_available_at_same_digest():
 # ==========================================================================
 # REPLAY-05b: passing untruncated/future bundle → ValueError
 # ==========================================================================
+
 
 def test_replay05b_future_containing_bundle_rejects():
     """REPLAY-05b: a bundle with available_at > as_of is strictly rejected."""
@@ -971,9 +1095,12 @@ def test_replay05b_future_containing_bundle_rejects():
         session_date=last.session_date,
         observed_at=last.observed_at,
         available_at=as_of + timedelta(days=1),
-        open_price=last.open_price, high_price=last.high_price,
-        low_price=last.low_price, close_price=last.close_price,
-        volume=last.volume, currency=last.currency,
+        open_price=last.open_price,
+        high_price=last.high_price,
+        low_price=last.low_price,
+        close_price=last.close_price,
+        volume=last.volume,
+        currency=last.currency,
     )
     proxy = [_make_candle(d, "1400") for d in dates]
     investor = [_make_investor(d, "0") for d in dates]
@@ -986,6 +1113,7 @@ def test_replay05b_future_containing_bundle_rejects():
 # ==========================================================================
 # REPLAY-05a: caller-side truncation builds a clean bundle
 # ==========================================================================
+
 
 def test_replay05a_truncated_bundle_evaluates_normally():
     """REPLAY-05a: a bundle built from only available_at <= as_of rows
@@ -1000,6 +1128,7 @@ def test_replay05a_truncated_bundle_evaluates_normally():
 # ==========================================================================
 # Investor insufficient count (OBS-09)
 # ==========================================================================
+
 
 def test_an05b_insufficient_count_investor():
     end = date(2026, 6, 18)
@@ -1021,6 +1150,7 @@ def test_an05b_insufficient_count_investor():
 # ==========================================================================
 # F-14: coverage PARTIAL → INSUFFICIENT_DATA regardless of component fires
 # ==========================================================================
+
 
 def test_f14_partial_coverage_insufficient_data():
     end = date(2026, 6, 18)
@@ -1052,6 +1182,7 @@ def test_f14_partial_coverage_insufficient_data():
 # F-15: proxy 261240 currency field is KRW
 # ==========================================================================
 
+
 def test_f15_proxy_currency_krw():
     bundle, as_of = _t1_bundle()
     lifecycle = _core_lifecycle(as_of)
@@ -1065,6 +1196,7 @@ def test_f15_proxy_currency_krw():
 # m8: EXPIRED HYPOTHESIS_SENSOR analyzer-blocking test (§3.7, LC-08)
 # ==========================================================================
 
+
 def test_lc08_expired_hypothesis_blocks_evaluation():
     """EXPIRED HYPOTHESIS_SENSOR blocks evaluation — coverage_state=None,
     lifecycle_reason=EXPIRED, all components fired=False."""
@@ -1077,7 +1209,8 @@ def test_lc08_expired_hypothesis_blocks_evaluation():
     bundle = _build_bundle(kospi, proxy, investor, as_of)
 
     spec = ProgramLifecycleSpecV1(
-        program_id="AI-CAPEX-001", version="1.0.0",
+        program_id="AI-CAPEX-001",
+        version="1.0.0",
         kind=ProgramKindV1.HYPOTHESIS_SENSOR,
         activated_at=datetime(2026, 1, 1, 9, 0, tzinfo=KST),
         review_due_at=datetime(2026, 1, 1, 9, 0, tzinfo=KST) + timedelta(days=45),
@@ -1086,9 +1219,12 @@ def test_lc08_expired_hypothesis_blocks_evaluation():
         spec_digest=_digest("hypothesis"),
     )
     state = ProgramLifecycleStateV1(
-        spec=spec, status=ProgramLifecycleStatusV1.EXPIRED,
-        last_evidence_at=None, evidence_count=0,
-        renewal_count=0, as_of=as_of,
+        spec=spec,
+        status=ProgramLifecycleStatusV1.EXPIRED,
+        last_evidence_at=None,
+        evidence_count=0,
+        renewal_count=0,
+        as_of=as_of,
     )
     pack = evaluate_macro_divergence(bundle, lifecycle=state)
     assert pack.primary_state == MacroDivergenceState.INSUFFICIENT_DATA.value

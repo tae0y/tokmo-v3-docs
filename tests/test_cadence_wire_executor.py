@@ -8,7 +8,7 @@ executor-issued only, live only for the duration of the callback, and the
 in-memory bearer is acquired lazily as an admitted TOKEN wire.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -26,12 +26,6 @@ from tokmo.values.cadence_policy import (
     TickRequestLimitsV1,
     TradesChildLimitsV1,
 )
-from tokmo.values.ops_kernel import (
-    CadenceBudgetExceeded,
-    CadenceDuplicateError,
-    CadenceTransitionError,
-    ProducerRole,
-)
 from tokmo.values.operation_lane_registry import (
     LANE_GOVERNED_OPERATIONS,
     OPERATION_LANE_REGISTRY_V1,
@@ -40,16 +34,24 @@ from tokmo.values.operation_lane_registry import (
     OperationLaneV1,
     OperationOwnershipError,
 )
+from tokmo.values.ops_kernel import (
+    CadenceBudgetExceeded,
+    CadenceDuplicateError,
+    ProducerRole,
+)
 
-SLOT = datetime(2026, 8, 3, 14, 0, tzinfo=timezone.utc)
-NOW = datetime(2026, 8, 3, 14, 0, 1, tzinfo=timezone.utc)
+SLOT = datetime(2026, 8, 3, 14, 0, tzinfo=UTC)
+NOW = datetime(2026, 8, 3, 14, 0, 1, tzinfo=UTC)
 
 
 def make_executor(tmp_path, policy=CADENCE_POLICY_V1, child_limits=None):
     store = OpsKernelStore(tmp_path / "ops_kernel.sqlite3")
     executor = CadenceWireExecutorV1(
-        ops_kernel=store, role=ProducerRole.COLLECTOR, policy=policy,
-        scheduled_for_utc=SLOT, clock=lambda: NOW,
+        ops_kernel=store,
+        role=ProducerRole.COLLECTOR,
+        policy=policy,
+        scheduled_for_utc=SLOT,
+        clock=lambda: NOW,
         child_limits=TradesChildLimitsV1() if child_limits is None else child_limits,
         lane_registry=OPERATION_LANE_REGISTRY_V1,
         lane=OperationLane.CADENCE_300S,
@@ -60,28 +62,34 @@ def make_executor(tmp_path, policy=CADENCE_POLICY_V1, child_limits=None):
 def test_execute_rejects_post_cutover_provider_before_kernel_or_callback(tmp_path):
     cutover = int(SLOT.timestamp()) - int(SLOT.timestamp()) % 300
     governed = {"PRICE_BATCH", "ORDERS_PAGE", "ORDER_DETAIL"}
-    registry = OperationLaneRegistryV1(entries={
-        operation: OperationLaneV1(
-            operation,
-            OperationLane.PULSE_60S if operation in governed
-            else OperationLane.CADENCE_300S,
-            OperationLane.CADENCE_300S if operation in governed else None,
-            cutover if operation in governed else None,
-        )
-        for operation in LANE_GOVERNED_OPERATIONS
-    })
+    registry = OperationLaneRegistryV1(
+        entries={
+            operation: OperationLaneV1(
+                operation,
+                OperationLane.PULSE_60S
+                if operation in governed
+                else OperationLane.CADENCE_300S,
+                OperationLane.CADENCE_300S if operation in governed else None,
+                cutover if operation in governed else None,
+            )
+            for operation in LANE_GOVERNED_OPERATIONS
+        }
+    )
     store = OpsKernelStore(tmp_path / "ops_kernel.sqlite3")
     executor = CadenceWireExecutorV1(
-        ops_kernel=store, role=ProducerRole.COLLECTOR,
-        policy=CADENCE_POLICY_V1, scheduled_for_utc=SLOT,
-        clock=lambda: NOW, child_limits=TradesChildLimitsV1(),
-        lane_registry=registry, lane=OperationLane.CADENCE_300S,
+        ops_kernel=store,
+        role=ProducerRole.COLLECTOR,
+        policy=CADENCE_POLICY_V1,
+        scheduled_for_utc=SLOT,
+        clock=lambda: NOW,
+        child_limits=TradesChildLimitsV1(),
+        lane_registry=registry,
+        lane=OperationLane.CADENCE_300S,
     )
     calls = []
 
     with pytest.raises(OperationOwnershipError):
-        executor.execute(
-            "PRICE_BATCH", "quotes:0", lambda claim: calls.append(claim))
+        executor.execute("PRICE_BATCH", "quotes:0", lambda claim: calls.append(claim))
 
     assert calls == []
     assert report(store) is None
@@ -97,7 +105,11 @@ def report(store, policy_version=CADENCE_POLICY_V1.policy_version):
 def test_wire_claim_cannot_be_constructed_outside_the_executor():
     with pytest.raises(PermissionError):
         WireClaimV1(
-            CADENCE_POLICY_V1.policy_version, SLOT, "TOKEN", "TOKEN", "token:tick0",
+            CADENCE_POLICY_V1.policy_version,
+            SLOT,
+            "TOKEN",
+            "TOKEN",
+            "token:tick0",
         )
 
 
@@ -141,7 +153,9 @@ def test_require_started_claim_rejects_forged_and_wrong_operation_claims(tmp_pat
 def test_execute_plans_starts_settles_succeeded_around_the_callback(tmp_path):
     store, executor = make_executor(tmp_path)
     value = executor.execute(
-        "ACCOUNTS", "accounts:tick0", lambda claim: "accounts-page",
+        "ACCOUNTS",
+        "accounts:tick0",
+        lambda claim: "accounts-page",
     )
     assert value == "accounts-page"
     result = report(store)
@@ -153,7 +167,8 @@ def test_callback_exception_settles_failed_and_reraises(tmp_path):
     store, executor = make_executor(tmp_path)
     with pytest.raises(RuntimeError):
         executor.execute(
-            "PRICE_BATCH", "quotes:0",
+            "PRICE_BATCH",
+            "quotes:0",
             lambda claim: (_ for _ in ()).throw(RuntimeError("boom")),
         )
     assert report(store)["state_counts"] == {"FAILED": 1}
@@ -163,7 +178,8 @@ def test_unknown_outcome_settles_unknown_and_reraises(tmp_path):
     store, executor = make_executor(tmp_path)
     with pytest.raises(WireOutcomeUnknownError):
         executor.execute(
-            "ORDERS_PAGE", "orders:0",
+            "ORDERS_PAGE",
+            "orders:0",
             lambda claim: (_ for _ in ()).throw(WireOutcomeUnknownError()),
         )
     assert report(store)["state_counts"] == {"UNKNOWN": 1}
@@ -195,22 +211,28 @@ def test_unknown_operation_and_noncanonical_identity_reject_before_callback(tmp_
 
 TINY = CadencePolicyV1(
     request_limits=TickRequestLimitsV1(
-        total_wire_starts=3, token_starts=1, calendar_starts=0,
-        holdings_starts=1, quote_starts=1, trades_starts=0,
+        total_wire_starts=3,
+        token_starts=1,
+        calendar_starts=0,
+        holdings_starts=1,
+        quote_starts=1,
+        trades_starts=0,
     ),
 )
 
 
 def test_group_ceiling_from_injected_tiny_policy_rejects_before_callback(tmp_path):
     store, executor = make_executor(
-        tmp_path, policy=TINY,
+        tmp_path,
+        policy=TINY,
         child_limits=TradesChildLimitsV1(orders_page_starts=0, order_detail_starts=0),
     )
     executor.execute("TOKEN", "token:tick0", lambda claim: "bearer")
     calls = []
     with pytest.raises(CadenceBudgetExceeded):
         executor.execute(
-            "CALENDAR_DAY_KR", "calendar:KR:2026-08-03:0",
+            "CALENDAR_DAY_KR",
+            "calendar:KR:2026-08-03:0",
             lambda claim: calls.append(1),
         )
     assert calls == []
@@ -220,8 +242,12 @@ def test_group_ceiling_from_injected_tiny_policy_rejects_before_callback(tmp_pat
 
 def test_total_ceiling_rejects_nplus1_even_when_groups_have_room(tmp_path):
     limits = TickRequestLimitsV1(
-        total_wire_starts=2, token_starts=0, calendar_starts=0,
-        holdings_starts=2, quote_starts=0, trades_starts=0,
+        total_wire_starts=2,
+        token_starts=0,
+        calendar_starts=0,
+        holdings_starts=2,
+        quote_starts=0,
+        trades_starts=0,
     )
     # Simulate a bypassed declaration invariant (frozen-dataclass backdoor)
     # exactly as the kernel admission tests do: the quotes group gains room
@@ -231,7 +257,8 @@ def test_total_ceiling_rejects_nplus1_even_when_groups_have_room(tmp_path):
     tiny = CadencePolicyV1()
     object.__setattr__(tiny, "request_limits", limits)
     store, executor = make_executor(
-        tmp_path, policy=tiny,
+        tmp_path,
+        policy=tiny,
         child_limits=TradesChildLimitsV1(orders_page_starts=0, order_detail_starts=0),
     )
     executor.execute("ACCOUNTS", "accounts:tick0", lambda claim: None)
@@ -289,7 +316,8 @@ def test_reconcile_settles_stale_started_rows_without_restart(tmp_path):
 
     with pytest.raises(Crash):
         executor.execute(
-            "ACCOUNTS", "accounts:tick0",
+            "ACCOUNTS",
+            "accounts:tick0",
             lambda claim: (_ for _ in ()).throw(Crash()),
         )
     # A BaseException that is not an Exception models a hard kill between

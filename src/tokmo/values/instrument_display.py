@@ -56,11 +56,16 @@ def format_instrument(value: InstrumentDisplayV1, *, name_first=False) -> str:
 
 def order_alert_title(market, symbol, name) -> str:
     """Order alerts only: Korean name first for both KR and US (2026-09-22)."""
-    if (isinstance(name, str) and any("가" <= c <= "힣" for c in name)
-            and "\n" not in name and "\r" not in name
-            and market in INSTRUMENT_DISPLAY_MARKETS):
-        return format_instrument(InstrumentDisplayV1(market, symbol, name.strip()),
-                                 name_first=True)
+    if (
+        isinstance(name, str)
+        and any("가" <= c <= "힣" for c in name)
+        and "\n" not in name
+        and "\r" not in name
+        and market in INSTRUMENT_DISPLAY_MARKETS
+    ):
+        return format_instrument(
+            InstrumentDisplayV1(market, symbol, name.strip()), name_first=True
+        )
     return display_or_symbol(market, symbol, None)
 
 

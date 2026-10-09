@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
-from tokmo.facts.toss import TossAccessToken, _TossTransportSuccess, build_auth_request, parse_token_response
+from tokmo.facts.toss import (
+    TossAccessToken,
+    _TossTransportSuccess,
+    build_auth_request,
+    parse_token_response,
+)
 from tokmo.facts.toss_auth_live import TossAuthLiveTransport
 from tokmo.facts.toss_read_parsers import parse_envelope
 from tokmo.facts.toss_reads import TossReadOperation, build_read_request
@@ -13,7 +18,10 @@ from tokmo.records.calendar_cache import CalendarCacheStore
 from tokmo.runtime.config import load_toss_config
 from tokmo.values.calendar_refresh import market_local_date
 from tokmo.values.session_gate import Market
-from tokmo.values.toss_market_calendar import KrMarketCalendarResponse, UsMarketCalendarResponse
+from tokmo.values.toss_market_calendar import (
+    KrMarketCalendarResponse,
+    UsMarketCalendarResponse,
+)
 
 ROOT = Path(__file__).resolve().parents[1] / "var/data"
 PROJECT = Path(__file__).resolve().parents[1]
@@ -23,7 +31,7 @@ MAX_STARTS = 6  # two explicit tranches of TOKEN + KR + US; never reset
 
 
 def now():
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def persist(state):
@@ -50,7 +58,9 @@ def key_shape(body):
         return {
             "result_keys": sorted(result) if isinstance(result, dict) else [],
             "today_keys": sorted(today) if isinstance(today, dict) else [],
-            "integrated_keys": sorted(integrated) if isinstance(integrated, dict) else [],
+            "integrated_keys": sorted(integrated)
+            if isinstance(integrated, dict)
+            else [],
         }
     except Exception:
         return {"shape": "unreadable"}
@@ -62,13 +72,20 @@ def main():
         state["cap"] = MAX_STARTS
         state["outcome"] = "STARTED_TRANCHE_2"
     else:
-        state = {"campaign": "calendar-cache-v2-migration-v1", "cap": MAX_STARTS,
-                 "starts": [], "outcome": "STARTED"}
+        state = {
+            "campaign": "calendar-cache-v2-migration-v1",
+            "cap": MAX_STARTS,
+            "starts": [],
+            "outcome": "STARTED",
+        }
     persist(state)
     config = load_toss_config(PROJECT / ".env.toss")
     start(state, "TOKEN")
-    auth = TossAuthLiveTransport()(build_auth_request(
-        client_id=config.client_id, client_secret=config.client_secret))
+    auth = TossAuthLiveTransport()(
+        build_auth_request(
+            client_id=config.client_id, client_secret=config.client_secret
+        )
+    )
     if not isinstance(auth, _TossTransportSuccess):
         raise RuntimeError("auth_failed")
     token = parse_token_response(auth.body, observed_at=now())
@@ -83,14 +100,20 @@ def main():
     ):
         start(state, operation.value)
         requested_date = market_local_date(market, observed)
-        reply = reads(build_read_request(
-            operation, token=token.value, date=requested_date.isoformat(),
-        ))
+        reply = reads(
+            build_read_request(
+                operation,
+                token=token.value,
+                date=requested_date.isoformat(),
+            )
+        )
         if not isinstance(reply, _TossTransportSuccess):
             raise RuntimeError(f"{operation.value}_transport_failed")
         parsed = parse_envelope(reply.body, operation.value)
         if not isinstance(parsed, expected):
-            state.setdefault("diagnostic_key_shapes", {})[operation.value] = key_shape(reply.body)
+            state.setdefault("diagnostic_key_shapes", {})[operation.value] = key_shape(
+                reply.body
+            )
             state["outcome"] = "CONTRACT_MISMATCH"
             persist(state)
             raise RuntimeError(f"{operation.value}_parse_failed")
@@ -108,11 +131,20 @@ def main():
     state["outcome"] = "COMPLETE"
     state["schema_version"] = reread.schema_version
     state["session_names"] = {
-        "KR": sorted(reread.kr.sessions), "US": sorted(reread.us.sessions),
+        "KR": sorted(reread.kr.sessions),
+        "US": sorted(reread.us.sessions),
     }
     persist(state)
-    print(json.dumps({"outcome": state["outcome"], "schema_version": state["schema_version"],
-                      "session_names": state["session_names"]}, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                "outcome": state["outcome"],
+                "schema_version": state["schema_version"],
+                "session_names": state["session_names"],
+            },
+            sort_keys=True,
+        )
+    )
 
 
 if __name__ == "__main__":

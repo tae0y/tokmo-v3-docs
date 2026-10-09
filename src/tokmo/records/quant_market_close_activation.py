@@ -1,7 +1,7 @@
 """Read-only exact activation source; absence or invalidity is OFF."""
 
-from datetime import datetime, timezone
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 _OFF = {"KR": "OFF", "US": "OFF"}
@@ -13,14 +13,15 @@ def read_activation(path: Path, *, now: datetime) -> dict[str, str]:
         raise ValueError("now")
     try:
         raw = Path(path).read_bytes()
-        if len(raw) > 4096: return dict(_OFF)
+        if len(raw) > 4096:
+            return dict(_OFF)
         value = json.loads(raw)
         if set(value) != {"schema_version", "expires_at", "markets"}:
             return dict(_OFF)
         if value["schema_version"] != 1 or set(value["markets"]) != {"KR", "US"}:
             return dict(_OFF)
         expires = datetime.fromisoformat(value["expires_at"].replace("Z", "+00:00"))
-        if expires.astimezone(timezone.utc) <= now.astimezone(timezone.utc):
+        if expires.astimezone(UTC) <= now.astimezone(UTC):
             return dict(_OFF)
         result = {market: value["markets"][market] for market in ("KR", "US")}
         return result if all(mode in _MODES for mode in result.values()) else dict(_OFF)

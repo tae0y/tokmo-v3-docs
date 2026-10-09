@@ -14,8 +14,7 @@ from __future__ import annotations
 import json
 import os
 import stat
-from dataclasses import asdict
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -53,8 +52,9 @@ _DISTINCT_MARKET_SCAN_CAP = 16
 _RAW_CANDIDATE_SCAN_CAP = 256
 
 
-def read_admissible_materials_ro(path: str | Path, *, canonical_symbol: str,
-                                 market, as_of: datetime, limit: int):
+def read_admissible_materials_ro(
+    path: str | Path, *, canonical_symbol: str, market, as_of: datetime, limit: int
+):
     """Read a bounded exact-symbol/market slice without creating anything."""
     import sqlite3
 
@@ -81,8 +81,12 @@ def read_admissible_materials_ro(path: str | Path, *, canonical_symbol: str,
                 (canonical_symbol, _DISTINCT_MARKET_SCAN_CAP + 1),
             ).fetchall()
             if len(stored_markets) > _DISTINCT_MARKET_SCAN_CAP:
-                raise FundamentalStoreVocabularyError("stored_market_vocabulary_scan_cap")
-            drift = tuple(sorted(row[0] for row in stored_markets if row[0] not in vocabulary))
+                raise FundamentalStoreVocabularyError(
+                    "stored_market_vocabulary_scan_cap"
+                )
+            drift = tuple(
+                sorted(row[0] for row in stored_markets if row[0] not in vocabulary)
+            )
             if drift:
                 raise FundamentalStoreVocabularyError("stored_market_vocabulary_drift")
             rows = connection.execute(
@@ -92,7 +96,9 @@ def read_admissible_materials_ro(path: str | Path, *, canonical_symbol: str,
         finally:
             connection.close()
         if len(rows) > _RAW_CANDIDATE_SCAN_CAP:
-            raise FundamentalStoreCandidateCapError("fundamental_raw_candidate_scan_cap")
+            raise FundamentalStoreCandidateCapError(
+                "fundamental_raw_candidate_scan_cap"
+            )
         decoded = []
         for source_ref, payload in rows:
             decoded_payload = json.loads(payload)
@@ -102,18 +108,41 @@ def read_admissible_materials_ro(path: str | Path, *, canonical_symbol: str,
             parsed_available = datetime.fromisoformat(encoded_available)
             if parsed_available.tzinfo is None or parsed_available.utcoffset() is None:
                 raise FundamentalStoreCorruptError("available_at_not_aware")
-            material = _deserialize_material(decoded_payload, expected_source_ref=source_ref)
+            material = _deserialize_material(
+                decoded_payload, expected_source_ref=source_ref
+            )
             available = material.available_at
             if available.tzinfo is None or available.utcoffset() is None:
                 raise FundamentalStoreCorruptError("available_at_not_aware")
-            if available.astimezone(timezone.utc) <= as_of.astimezone(timezone.utc):
+            if available.astimezone(UTC) <= as_of.astimezone(UTC):
                 decoded.append(material)
         if len(decoded) > limit:
-            raise FundamentalStoreCandidateCapError("fundamental_admissible_candidate_cap")
-        return tuple(sorted(decoded, key=lambda item: (-item.available_at.astimezone(timezone.utc).timestamp(), item.source_ref)))
-    except (FundamentalStoreCandidateCapError, FundamentalStoreVocabularyError, FundamentalStoreCorruptError):
+            raise FundamentalStoreCandidateCapError(
+                "fundamental_admissible_candidate_cap"
+            )
+        return tuple(
+            sorted(
+                decoded,
+                key=lambda item: (
+                    -item.available_at.astimezone(UTC).timestamp(),
+                    item.source_ref,
+                ),
+            )
+        )
+    except (
+        FundamentalStoreCandidateCapError,
+        FundamentalStoreVocabularyError,
+        FundamentalStoreCorruptError,
+    ):
         raise
-    except (sqlite3.Error, KeyError, TypeError, ValueError, json.JSONDecodeError, FundamentalMaterialStoreError) as error:
+    except (
+        sqlite3.Error,
+        KeyError,
+        TypeError,
+        ValueError,
+        json.JSONDecodeError,
+        FundamentalMaterialStoreError,
+    ) as error:
         raise FundamentalStoreCorruptError("fundamental_store_corrupt") from error
 
 
@@ -250,7 +279,9 @@ class FundamentalMaterialStore:
                         material.fiscal_year,
                         revenue.source_concept_id if revenue else None,
                         # m5: use `is not None` check, not truthiness, so Decimal(0) persists.
-                        str(revenue.value) if revenue and revenue.value is not None else None,
+                        str(revenue.value)
+                        if revenue and revenue.value is not None
+                        else None,
                         revenue.unit if revenue else None,
                         material.available_at.isoformat(),
                         material.raw_body_sha256,
@@ -277,7 +308,9 @@ class FundamentalMaterialStore:
         finally:
             conn.close()
 
-    def get_by_source_ref(self, source_ref: str) -> OfficialFundamentalMaterialV1 | None:
+    def get_by_source_ref(
+        self, source_ref: str
+    ) -> OfficialFundamentalMaterialV1 | None:
         conn = self._connect()
         try:
             cursor = conn.execute(
@@ -288,9 +321,7 @@ class FundamentalMaterialStore:
             if row is None:
                 return None
             # B1 fix: pass the SQL PK for triple-exact verification.
-            return _deserialize_material(
-                json.loads(row[1]), expected_source_ref=row[0]
-            )
+            return _deserialize_material(json.loads(row[1]), expected_source_ref=row[0])
         finally:
             conn.close()
 
@@ -393,9 +424,7 @@ def _deserialize_material(
     # SQL PK separately as ``expected_source_ref``; we compare the payload
     # key, the recomputed digest, and the SQL PK in triple-exact agreement.
     if "source_ref" not in d:
-        raise FundamentalMaterialStoreError(
-            "source_ref_missing_in_payload"
-        )
+        raise FundamentalMaterialStoreError("source_ref_missing_in_payload")
     stored_source_ref = d["source_ref"]
 
     material = OfficialFundamentalMaterialV1(
@@ -406,7 +435,9 @@ def _deserialize_material(
         accounting_regime=AccountingRegime(d["accounting_regime"]),
         statement_scope=StatementScope(d["statement_scope"]),
         fiscal_year=d["fiscal_year"],
-        period_start=date.fromisoformat(d["period_start"]) if d["period_start"] else None,
+        period_start=date.fromisoformat(d["period_start"])
+        if d["period_start"]
+        else None,
         period_end=date.fromisoformat(d["period_end"]),
         filing_id=d["filing_id"],
         filed_at_raw=d["filed_at_raw"],
@@ -442,10 +473,7 @@ def _deserialize_material(
         raise FundamentalMaterialStoreError(
             f"source_ref_mismatch: stored={stored_source_ref} recomputed={material.source_ref}"
         )
-    if (
-        expected_source_ref is not None
-        and expected_source_ref != stored_source_ref
-    ):
+    if expected_source_ref is not None and expected_source_ref != stored_source_ref:
         raise FundamentalMaterialStoreError(
             f"source_ref_pk_mismatch: pk={expected_source_ref} payload={stored_source_ref}"
         )

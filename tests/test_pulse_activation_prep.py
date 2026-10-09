@@ -5,11 +5,10 @@ import json
 import os
 import stat
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-
 
 PROJECT = Path(__file__).parents[1]
 WRAPPER = PROJECT / "ops/hermes-cron/tokmo_v3_pulse.sh"
@@ -17,7 +16,8 @@ WRAPPER = PROJECT / "ops/hermes-cron/tokmo_v3_pulse.sh"
 
 def _runner_module():
     spec = importlib.util.spec_from_file_location(
-        "activation_prep_runner", PROJECT / "tools/run_tokmo_pulse.py")
+        "activation_prep_runner", PROJECT / "tools/run_tokmo_pulse.py"
+    )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -25,10 +25,12 @@ def _runner_module():
 
 def test_runner_passes_slot_and_observed_now_from_one_sample(monkeypatch):
     module = _runner_module()
-    samples = iter((
-        datetime(2026, 8, 11, 0, 0, 59, 900000, tzinfo=timezone.utc),
-        datetime(2026, 8, 11, 0, 1, 0, 100000, tzinfo=timezone.utc),
-    ))
+    samples = iter(
+        (
+            datetime(2026, 8, 11, 0, 0, 59, 900000, tzinfo=UTC),
+            datetime(2026, 8, 11, 0, 1, 0, 100000, tzinfo=UTC),
+        )
+    )
     calls = []
 
     class BoundaryDateTime:
@@ -41,6 +43,7 @@ def test_runner_passes_slot_and_observed_now_from_one_sample(monkeypatch):
 
     captured = {}
     monkeypatch.setattr(module, "datetime", BoundaryDateTime)
+
     def capture(args, *, environ=None, capture_clock=None):
         captured["args"] = args
         captured["environ"] = environ
@@ -56,7 +59,9 @@ def test_runner_passes_slot_and_observed_now_from_one_sample(monkeypatch):
     # The ambient edge injects the process environment (G3 SDS §4.1);
     # src itself never reads os.environ.
     assert captured["environ"] is not None
-    assert captured['capture_clock']() == datetime(2026, 8, 11, 0, 1, 0, 100000, tzinfo=timezone.utc)
+    assert captured["capture_clock"]() == datetime(
+        2026, 8, 11, 0, 1, 0, 100000, tzinfo=UTC
+    )
     assert len(calls) == 2  # Capture time advances independently of the slot identity.
 
 
@@ -72,7 +77,9 @@ def wrapper_env(tmp_path):
     runtime = tmp_path / "runtime"
     fake = tmp_path / "completion-safe-cli"
     alert = tmp_path / "send-system-alert"
-    _write_executable(fake, """#!/bin/bash
+    _write_executable(
+        fake,
+        """#!/bin/bash
 set -eu
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -90,25 +97,32 @@ printf '%s\n' "${FAKE_STDERR:-}" >"$err"
 printf 'launcher diagnostic\n' 
 printf '{"child_exit_code":%s}\n' "${FAKE_CHILD_RC:-0}" >"$manifest"
 exit "${FAKE_WRAPPER_RC:-0}"
-""")
-    _write_executable(alert, """#!/bin/bash
+""",
+    )
+    _write_executable(
+        alert,
+        """#!/bin/bash
 printf '%s\n' "$*" >>"$ALERT_CAPTURE"
-""")
+""",
+    )
     env = os.environ.copy()
-    env.update({
-        "TOKMO_PULSE_PROJECT": str(project),
-        "TOKMO_PULSE_RUNTIME": str(runtime),
-        "TOKMO_COMPLETION_SAFE_CLI": str(fake),
-        "TOKMO_SYSTEM_ALERT_SCRIPT": str(alert),
-        "ALERT_CAPTURE": str(tmp_path / "alerts"),
-        "TOKMO_PULSE_NOW_EPOCH": "1786406400",
-    })
+    env.update(
+        {
+            "TOKMO_PULSE_PROJECT": str(project),
+            "TOKMO_PULSE_RUNTIME": str(runtime),
+            "TOKMO_COMPLETION_SAFE_CLI": str(fake),
+            "TOKMO_SYSTEM_ALERT_SCRIPT": str(alert),
+            "ALERT_CAPTURE": str(tmp_path / "alerts"),
+            "TOKMO_PULSE_NOW_EPOCH": "1786406400",
+        }
+    )
     return env, runtime, Path(env["ALERT_CAPTURE"])
 
 
 def _run_wrapper(env):
-    return subprocess.run(["bash", str(WRAPPER)], env=env, text=True,
-                          capture_output=True, check=False)
+    return subprocess.run(
+        ["bash", str(WRAPPER)], env=env, text=True, capture_output=True, check=False
+    )
 
 
 def _manifest_paths(runtime):
@@ -135,8 +149,10 @@ def test_wrapper_child_failure_alerts_with_pointers_and_launcher_head(wrapper_en
     alert = alerts.read_text()
     assert "wrapper_rc=0 child_rc=2" in alert
     assert "launcher diagnostic" in alert
-    assert all(str(manifest.parent / name) in alert for name in
-               ("manifest.json", "stdout.log", "stderr.log"))
+    assert all(
+        str(manifest.parent / name) in alert
+        for name in ("manifest.json", "stdout.log", "stderr.log")
+    )
 
 
 def test_wrapper_suffix_is_distinct_and_unsafe_suffix_fails_closed(wrapper_env):
@@ -156,7 +172,10 @@ def test_wrapper_launcher_error_is_captured(wrapper_env):
     env["FAKE_WRAPPER_RC"] = "7"
     result = _run_wrapper(env)
     assert result.returncode == 1
-    assert "launcher diagnostic" in _manifest_paths(runtime)[0].with_name("launcher.log").read_text()
+    assert (
+        "launcher diagnostic"
+        in _manifest_paths(runtime)[0].with_name("launcher.log").read_text()
+    )
     assert "launcher diagnostic" in alerts.read_text()
 
 
@@ -177,12 +196,15 @@ def execution_stage_accepted(stage):
     return stage.get("status") == "saved" and stage.get("reason") == "saved"
 
 
-@pytest.mark.parametrize("stage, accepted", [
-    ({"status": "saved", "reason": "saved"}, True),
-    ({"status": "saved", "reason": "partial_accounts"}, False),
-    ({"status": "saved", "reason": "pagination_pending"}, False),
-    ({"status": "partial", "reason": "saved"}, False),
-])
+@pytest.mark.parametrize(
+    "stage, accepted",
+    [
+        ({"status": "saved", "reason": "saved"}, True),
+        ({"status": "saved", "reason": "partial_accounts"}, False),
+        ({"status": "saved", "reason": "pagination_pending"}, False),
+        ({"status": "partial", "reason": "saved"}, False),
+    ],
+)
 def test_execution_stage_acceptance_is_observable(stage, accepted):
     assert execution_stage_accepted(stage) is accepted
 

@@ -21,10 +21,11 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(_PROJECT_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT / "src"))
 
-from tokmo.records.ops_kernel import (  # noqa: E402
-    OpsKernelMigrationReceiptV1, OpsKernelStore,
+from tokmo.records.ops_kernel import (
+    OpsKernelMigrationReceiptV1,
+    OpsKernelStore,
 )
-from tokmo.values.ops_kernel import OpsKernelError  # noqa: E402
+from tokmo.values.ops_kernel import OpsKernelError
 
 
 def _emit(payload, stream=sys.stdout):
@@ -62,26 +63,34 @@ def main(argv=None) -> int:
     snapshot = Path(arguments.snapshot)
     receipt_target = Path(arguments.receipt)
     for option, value in (
-        ("--database", database), ("--snapshot", snapshot),
+        ("--database", database),
+        ("--snapshot", snapshot),
         ("--receipt", receipt_target),
     ):
         if not value.is_absolute():
             _emit({"status": "REFUSED", "reason": f"{option} must be absolute"})
             return 1
     for option, value in (
-        ("--database", database.parent), ("--snapshot", snapshot.parent),
+        ("--database", database.parent),
+        ("--snapshot", snapshot.parent),
         ("--receipt", receipt_target.parent),
     ):
         try:
             info = os.lstat(value)
         except OSError:
-            _emit({"status": "REFUSED",
-                   "reason": f"{option} parent directory missing"})
+            _emit({"status": "REFUSED", "reason": f"{option} parent directory missing"})
             return 1
-        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
-                or stat.S_IMODE(info.st_mode) != 0o700):
-            _emit({"status": "REFUSED",
-                   "reason": f"{option} parent directory not private"})
+        if (
+            not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != os.getuid()
+            or stat.S_IMODE(info.st_mode) != 0o700
+        ):
+            _emit(
+                {
+                    "status": "REFUSED",
+                    "reason": f"{option} parent directory not private",
+                }
+            )
             return 1
     # B1: refuse a pre-existing receipt target BEFORE migrating so the
     # source database is never left v15 with the requested receipt absent.
@@ -107,7 +116,9 @@ def main(argv=None) -> int:
     try:
         descriptor = os.open(
             receipt_temporary,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
             | (os.O_NOFOLLOW if hasattr(os, "O_NOFOLLOW") else 0),
             0o600,
         )
@@ -128,8 +139,12 @@ def main(argv=None) -> int:
     except OSError as error:
         # Remove only our private temporary. Never delete a raced target.
         receipt_temporary.unlink(missing_ok=True)
-        _emit({"status": "ERROR",
-               "reason": f"receipt persistence failed: {type(error).__name__}"})
+        _emit(
+            {
+                "status": "ERROR",
+                "reason": f"receipt persistence failed: {type(error).__name__}",
+            }
+        )
         return 2
     _emit({"status": "MIGRATED", "receipt": payload})
     return 0

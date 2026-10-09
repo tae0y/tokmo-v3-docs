@@ -1,7 +1,7 @@
 """Pure W1 Quant recurring identities, planning, and deadline gates."""
 
 from dataclasses import FrozenInstanceError
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -47,10 +47,16 @@ def test_membership_plan_formulas_are_single_source_pure_and_strictly_total():
     )
 
     assert tuple(membership_plan_starts(size) for size in (0, 1, 4, 8)) == (
-        3, 4, 7, 11,
+        3,
+        4,
+        7,
+        11,
     )
     assert tuple(quant_due_max_increment(size) for size in (0, 1, 4, 8)) == (
-        3, 6, 15, 27,
+        3,
+        6,
+        15,
+        27,
     )
     for invalid in (True, -1, 1.0, "4", None):
         with pytest.raises(ValueError, match="^cohort_size$"):
@@ -75,9 +81,7 @@ def test_quant_tick_calendar_input_is_frozen_slotted_and_declares_typed_conflict
 
 
 def test_quant_tick_calendar_input_rejects_mask_verdict_divergence():
-    with pytest.raises(
-        ValueError, match="^quant_calendar_mask_verdict_conflict$"
-    ):
+    with pytest.raises(ValueError, match="^quant_calendar_mask_verdict_conflict$"):
         _calendar_input(us_in_effective_mask=False)
 
 
@@ -96,13 +100,15 @@ def test_quant_tick_calendar_input_rejects_failed_refresh_presenting_open(overri
     with pytest.raises(
         ValueError, match="^quant_calendar_failed_refresh_open_conflict$"
     ):
-        _calendar_input(**{
-            "us_refresh_state": "provider_failed",
-            "us_refresh_succeeded": False,
-            "mask_bound": False,
-            "us_in_effective_mask": False,
-            **overrides,
-        })
+        _calendar_input(
+            **{
+                "us_refresh_state": "provider_failed",
+                "us_refresh_succeeded": False,
+                "mask_bound": False,
+                "us_in_effective_mask": False,
+                **overrides,
+            }
+        )
 
 
 @pytest.mark.parametrize(
@@ -284,7 +290,9 @@ def test_membership_operation_plan_is_d_bound_deterministic_and_fixed_order():
     second = membership_operation_plan(symbols, second_date)
 
     assert first == membership_operation_plan(symbols, first_date)
-    assert all(membership_operation_plan(symbols, first_date) == first for _ in range(100))
+    assert all(
+        membership_operation_plan(symbols, first_date) == first for _ in range(100)
+    )
     assert tuple(operation for operation, _ in first) == tuple(
         operation for operation, _ in second
     )
@@ -324,7 +332,9 @@ def test_membership_operation_plan_is_d_bound_deterministic_and_fixed_order():
     ),
 )
 def test_membership_operation_plan_fails_closed_before_returning_pairs(
-    symbols, session_date, code,
+    symbols,
+    session_date,
+    code,
 ):
     from tokmo.facts.quant_recurring_membership import membership_operation_plan
 
@@ -355,22 +365,31 @@ def test_quant_candle_identity_and_deadline_arithmetic_delegate_to_closed_contra
     from tokmo.values.session_gate import Market
 
     session_date = date(2026, 8, 14)
-    assert quant_candle_native_identity(
-        market=Market.US,
-        symbol="AAPL",
-        session_date=session_date,
-        page_index=2,
-    ) == "candles:qt:US:AAPL:2026-08-14:2"
-    scheduled = datetime(2026, 8, 14, 20, 0, tzinfo=timezone.utc)
-    assert sufficient_deadline(
-        policy=CADENCE_QUANT_SHADOW_POLICY_V1,
-        scheduled_for_utc=scheduled,
-        observed_now_utc=scheduled + timedelta(seconds=90),
-        planned_starts=15,
-    ) is True
-    assert sufficient_deadline(
-        policy=CADENCE_QUANT_SHADOW_POLICY_V1,
-        scheduled_for_utc=scheduled,
-        observed_now_utc=scheduled + timedelta(seconds=91),
-        planned_starts=15,
-    ) is False
+    assert (
+        quant_candle_native_identity(
+            market=Market.US,
+            symbol="AAPL",
+            session_date=session_date,
+            page_index=2,
+        )
+        == "candles:qt:US:AAPL:2026-08-14:2"
+    )
+    scheduled = datetime(2026, 8, 14, 20, 0, tzinfo=UTC)
+    assert (
+        sufficient_deadline(
+            policy=CADENCE_QUANT_SHADOW_POLICY_V1,
+            scheduled_for_utc=scheduled,
+            observed_now_utc=scheduled + timedelta(seconds=90),
+            planned_starts=15,
+        )
+        is True
+    )
+    assert (
+        sufficient_deadline(
+            policy=CADENCE_QUANT_SHADOW_POLICY_V1,
+            scheduled_for_utc=scheduled,
+            observed_now_utc=scheduled + timedelta(seconds=91),
+            planned_starts=15,
+        )
+        is False
+    )

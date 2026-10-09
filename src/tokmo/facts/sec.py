@@ -5,10 +5,10 @@ carried apart from request identity with ``repr=False`` and only the
 source-private live transport puts it on the wire.
 """
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime
-import json
 
 from tokmo.facts.eia import (
     LIVE_TRANSPORT_FAILURE_CODES,
@@ -96,20 +96,25 @@ Clock = Callable[[], datetime]
 
 def build_tickers_request(*, user_agent: str) -> SecRequest:
     return SecRequest(
-        endpoint_id=TICKERS_ENDPOINT_ID, cik=None,
-        timeout_seconds=REQUEST_TIMEOUT_SECONDS, user_agent=user_agent,
+        endpoint_id=TICKERS_ENDPOINT_ID,
+        cik=None,
+        timeout_seconds=REQUEST_TIMEOUT_SECONDS,
+        user_agent=user_agent,
     )
 
 
 def build_submissions_request(*, cik: str | None, user_agent: str) -> SecRequest:
     return SecRequest(
-        endpoint_id=SUBMISSIONS_ENDPOINT_ID, cik=cik,
-        timeout_seconds=REQUEST_TIMEOUT_SECONDS, user_agent=user_agent,
+        endpoint_id=SUBMISSIONS_ENDPOINT_ID,
+        cik=cik,
+        timeout_seconds=REQUEST_TIMEOUT_SECONDS,
+        user_agent=user_agent,
     )
 
 
-def parse_company_tickers(body: bytes, *, ticker: str,
-                          observed_at: datetime) -> SecTickerMapping | UnavailableFact:
+def parse_company_tickers(
+    body: bytes, *, ticker: str, observed_at: datetime
+) -> SecTickerMapping | UnavailableFact:
     try:
         payload = json.loads(body)
     except (json.JSONDecodeError, UnicodeDecodeError):
@@ -118,24 +123,29 @@ def parse_company_tickers(body: bytes, *, ticker: str,
         return UnavailableFact(SOURCE, "contract_mismatch", observed_at)
 
     for entry in payload.values():
-        if (not isinstance(entry, dict)
-                or not isinstance(entry.get("ticker"), str)
-                or not isinstance(entry.get("title"), str)
-                or type(entry.get("cik_str")) is not int):
+        if (
+            not isinstance(entry, dict)
+            or not isinstance(entry.get("ticker"), str)
+            or not isinstance(entry.get("title"), str)
+            or type(entry.get("cik_str")) is not int
+        ):
             return UnavailableFact(SOURCE, "contract_mismatch", observed_at)
         if entry["ticker"] != ticker:
             continue
         cik_number = entry["cik_str"]
-        if not 0 < cik_number < 10 ** CIK_DIGITS or not entry["title"]:
+        if not 0 < cik_number < 10**CIK_DIGITS or not entry["title"]:
             return UnavailableFact(SOURCE, "contract_mismatch", observed_at)
         return SecTickerMapping(
-            ticker=ticker, cik=f"{cik_number:0{CIK_DIGITS}d}",
-            company_name=entry["title"])
+            ticker=ticker,
+            cik=f"{cik_number:0{CIK_DIGITS}d}",
+            company_name=entry["title"],
+        )
     return UnavailableFact(SOURCE, "no_published_data", observed_at)
 
 
-def parse_submissions(body: bytes, *, ticker: str, cik: str, company_name: str,
-                      observed_at: datetime) -> SecFilingFact | UnavailableFact:
+def parse_submissions(
+    body: bytes, *, ticker: str, cik: str, company_name: str, observed_at: datetime
+) -> SecFilingFact | UnavailableFact:
     try:
         payload = json.loads(body)
     except (json.JSONDecodeError, UnicodeDecodeError):
@@ -169,9 +179,15 @@ def parse_submissions(body: bytes, *, ticker: str, cik: str, company_name: str,
         return UnavailableFact(SOURCE, "parse_error", observed_at)
 
     return SecFilingFact(
-        source=SOURCE, ticker=ticker, cik=cik, company_name=company_name,
-        accession_number=accession, form=form, filing_date=filing_date,
-        report_date=report_date, primary_document=primary_document,
+        source=SOURCE,
+        ticker=ticker,
+        cik=cik,
+        company_name=company_name,
+        accession_number=accession,
+        form=form,
+        filing_date=filing_date,
+        report_date=report_date,
+        primary_document=primary_document,
         is_xbrl=None if raw_is_xbrl is None else bool(raw_is_xbrl),
         observed_at=observed_at,
     )
@@ -208,27 +224,54 @@ def _aligned_recent(payload, cik: str) -> dict | None:
     return recent
 
 
-def query_company_tickers(*, ticker: str, user_agent: str,
-                          transport: SecTransport, clock: Clock) -> SecQueryResult:
+def query_company_tickers(
+    *, ticker: str, user_agent: str, transport: SecTransport, clock: Clock
+) -> SecQueryResult:
     request = build_tickers_request(user_agent=user_agent)
-    return _query(request, transport, clock,
-                  lambda body, observed_at: parse_company_tickers(
-                      body, ticker=ticker, observed_at=observed_at),
-                  success_type=SecTickerMapping)
+    return _query(
+        request,
+        transport,
+        clock,
+        lambda body, observed_at: parse_company_tickers(
+            body, ticker=ticker, observed_at=observed_at
+        ),
+        success_type=SecTickerMapping,
+    )
 
 
-def query_submissions(*, ticker: str, cik: str, company_name: str, user_agent: str,
-                      transport: SecTransport, clock: Clock) -> SecQueryResult:
+def query_submissions(
+    *,
+    ticker: str,
+    cik: str,
+    company_name: str,
+    user_agent: str,
+    transport: SecTransport,
+    clock: Clock,
+) -> SecQueryResult:
     request = build_submissions_request(cik=cik, user_agent=user_agent)
-    return _query(request, transport, clock,
-                  lambda body, observed_at: parse_submissions(
-                      body, ticker=ticker, cik=cik, company_name=company_name,
-                      observed_at=observed_at),
-                  success_type=SecFilingFact)
+    return _query(
+        request,
+        transport,
+        clock,
+        lambda body, observed_at: parse_submissions(
+            body,
+            ticker=ticker,
+            cik=cik,
+            company_name=company_name,
+            observed_at=observed_at,
+        ),
+        success_type=SecFilingFact,
+    )
 
 
-def _query(request: SecRequest, transport: SecTransport, clock: Clock,
-           parse, *, success_type: type) -> SecQueryResult:
+def _query(
+    request: SecRequest,
+    transport: SecTransport,
+    clock: Clock,
+    parse,
+    *,
+    success_type: type,
+) -> SecQueryResult:
     """One transport call per invocation; escaping exceptions are sanitized."""
     observed_at = clock()
     try:
@@ -241,13 +284,16 @@ def _query(request: SecRequest, transport: SecTransport, clock: Clock,
         del outcome
         if isinstance(parsed, success_type):
             return SecQueryResult(parsed, LiveAttemptOutcome(code="success"))
-        return SecQueryResult(parsed, LiveAttemptOutcome(code="response_contract_failure"))
+        return SecQueryResult(
+            parsed, LiveAttemptOutcome(code="response_contract_failure")
+        )
 
     if isinstance(outcome, _SecTransportFailure):
         reason = _FAILURE_REASONS[outcome.code]
         fact = UnavailableFact(SOURCE, reason, observed_at, outcome.retry_after)
         return SecQueryResult(
-            fact, LiveAttemptOutcome(code=outcome.code, retry_after=outcome.retry_after))
+            fact, LiveAttemptOutcome(code=outcome.code, retry_after=outcome.retry_after)
+        )
 
     return SecQueryResult(
         UnavailableFact(SOURCE, "transport_error", observed_at),

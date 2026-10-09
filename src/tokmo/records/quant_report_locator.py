@@ -8,10 +8,10 @@ report bytes (``report_sha256``) and a success outcome. Nothing is written.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import date
 from hashlib import sha256
-import json
 from pathlib import Path
 
 from tokmo.records.quant_reports import decode_report
@@ -46,20 +46,30 @@ def _verified(report_path: Path, market: str) -> LocatedReportV1 | None:
         report_json = json.loads(report_raw)
         identity = report_json["identity"]
         digest = sha256(report_raw).hexdigest()
-        if (receipt.get("outcome") not in _SUCCESS_OUTCOMES
-                or receipt.get("report_sha256") != digest
-                or receipt.get("identity") != identity
-                or identity.get("market") != market
-                or identity.get("product_kind") != "MARKET_DISCOVERY"
-                or type(identity.get("completed_session_date")) is not str):
+        if (
+            receipt.get("outcome") not in _SUCCESS_OUTCOMES
+            or receipt.get("report_sha256") != digest
+            or receipt.get("identity") != identity
+            or identity.get("market") != market
+            or identity.get("product_kind") != "MARKET_DISCOVERY"
+            or type(identity.get("completed_session_date")) is not str
+        ):
             return None
         session = identity["completed_session_date"]
         date.fromisoformat(session)
         report = decode_report(report_raw)
     except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
         return None
-    return LocatedReportV1(market, session, identity["identity_sha256"], digest,
-                           report_path, receipt["outcome"], None, report)
+    return LocatedReportV1(
+        market,
+        session,
+        identity["identity_sha256"],
+        digest,
+        report_path,
+        receipt["outcome"],
+        None,
+        report,
+    )
 
 
 def _scan(leaf: Path, market: str) -> tuple[LocatedReportV1, ...]:
@@ -78,12 +88,19 @@ def _latest(candidates) -> LocatedReportV1 | None:
         return None
     # Latest completed session wins; a card-bearing report outranks an empty
     # one for the same session; identity digest is the final deterministic tie.
-    return max(candidates, key=lambda item: (item.completed_session_date,
-                                              len(item.report.cards),
-                                              item.identity_sha256))
+    return max(
+        candidates,
+        key=lambda item: (
+            item.completed_session_date,
+            len(item.report.cards),
+            item.identity_sha256,
+        ),
+    )
 
 
-def locate_latest_verified_reports(report_root: str | Path) -> dict[str, LocatedReportV1 | None]:
+def locate_latest_verified_reports(
+    report_root: str | Path,
+) -> dict[str, LocatedReportV1 | None]:
     """Latest receipt-verified report per market, or None when absent."""
     root = Path(report_root)
     result: dict[str, LocatedReportV1 | None] = {}
@@ -111,14 +128,28 @@ def locate_latest_verified_reports(report_root: str | Path) -> dict[str, Located
                 by_date[session] = campaign_id
             for session in sorted(by_date, reverse=True):
                 campaign_id = by_date[session]
-                leaf = root / "sessions" / campaign_id / "report-store" / "market_discovery" / market.lower()
+                leaf = (
+                    root
+                    / "sessions"
+                    / campaign_id
+                    / "report-store"
+                    / "market_discovery"
+                    / market.lower()
+                )
                 for located in _scan(leaf, market):
                     if located.completed_session_date == session:
-                        candidates.append(LocatedReportV1(
-                            located.market, located.completed_session_date,
-                            located.identity_sha256, located.report_sha256,
-                            located.report_path, located.outcome, campaign_id,
-                            located.report))
+                        candidates.append(
+                            LocatedReportV1(
+                                located.market,
+                                located.completed_session_date,
+                                located.identity_sha256,
+                                located.report_sha256,
+                                located.report_path,
+                                located.outcome,
+                                campaign_id,
+                                located.report,
+                            )
+                        )
                 if candidates:
                     break
         if not candidates:

@@ -18,12 +18,11 @@ are Slice 9 (`test_all_physical_marker_states`, `test_promotion_crash_windows`,
 import ast
 import json
 import os
-import shutil
 import stat
 import subprocess
 import sys
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -34,11 +33,22 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from tokmo.composition import LiveRunError, execute_holdings_route
+from tokmo.records.holdings_cutover import (
+    CUTOVER_MARKER_BYTES,
+    CutoverContext,
+    FamilyLockTimeout,
+    HoldingsRoute,
+    acquire_family_lock,
+    parse_marker_bytes,
+    resolve_route,
+    with_family_lock,
+)
 from tokmo.records.holdings_persistence import (
-    DenialToken,
-    HoldingsPersistencePermitV1,
     MIGRATION_CRITERIA_VERSION,
     MIGRATION_PROGRAM_TOKEN,
+    DenialToken,
+    HoldingsPersistencePermitV1,
     PurposeKind,
     authorize_legacy_migration,
     authorize_user_request,
@@ -55,17 +65,6 @@ from tokmo.records.legacy_holdings_v1 import (
     LEGACY_SOURCE,
     validate_legacy_json,
 )
-from tokmo.records.holdings_cutover import (
-    CUTOVER_MARKER_BYTES,
-    CutoverContext,
-    FamilyLockTimeout,
-    HoldingsRoute,
-    acquire_family_lock,
-    parse_marker_bytes,
-    resolve_route,
-    with_family_lock,
-)
-from tokmo.composition import LiveRunError, execute_holdings_route
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 TOSS_FIXTURE = FIXTURES / "holdings_legacy_toss_v1.json"
@@ -87,8 +86,7 @@ def toss_payload() -> dict:
 
 
 def decode(payload: dict):
-    return validate_legacy_json(
-        json.dumps(payload, separators=(",", ":")).encode())
+    return validate_legacy_json(json.dumps(payload, separators=(",", ":")).encode())
 
 
 # --- Frozen decoder: exact two-capture admission ---
@@ -119,8 +117,7 @@ def test_exact_toss_two_capture_import():
 
     # Capture 2 holdings come back in canonical symbol order even though the
     # fixture stores GOOGL before AAPL.
-    assert [item.symbol for item in second.accounts[0].holdings] == [
-        "AAPL", "GOOGL"]
+    assert [item.symbol for item in second.accounts[0].holdings] == ["AAPL", "GOOGL"]
     assert [item.symbol for item in second.accounts[1].holdings] == ["MSFT"]
 
 
@@ -131,18 +128,21 @@ def test_legacy_id_stability():
     # Reformatting the surface JSON (indentation, object key order) must not
     # change the deterministic IDs; only the schema-relevant content counts.
     payload = toss_payload()
-    reordered = {"records": [
-        dict(reversed(list(record.items()))) for record in payload["records"]
-    ]}
-    reformatted = validate_legacy_json(
-        json.dumps(reordered, indent=2).encode())
+    reordered = {
+        "records": [
+            dict(reversed(list(record.items()))) for record in payload["records"]
+        ]
+    }
+    reformatted = validate_legacy_json(json.dumps(reordered, indent=2).encode())
 
     for result in (again, reformatted):
         assert result.status == "VALID"
         assert [c.snapshot_id for c in result.captures] == [
-            c.snapshot_id for c in baseline.captures]
+            c.snapshot_id for c in baseline.captures
+        ]
         assert [c.content_hash for c in result.captures] == [
-            c.content_hash for c in baseline.captures]
+            c.content_hash for c in baseline.captures
+        ]
 
 
 def test_canonical_parity_with_typed_store():
@@ -174,18 +174,21 @@ def mutate(transform):
 def drop_key(record_index: int, key: str):
     def transform(payload):
         del payload["records"][record_index][key]
+
     return transform
 
 
 def set_field(record_index: int, key: str, value):
     def transform(payload):
         payload["records"][record_index][key] = value
+
     return transform
 
 
 def set_holding(record_index: int, holding_index: int, key: str, value):
     def transform(payload):
         payload["records"][record_index]["holdings"][holding_index][key] = value
+
     return transform
 
 
@@ -198,8 +201,7 @@ def test_non_toss_refusal():
 
 def test_mixed_non_toss_row_refused():
     payload = toss_payload()
-    payload["records"].append(
-        json.loads(REFUSAL_FIXTURE.read_bytes())["records"][0])
+    payload["records"].append(json.loads(REFUSAL_FIXTURE.read_bytes())["records"][0])
     result = decode(payload)
     assert result.status == "INVALID"
     assert result.reason == "non_toss_source"
@@ -215,51 +217,60 @@ def test_incomplete_capture_refusal():
     assert result.captures == ()
 
 
-@pytest.mark.parametrize("transform, reason", [
-    # Envelope strictness.
-    (lambda payload: payload.update(extra=1), "envelope_outside_contract"),
-    (lambda payload: payload.update(records={}), "envelope_outside_contract"),
-    # Record key-set/type strictness.
-    (drop_key(0, "policy_version"), "record_outside_contract"),
-    (set_field(0, "unexpected", "x"), "record_outside_contract"),
-    (set_field(0, "account_ordinal", "1"), "record_outside_contract"),
-    (set_field(0, "account_ordinal", True), "record_outside_contract"),
-    (set_field(0, "account_ordinal", 0), "record_outside_contract"),
-    (set_field(0, "account_ordinal", 3), "record_outside_contract"),
-    (set_field(0, "account_count", 0), "record_outside_contract"),
-    (set_field(0, "holdings", {}), "record_outside_contract"),
-    (drop_key(2, "source"), "record_outside_contract"),
-    (set_field(2, "source", 7), "record_outside_contract"),
-    # Frozen policy/source tokens.
-    (set_field(0, "policy_version", "toss1-v2"), "policy_outside_contract"),
-    (set_field(3, "source", "toss-holdings-v2"), "non_toss_source"),
-    # Record IDs.
-    (set_field(0, "record_id", ""), "record_id_outside_contract"),
-    (set_field(1, "record_id", "legacy-0001"), "record_id_outside_contract"),
-    # Timestamps.
-    (set_field(0, "captured_at", "2026-07-28T00:00:00"),
-     "timestamp_outside_contract"),
-    (set_field(0, "captured_at", "yesterday"), "timestamp_outside_contract"),
-    (set_field(0, "stored_at", ""), "record_outside_contract"),
-    # Holding semantics.
-    (set_holding(0, 0, "quantity", "10.0"), "holding_outside_contract"),
-    (set_holding(0, 0, "quantity", "-1"), "holding_outside_contract"),
-    (set_holding(0, 0, "avg_price", "1E+2"), "holding_outside_contract"),
-    (set_holding(0, 0, "symbol", ""), "holding_outside_contract"),
-    (set_holding(0, 0, "market_raw", None), "holding_outside_contract"),
-    (set_holding(0, 0, "name", 5), "holding_outside_contract"),
-    (set_holding(0, 0, "extra", "x"), "holding_outside_contract"),
-    (lambda payload: payload["records"][2]["holdings"].append(
-        dict(payload["records"][2]["holdings"][0])),
-     "holding_outside_contract"),
-    (lambda payload: payload["records"][0]["holdings"][0].pop("asset_type"),
-     "holding_outside_contract"),
-    # Capture grouping conflicts.
-    (set_field(1, "account_count", 3), "capture_conflict"),
-    (set_field(1, "account_ordinal", 1), "capture_conflict"),
-    (set_field(1, "captured_at", "2026-07-28T09:00:00+09:00"),
-     "capture_conflict"),
-])
+@pytest.mark.parametrize(
+    "transform, reason",
+    [
+        # Envelope strictness.
+        (lambda payload: payload.update(extra=1), "envelope_outside_contract"),
+        (lambda payload: payload.update(records={}), "envelope_outside_contract"),
+        # Record key-set/type strictness.
+        (drop_key(0, "policy_version"), "record_outside_contract"),
+        (set_field(0, "unexpected", "x"), "record_outside_contract"),
+        (set_field(0, "account_ordinal", "1"), "record_outside_contract"),
+        (set_field(0, "account_ordinal", True), "record_outside_contract"),
+        (set_field(0, "account_ordinal", 0), "record_outside_contract"),
+        (set_field(0, "account_ordinal", 3), "record_outside_contract"),
+        (set_field(0, "account_count", 0), "record_outside_contract"),
+        (set_field(0, "holdings", {}), "record_outside_contract"),
+        (drop_key(2, "source"), "record_outside_contract"),
+        (set_field(2, "source", 7), "record_outside_contract"),
+        # Frozen policy/source tokens.
+        (set_field(0, "policy_version", "toss1-v2"), "policy_outside_contract"),
+        (set_field(3, "source", "toss-holdings-v2"), "non_toss_source"),
+        # Record IDs.
+        (set_field(0, "record_id", ""), "record_id_outside_contract"),
+        (set_field(1, "record_id", "legacy-0001"), "record_id_outside_contract"),
+        # Timestamps.
+        (
+            set_field(0, "captured_at", "2026-07-28T00:00:00"),
+            "timestamp_outside_contract",
+        ),
+        (set_field(0, "captured_at", "yesterday"), "timestamp_outside_contract"),
+        (set_field(0, "stored_at", ""), "record_outside_contract"),
+        # Holding semantics.
+        (set_holding(0, 0, "quantity", "10.0"), "holding_outside_contract"),
+        (set_holding(0, 0, "quantity", "-1"), "holding_outside_contract"),
+        (set_holding(0, 0, "avg_price", "1E+2"), "holding_outside_contract"),
+        (set_holding(0, 0, "symbol", ""), "holding_outside_contract"),
+        (set_holding(0, 0, "market_raw", None), "holding_outside_contract"),
+        (set_holding(0, 0, "name", 5), "holding_outside_contract"),
+        (set_holding(0, 0, "extra", "x"), "holding_outside_contract"),
+        (
+            lambda payload: payload["records"][2]["holdings"].append(
+                dict(payload["records"][2]["holdings"][0])
+            ),
+            "holding_outside_contract",
+        ),
+        (
+            lambda payload: payload["records"][0]["holdings"][0].pop("asset_type"),
+            "holding_outside_contract",
+        ),
+        # Capture grouping conflicts.
+        (set_field(1, "account_count", 3), "capture_conflict"),
+        (set_field(1, "account_ordinal", 1), "capture_conflict"),
+        (set_field(1, "captured_at", "2026-07-28T09:00:00+09:00"), "capture_conflict"),
+    ],
+)
 def test_refusal_matrix(transform, reason):
     result = decode(mutate(transform))
     assert result.status == "INVALID"
@@ -292,24 +303,34 @@ def dup_variant(needle: str, replacement: str) -> bytes:
     return raw.replace(needle.encode(), replacement.encode(), 1)
 
 
-@pytest.mark.parametrize("raw_builder", [
-    # Envelope-level duplicates: same and differing member values.
-    lambda: b'{"records":[],"records":[]}',
-    lambda: b'{"records":[],"records":[{"bogus":1}]}',
-    # Record-level duplicates inside records[0].
-    lambda: dup_variant(
-        '"policy_version":"toss1-v1"',
-        '"policy_version":"toss1-v1","policy_version":"toss1-v1"'),
-    lambda: dup_variant(
-        '"policy_version":"toss1-v1"',
-        '"policy_version":"toss1-v1","policy_version":"toss1-v9"'),
-    # Holding-level duplicates inside records[0].holdings[0].
-    lambda: dup_variant(
-        '"symbol":"AAPL"', '"symbol":"AAPL","symbol":"AAPL"'),
-    lambda: dup_variant(
-        '"symbol":"AAPL"', '"symbol":"AAPL","symbol":"ZZZZ"'),
-], ids=["envelope_same", "envelope_differs", "record_same", "record_differs",
-        "holding_same", "holding_differs"])
+@pytest.mark.parametrize(
+    "raw_builder",
+    [
+        # Envelope-level duplicates: same and differing member values.
+        lambda: b'{"records":[],"records":[]}',
+        lambda: b'{"records":[],"records":[{"bogus":1}]}',
+        # Record-level duplicates inside records[0].
+        lambda: dup_variant(
+            '"policy_version":"toss1-v1"',
+            '"policy_version":"toss1-v1","policy_version":"toss1-v1"',
+        ),
+        lambda: dup_variant(
+            '"policy_version":"toss1-v1"',
+            '"policy_version":"toss1-v1","policy_version":"toss1-v9"',
+        ),
+        # Holding-level duplicates inside records[0].holdings[0].
+        lambda: dup_variant('"symbol":"AAPL"', '"symbol":"AAPL","symbol":"AAPL"'),
+        lambda: dup_variant('"symbol":"AAPL"', '"symbol":"AAPL","symbol":"ZZZZ"'),
+    ],
+    ids=[
+        "envelope_same",
+        "envelope_differs",
+        "record_same",
+        "record_differs",
+        "holding_same",
+        "holding_differs",
+    ],
+)
 def test_duplicate_json_member_names_refused(raw_builder):
     """Duplicate object member names refuse fail-closed at every nesting
     level — even when the duplicate carries the identical value — with one
@@ -325,7 +346,7 @@ def test_duplicate_json_member_names_refused(raw_builder):
 
 # --- Migration authorization: authorize_legacy_migration only ---
 
-CLOCK_NOW = datetime(2026, 7, 29, 0, 0, 0, tzinfo=timezone.utc)
+CLOCK_NOW = datetime(2026, 7, 29, 0, 0, 0, tzinfo=UTC)
 
 
 def clock():
@@ -364,10 +385,10 @@ def test_authorize_legacy_migration_recomputes_digest():
     recomputed inside the factory; any mismatch denies."""
     capture = decoded_captures()[0]
     canonical = canonical_snapshot_bytes(capture)
-    for wrong in ("f" * 64, decoded_captures()[1].snapshot_id,
-                  uuid.uuid4().hex, ""):
+    for wrong in ("f" * 64, decoded_captures()[1].snapshot_id, uuid.uuid4().hex, ""):
         denial = authorize_legacy_migration(
-            snapshot_id=wrong, canonical_bytes=canonical, clock=clock)
+            snapshot_id=wrong, canonical_bytes=canonical, clock=clock
+        )
         assert isinstance(denial, DenialToken)
         assert denial.reason == "invalid_snapshot_id"
 
@@ -432,20 +453,29 @@ def test_result_repr_closed():
     """No decoded value, symbol, ID, or hash renders through result repr."""
     result = validate_legacy_json(TOSS_FIXTURE.read_bytes())
     rendered = repr(result)
-    for leaked in ("AAPL", "GOOGL", "MSFT", "150.5", "2800", "380.25",
-                   "Apple", "Alphabet", "Microsoft",
-                   EXPECTED_LEGACY_DIGESTS["capture_1"],
-                   EXPECTED_CONTENT_HASHES["capture_1"]):
+    for leaked in (
+        "AAPL",
+        "GOOGL",
+        "MSFT",
+        "150.5",
+        "2800",
+        "380.25",
+        "Apple",
+        "Alphabet",
+        "Microsoft",
+        EXPECTED_LEGACY_DIGESTS["capture_1"],
+        EXPECTED_CONTENT_HASHES["capture_1"],
+    ):
         assert leaked not in rendered
     assert LEGACY_POLICY_VERSION == "toss1-v1"
 
 
 # --- Offline migration tool: dry-run creates and mutates nothing ---
 
-from tools.migrate_holdings_factstore import (  # noqa: E402
+from tools.migrate_holdings_factstore import (
+    TOOL_REFUSAL_REASONS,
     approve_cutover_build,
     execute_cutover,
-    TOOL_REFUSAL_REASONS,
     format_report,
     main,
     run_clone,
@@ -502,31 +532,51 @@ def test_marker_parser_is_exact_two_key_contract():
 def test_routing_legacy_sqlite_staged_invalid(tmp_path):
     leaf, source, canonical, marker, _lock = cutover_workspace(tmp_path)
     context = CutoverContext(first_use_legacy=False)
-    assert resolve_route(
-        marker_path=marker, sqlite_path=canonical, json_path=source,
-        context=context,
-    ) is HoldingsRoute.LEGACY
+    assert (
+        resolve_route(
+            marker_path=marker,
+            sqlite_path=canonical,
+            json_path=source,
+            context=context,
+        )
+        is HoldingsRoute.LEGACY
+    )
 
     candidate = leaf / "candidate.sqlite3"
     assert run_clone(source, candidate).status == "closed"
     os.link(candidate, canonical)
-    assert resolve_route(
-        marker_path=marker, sqlite_path=canonical, json_path=source,
-        context=context,
-    ) is HoldingsRoute.STAGED_OR_CRASHED
+    assert (
+        resolve_route(
+            marker_path=marker,
+            sqlite_path=canonical,
+            json_path=source,
+            context=context,
+        )
+        is HoldingsRoute.STAGED_OR_CRASHED
+    )
 
     marker.write_bytes(CUTOVER_MARKER_BYTES)
     os.chmod(marker, 0o600)
-    assert resolve_route(
-        marker_path=marker, sqlite_path=canonical, json_path=source,
-        context=context,
-    ) is HoldingsRoute.SQLITE_V1
+    assert (
+        resolve_route(
+            marker_path=marker,
+            sqlite_path=canonical,
+            json_path=source,
+            context=context,
+        )
+        is HoldingsRoute.SQLITE_V1
+    )
 
     marker.write_bytes(b'{"state":"sqlite-v1","schema_version":1,"x":0}')
-    assert resolve_route(
-        marker_path=marker, sqlite_path=canonical, json_path=source,
-        context=context,
-    ) is HoldingsRoute.INVALID
+    assert (
+        resolve_route(
+            marker_path=marker,
+            sqlite_path=canonical,
+            json_path=source,
+            context=context,
+        )
+        is HoldingsRoute.INVALID
+    )
 
 
 def test_first_use_safe_absent_is_explicit_context(tmp_path):
@@ -537,12 +587,20 @@ def test_first_use_safe_absent_is_explicit_context(tmp_path):
         sqlite_path=leaf / "holdings_snapshots.sqlite3",
         json_path=leaf / "holdings_store.json",
     )
-    assert resolve_route(
-        **args, context=CutoverContext(first_use_legacy=True),
-    ) is HoldingsRoute.LEGACY
-    assert resolve_route(
-        **args, context=CutoverContext(first_use_legacy=False),
-    ) is HoldingsRoute.INVALID
+    assert (
+        resolve_route(
+            **args,
+            context=CutoverContext(first_use_legacy=True),
+        )
+        is HoldingsRoute.LEGACY
+    )
+    assert (
+        resolve_route(
+            **args,
+            context=CutoverContext(first_use_legacy=False),
+        )
+        is HoldingsRoute.INVALID
+    )
 
 
 def test_family_lock_shared_exclusive_and_finally_release(tmp_path):
@@ -560,7 +618,8 @@ def test_family_lock_shared_exclusive_and_finally_release(tmp_path):
 
     with pytest.raises(KeyboardInterrupt):
         with_family_lock(
-            lock, exclusive=True,
+            lock,
+            exclusive=True,
             fn=lambda: (_ for _ in ()).throw(KeyboardInterrupt()),
         )
     fd = acquire_family_lock(lock, exclusive=True, deadline_s=0.1)
@@ -571,7 +630,8 @@ def test_promotion_marker_and_retained_alias(tmp_path):
     leaf, source, canonical, marker, lock = cutover_workspace(tmp_path)
     approval = approve_cutover_build(source)
     report = execute_cutover(
-        approval=approval, canonical=canonical, marker=marker, lock_path=lock)
+        approval=approval, canonical=canonical, marker=marker, lock_path=lock
+    )
     assert report.status == "closed"
     assert report.reason == ""
     assert canonical.exists()
@@ -589,7 +649,8 @@ def test_source_change_refusal_under_exclusive_lock(tmp_path):
     source.write_bytes(payload)
     os.chmod(source, 0o600)
     report = execute_cutover(
-        approval=approval, canonical=canonical, marker=marker, lock_path=lock)
+        approval=approval, canonical=canonical, marker=marker, lock_path=lock
+    )
     assert report.status == "refused"
     assert report.reason == "source_changed"
     assert not canonical.exists()
@@ -600,15 +661,23 @@ def test_promotion_crash_windows_never_route_sqlite_without_marker(tmp_path):
     leaf, source, canonical, marker, lock = cutover_workspace(tmp_path)
     approval = approve_cutover_build(source)
     report = execute_cutover(
-        approval=approval, canonical=canonical, marker=marker, lock_path=lock,
+        approval=approval,
+        canonical=canonical,
+        marker=marker,
+        lock_path=lock,
         stop_after="promotion",
     )
     assert report.status == "interrupted"
     assert not marker.exists()
-    assert resolve_route(
-        marker_path=marker, sqlite_path=canonical, json_path=source,
-        context=CutoverContext(first_use_legacy=False),
-    ) is HoldingsRoute.STAGED_OR_CRASHED
+    assert (
+        resolve_route(
+            marker_path=marker,
+            sqlite_path=canonical,
+            json_path=source,
+            context=CutoverContext(first_use_legacy=False),
+        )
+        is HoldingsRoute.STAGED_OR_CRASHED
+    )
     assert list(leaf.glob(".holdings_snapshots.staging.*.sqlite3"))
 
 
@@ -617,17 +686,21 @@ def test_marker_write_failure_windows_are_deterministic(tmp_path, monkeypatch):
 
     _leaf, source, canonical, marker, lock = cutover_workspace(tmp_path)
     approval = approve_cutover_build(source)
-    monkeypatch.setattr(tool, "_commit_marker",
-                        lambda _path: "marker_commit_failed")
+    monkeypatch.setattr(tool, "_commit_marker", lambda _path: "marker_commit_failed")
     report = execute_cutover(
-        approval=approval, canonical=canonical, marker=marker, lock_path=lock)
-    assert (report.status, report.reason) == (
-        "refused", "marker_commit_failed")
+        approval=approval, canonical=canonical, marker=marker, lock_path=lock
+    )
+    assert (report.status, report.reason) == ("refused", "marker_commit_failed")
     assert not marker.exists()
-    assert resolve_route(
-        marker_path=marker, sqlite_path=canonical, json_path=source,
-        context=CutoverContext(first_use_legacy=False),
-    ) is HoldingsRoute.STAGED_OR_CRASHED
+    assert (
+        resolve_route(
+            marker_path=marker,
+            sqlite_path=canonical,
+            json_path=source,
+            context=CutoverContext(first_use_legacy=False),
+        )
+        is HoldingsRoute.STAGED_OR_CRASHED
+    )
 
 
 def test_crash_after_marker_replace_routes_sqlite(tmp_path, monkeypatch):
@@ -647,14 +720,24 @@ def test_crash_after_marker_replace_routes_sqlite(tmp_path, monkeypatch):
     monkeypatch.setattr(tool, "fsync_directory", fail_marker_parent)
     report = execute_cutover(
         approval=approve_cutover_build(source),
-        canonical=canonical, marker=marker, lock_path=lock)
+        canonical=canonical,
+        marker=marker,
+        lock_path=lock,
+    )
     assert (report.status, report.reason) == (
-        "recovery_required", "marker_durability_uncertain")
+        "recovery_required",
+        "marker_durability_uncertain",
+    )
     assert marker.read_bytes() == CUTOVER_MARKER_BYTES
-    assert resolve_route(
-        marker_path=marker, sqlite_path=canonical, json_path=source,
-        context=CutoverContext(first_use_legacy=False),
-    ) is HoldingsRoute.SQLITE_V1
+    assert (
+        resolve_route(
+            marker_path=marker,
+            sqlite_path=canonical,
+            json_path=source,
+            context=CutoverContext(first_use_legacy=False),
+        )
+        is HoldingsRoute.SQLITE_V1
+    )
 
 
 def test_no_replace_existing_canonical_and_no_deletion(tmp_path):
@@ -664,7 +747,10 @@ def test_no_replace_existing_canonical_and_no_deletion(tmp_path):
     before = canonical.read_bytes()
     report = execute_cutover(
         approval=approve_cutover_build(source),
-        canonical=canonical, marker=marker, lock_path=lock)
+        canonical=canonical,
+        marker=marker,
+        lock_path=lock,
+    )
     assert report.status == "refused"
     assert report.reason == "canonical_exists"
     assert canonical.read_bytes() == before
@@ -678,7 +764,8 @@ def test_whole_file_quarantine_simulation_is_non_mutating(tmp_path):
     _leaf, source, canonical, marker, _lock = cutover_workspace(tmp_path)
     before = tree_inventory(tmp_path)
     report = simulate_whole_file_quarantine(
-        source=source, canonical=canonical, marker=marker)
+        source=source, canonical=canonical, marker=marker
+    )
     assert report.status == "simulation"
     assert report.reason == "separate_approval_required"
     assert tree_inventory(tmp_path) == before
@@ -690,8 +777,11 @@ def test_route_dominance_legacy_sqlite_and_refused(tmp_path):
 
     def invoke():
         return execute_holdings_route(
-            marker_path=marker, sqlite_path=canonical, json_path=source,
-            lock_path=lock, context=CutoverContext(first_use_legacy=False),
+            marker_path=marker,
+            sqlite_path=canonical,
+            json_path=source,
+            lock_path=lock,
+            context=CutoverContext(first_use_legacy=False),
             legacy_fn=lambda: calls.append("legacy"),
             sqlite_fn=lambda: calls.append("sqlite"),
         )
@@ -700,9 +790,12 @@ def test_route_dominance_legacy_sqlite_and_refused(tmp_path):
     assert calls == ["legacy"]
 
     approval = approve_cutover_build(source)
-    assert execute_cutover(
-        approval=approval, canonical=canonical, marker=marker,
-        lock_path=lock).status == "closed"
+    assert (
+        execute_cutover(
+            approval=approval, canonical=canonical, marker=marker, lock_path=lock
+        ).status
+        == "closed"
+    )
     calls.clear()
     invoke()
     assert calls == ["sqlite"]
@@ -718,8 +811,11 @@ def test_legacy_reaches_only_json(tmp_path):
     leaf, source, canonical, marker, lock = cutover_workspace(tmp_path)
     calls = []
     execute_holdings_route(
-        marker_path=marker, sqlite_path=canonical, json_path=source,
-        lock_path=lock, context=CutoverContext(first_use_legacy=False),
+        marker_path=marker,
+        sqlite_path=canonical,
+        json_path=source,
+        lock_path=lock,
+        context=CutoverContext(first_use_legacy=False),
         legacy_fn=lambda: calls.append("json"),
         sqlite_fn=lambda: calls.append("sqlite"),
     )
@@ -728,14 +824,22 @@ def test_legacy_reaches_only_json(tmp_path):
 
 def test_sqlite_v1_reaches_only_sqlite(tmp_path):
     leaf, source, canonical, marker, lock = cutover_workspace(tmp_path)
-    assert execute_cutover(
-        approval=approve_cutover_build(source), canonical=canonical,
-        marker=marker, lock_path=lock,
-    ).status == "closed"
+    assert (
+        execute_cutover(
+            approval=approve_cutover_build(source),
+            canonical=canonical,
+            marker=marker,
+            lock_path=lock,
+        ).status
+        == "closed"
+    )
     calls = []
     execute_holdings_route(
-        marker_path=marker, sqlite_path=canonical, json_path=source,
-        lock_path=lock, context=CutoverContext(first_use_legacy=False),
+        marker_path=marker,
+        sqlite_path=canonical,
+        json_path=source,
+        lock_path=lock,
+        context=CutoverContext(first_use_legacy=False),
         legacy_fn=lambda: calls.append("json"),
         sqlite_fn=lambda: calls.append("sqlite"),
     )
@@ -750,8 +854,11 @@ def test_staged_invalid_reach_neither(tmp_path):
     calls = []
     with pytest.raises(LiveRunError, match="cutover_incomplete"):
         execute_holdings_route(
-            marker_path=marker, sqlite_path=canonical, json_path=source,
-            lock_path=lock, context=CutoverContext(first_use_legacy=False),
+            marker_path=marker,
+            sqlite_path=canonical,
+            json_path=source,
+            lock_path=lock,
+            context=CutoverContext(first_use_legacy=False),
             legacy_fn=lambda: calls.append("json"),
             sqlite_fn=lambda: calls.append("sqlite"),
         )
@@ -759,7 +866,7 @@ def test_staged_invalid_reach_neither(tmp_path):
 
 
 def test_route_transition_recheck_reaches_neither(tmp_path, monkeypatch):
-    import tokmo.composition as composition
+    from tokmo import composition
 
     leaf, source, canonical, marker, lock = cutover_workspace(tmp_path)
     calls = []
@@ -767,8 +874,11 @@ def test_route_transition_recheck_reaches_neither(tmp_path, monkeypatch):
     monkeypatch.setattr(composition, "resolve_route", lambda **_kw: next(routes))
     with pytest.raises(composition.LiveRunError, match="cutover_incomplete"):
         composition.execute_holdings_route(
-            marker_path=marker, sqlite_path=canonical, json_path=source,
-            lock_path=lock, context=CutoverContext(first_use_legacy=False),
+            marker_path=marker,
+            sqlite_path=canonical,
+            json_path=source,
+            lock_path=lock,
+            context=CutoverContext(first_use_legacy=False),
             legacy_fn=lambda: calls.append("legacy"),
             sqlite_fn=lambda: calls.append("sqlite"),
         )
@@ -785,8 +895,7 @@ def test_rollback_before_promotion_is_non_destructive_simulation(tmp_path):
     staging.write_bytes(b"retained")
     os.chmod(staging, 0o600)
     before = tree_inventory(tmp_path)
-    report = simulate_rollback_before_promotion(
-        source=source, staging=staging)
+    report = simulate_rollback_before_promotion(source=source, staging=staging)
     assert (report.status, report.reason) == ("simulation", "artifact_retained")
     assert tree_inventory(tmp_path) == before
 
@@ -805,9 +914,12 @@ def test_rollback_after_promotion_before_marker_requires_reversal_approval(
     os.link(staging, canonical)
     before = tree_inventory(tmp_path)
     report = simulate_rollback_after_promotion_before_marker(
-        source=source, staging=staging, canonical=canonical, marker=marker)
+        source=source, staging=staging, canonical=canonical, marker=marker
+    )
     assert (report.status, report.reason) == (
-        "simulation", "separate_reversal_required")
+        "simulation",
+        "separate_reversal_required",
+    )
     assert tree_inventory(tmp_path) == before
 
 
@@ -815,8 +927,7 @@ def tree_inventory(base: Path) -> set[tuple[str, int, int]]:
     entries = set()
     for path in sorted(base.rglob("*")):
         value = os.lstat(path)
-        entries.add((str(path.relative_to(base)), value.st_size,
-                     value.st_mtime_ns))
+        entries.add((str(path.relative_to(base)), value.st_size, value.st_mtime_ns))
     return entries
 
 
@@ -883,13 +994,14 @@ def test_clone_candidate_parity_reopen(tmp_path):
     headers = store.list_capture_headers()
     assert len(headers) == 2
     assert {header.snapshot_id for header in headers} == set(
-        EXPECTED_LEGACY_DIGESTS.values())
+        EXPECTED_LEGACY_DIGESTS.values()
+    )
     assert {header.content_hash for header in headers} == set(
-        EXPECTED_CONTENT_HASHES.values())
+        EXPECTED_CONTENT_HASHES.values()
+    )
     for capture in decoded_captures():
         read_back = store.read_snapshot(capture.snapshot_id)
-        assert canonical_snapshot_bytes(read_back) == canonical_snapshot_bytes(
-            capture)
+        assert canonical_snapshot_bytes(read_back) == canonical_snapshot_bytes(capture)
         assert read_back.content_hash == capture.content_hash
 
 
@@ -912,8 +1024,7 @@ def test_clone_refuses_existing_candidate(tmp_path):
     report = run_clone(source, candidate)
     assert report.status == "refused"
     assert report.reason == "candidate_exists"
-    assert (os.lstat(candidate).st_mtime_ns,
-            candidate.read_bytes()) == after_first
+    assert (os.lstat(candidate).st_mtime_ns, candidate.read_bytes()) == after_first
 
 
 def test_clone_rerun_deterministic(tmp_path):
@@ -927,8 +1038,7 @@ def test_clone_rerun_deterministic(tmp_path):
     first_store = HoldingsSnapshotStore(candidate, clock=clock)
     second_store = HoldingsSnapshotStore(second, clock=clock)
     first_ids = [h.snapshot_id for h in first_store.list_capture_headers()]
-    assert first_ids == [
-        h.snapshot_id for h in second_store.list_capture_headers()]
+    assert first_ids == [h.snapshot_id for h in second_store.list_capture_headers()]
     for snapshot_id in first_ids:
         assert canonical_snapshot_bytes(
             first_store.read_snapshot(snapshot_id)
@@ -974,8 +1084,9 @@ def test_clone_refuses_unsafe_candidate_parent(tmp_path):
 
     alias_dir = tmp_path / "alias"
     alias_dir.symlink_to(candidate.parent)
-    assert run_clone(
-        source, alias_dir / "candidate.sqlite3").reason == "candidate_unsafe"
+    assert (
+        run_clone(source, alias_dir / "candidate.sqlite3").reason == "candidate_unsafe"
+    )
 
     missing_parent = tmp_path / "missing" / "candidate.sqlite3"
     assert run_clone(source, missing_parent).reason == "candidate_unsafe"
@@ -989,8 +1100,7 @@ def test_clone_injected_import_failure(tmp_path, monkeypatch):
 
     class FailingStore(HoldingsSnapshotStore):
         def import_legacy(self, snapshot, permit):
-            return self._failure(snapshot.snapshot_id, clock(),
-                                 "store_write_failed")
+            return self._failure(snapshot.snapshot_id, clock(), "store_write_failed")
 
     monkeypatch.setattr(tool_module, "HoldingsSnapshotStore", FailingStore)
     report = run_clone(source, candidate)
@@ -1001,9 +1111,9 @@ def test_clone_injected_import_failure(tmp_path, monkeypatch):
 # --- Clone rehearsal source copy (SDS §10.2 step 3, §10.5 no-deletion) ---
 
 
-import hashlib  # noqa: E402
+import hashlib
 
-import tools.migrate_holdings_factstore as tool_module  # noqa: E402
+import tools.migrate_holdings_factstore as tool_module
 
 
 def expected_copy_path(candidate: Path) -> Path:
@@ -1036,8 +1146,10 @@ def test_clone_creates_owner_only_rehearsal_source_copy(tmp_path):
     assert stat.S_IMODE(value.st_mode) == 0o600
     assert value.st_uid == os.getuid()
     assert copy.read_bytes() == original
-    assert (hashlib.sha256(copy.read_bytes()).hexdigest()
-            == hashlib.sha256(original).hexdigest())
+    assert (
+        hashlib.sha256(copy.read_bytes()).hexdigest()
+        == hashlib.sha256(original).hexdigest()
+    )
     # Exactly the candidate and its rehearsal source copy — nothing else was
     # created, and nothing was deleted.
     assert private_artifacts(candidate) == {candidate.name, copy.name}
@@ -1129,8 +1241,7 @@ def test_clone_decoder_reads_rehearsal_copy(tmp_path, monkeypatch):
     assert raw == TOSS_FIXTURE.read_bytes()
 
 
-def test_partial_import_failure_preserves_private_artifacts(
-        tmp_path, monkeypatch):
+def test_partial_import_failure_preserves_private_artifacts(tmp_path, monkeypatch):
     """MINOR-2 as explicit policy: after a partial clone failure the private
     0600 candidate and rehearsal copy both survive (SDS §10.5 requires a
     separate deletion approval), and a rerun refuses candidate_exists."""
@@ -1143,12 +1254,12 @@ def test_partial_import_failure_preserves_private_artifacts(
         def import_legacy(self, snapshot, permit):
             type(self).imports += 1
             if type(self).imports > 1:
-                return self._failure(snapshot.snapshot_id, clock(),
-                                     "store_write_failed")
+                return self._failure(
+                    snapshot.snapshot_id, clock(), "store_write_failed"
+                )
             return super().import_legacy(snapshot, permit)
 
-    monkeypatch.setattr(tool_module, "HoldingsSnapshotStore",
-                        SecondImportFailingStore)
+    monkeypatch.setattr(tool_module, "HoldingsSnapshotStore", SecondImportFailingStore)
     report = run_clone(source, candidate)
     assert report.status == "refused"
     assert report.reason == "import_failed"
@@ -1158,17 +1269,19 @@ def test_partial_import_failure_preserves_private_artifacts(
     assert stat.S_IMODE(os.lstat(candidate).st_mode) == 0o600
     assert stat.S_IMODE(os.lstat(copy).st_mode) == 0o600
     assert copy.read_bytes() == original
-    headers = HoldingsSnapshotStore(candidate, clock=clock) \
-        .list_capture_headers()
-    assert [h.snapshot_id for h in headers] == [
-        EXPECTED_LEGACY_DIGESTS["capture_1"]]
+    headers = HoldingsSnapshotStore(candidate, clock=clock).list_capture_headers()
+    assert [h.snapshot_id for h in headers] == [EXPECTED_LEGACY_DIGESTS["capture_1"]]
     assert private_artifacts(candidate) == {candidate.name, copy.name}
 
     # A rerun with the real store refuses without touching either artifact.
     monkeypatch.undo()
-    before = {name: (os.lstat(candidate.parent / name).st_mtime_ns,
-                     (candidate.parent / name).read_bytes())
-              for name in private_artifacts(candidate)}
+    before = {
+        name: (
+            os.lstat(candidate.parent / name).st_mtime_ns,
+            (candidate.parent / name).read_bytes(),
+        )
+        for name in private_artifacts(candidate)
+    }
     rerun = run_clone(source, candidate)
     assert rerun.status == "refused"
     assert rerun.reason == "candidate_exists"
@@ -1211,8 +1324,11 @@ def test_fresh_process_reopen(tmp_path):
     )
     completed = subprocess.run(
         [sys.executable, "-c", code, str(candidate)],
-        capture_output=True, text=True, cwd=ROOT,
-        env={**os.environ, "PYTHONPATH": str(ROOT / "src")}, timeout=60,
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        env={**os.environ, "PYTHONPATH": str(ROOT / "src")},
+        timeout=60,
     )
     assert completed.returncode == 0, completed.stderr
     payload = json.loads(completed.stdout)
@@ -1227,15 +1343,17 @@ def test_fresh_process_reopen(tmp_path):
 def run_cli(*argv: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "-m", "tools.migrate_holdings_factstore", *argv],
-        capture_output=True, text=True, cwd=ROOT,
-        env={**os.environ,
-             "PYTHONPATH": f"{ROOT / 'src'}{os.pathsep}{ROOT}"},
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        env={**os.environ, "PYTHONPATH": f"{ROOT / 'src'}{os.pathsep}{ROOT}"},
         timeout=60,
     )
 
 
-def closed_report_text(status: str, reason: str, captures: int,
-                       accounts: int, items: int) -> str:
+def closed_report_text(
+    status: str, reason: str, captures: int, accounts: int, items: int
+) -> str:
     return (
         f"status={status}\n"
         f"reason={reason}\n"
@@ -1250,7 +1368,8 @@ def closed_report_text(status: str, reason: str, captures: int,
 def test_cli_dry_run_exact_closed_output(tmp_path):
     source, candidate = workspace(tmp_path)
     completed = run_cli(
-        "--source", str(source), "--candidate", str(candidate), "--dry-run")
+        "--source", str(source), "--candidate", str(candidate), "--dry-run"
+    )
     assert completed.returncode == 0
     assert completed.stdout == closed_report_text("closed", "", 2, 4, 4)
     assert completed.stderr == ""
@@ -1260,7 +1379,8 @@ def test_cli_dry_run_exact_closed_output(tmp_path):
 def test_cli_clone_exact_closed_output(tmp_path):
     source, candidate = workspace(tmp_path)
     completed = run_cli(
-        "--source", str(source), "--candidate", str(candidate), "--clone")
+        "--source", str(source), "--candidate", str(candidate), "--clone"
+    )
     assert completed.returncode == 0
     assert completed.stdout == closed_report_text("closed", "", 2, 4, 4)
     assert completed.stderr == ""
@@ -1271,10 +1391,10 @@ def test_cli_refusal_exact_closed_output(tmp_path):
     source, candidate = workspace(tmp_path)
     source.write_bytes(REFUSAL_FIXTURE.read_bytes())
     completed = run_cli(
-        "--source", str(source), "--candidate", str(candidate), "--dry-run")
+        "--source", str(source), "--candidate", str(candidate), "--dry-run"
+    )
     assert completed.returncode == 1
-    assert completed.stdout == closed_report_text(
-        "refused", "non_toss_source", 0, 0, 0)
+    assert completed.stdout == closed_report_text("refused", "non_toss_source", 0, 0, 0)
     assert completed.stderr == ""
 
 
@@ -1295,7 +1415,8 @@ def test_cli_import_safe():
     # store, and prints nothing; main() is the only entry point.
     tree = ast.parse(source_text)
     top_level_calls = [
-        node for node in tree.body
+        node
+        for node in tree.body
         if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
     ]
     assert top_level_calls == []
@@ -1304,15 +1425,27 @@ def test_cli_import_safe():
 def test_report_reasons_and_redaction(tmp_path):
     source, candidate = workspace(tmp_path)
     closed = run_clone(source, candidate)
-    refusal = run_dry_run(ROOT / "tests" / "fixtures"
-                          / "holdings_legacy_non_toss_refusal_v1.json")
+    refusal = run_dry_run(
+        ROOT / "tests" / "fixtures" / "holdings_legacy_non_toss_refusal_v1.json"
+    )
     for report in (closed, refusal):
         assert report.reason == "" or report.reason in TOOL_REFUSAL_REASONS
         rendered = repr(report) + "\n" + format_report(report)
-        for leaked in ("AAPL", "GOOGL", "MSFT", "150.5", "2800", "380.25",
-                       "Apple", "Alphabet", "Microsoft", "/", str(tmp_path),
-                       *EXPECTED_LEGACY_DIGESTS.values(),
-                       *EXPECTED_CONTENT_HASHES.values()):
+        for leaked in (
+            "AAPL",
+            "GOOGL",
+            "MSFT",
+            "150.5",
+            "2800",
+            "380.25",
+            "Apple",
+            "Alphabet",
+            "Microsoft",
+            "/",
+            str(tmp_path),
+            *EXPECTED_LEGACY_DIGESTS.values(),
+            *EXPECTED_CONTENT_HASHES.values(),
+        ):
             assert leaked not in rendered
 
 
@@ -1321,20 +1454,31 @@ def test_report_reasons_and_redaction(tmp_path):
 DECODER_SOURCE_PATH = ROOT / "src" / "tokmo" / "records" / "legacy_holdings_v1.py"
 
 FORBIDDEN_IMPORT_PREFIXES = (
-    "tokmo.records.fact_store", "tokmo.facts", "tokmo.composition",
-    "tokmo.runtime", "urllib", "http", "socket", "requests", "ssl",
+    "tokmo.records.fact_store",
+    "tokmo.facts",
+    "tokmo.composition",
+    "tokmo.runtime",
+    "urllib",
+    "http",
+    "socket",
+    "requests",
+    "ssl",
 )
 
 
 def test_generation_metadata_boundaries_are_frozen():
-    assert generation_migration._V1_METADATA == frozenset({
-        ("holdings_snapshot_schema_version", "1"),
-        ("holdings_snapshot_adapter", "tokmo-holdings-snapshots-v1"),
-    })
-    assert generation_migration._GEN2_METADATA == frozenset({
-        ("holdings_snapshot_schema_version", "2"),
-        ("holdings_snapshot_adapter", "tokmo-holdings-snapshots-v1"),
-    })
+    assert generation_migration._V1_METADATA == frozenset(
+        {
+            ("holdings_snapshot_schema_version", "1"),
+            ("holdings_snapshot_adapter", "tokmo-holdings-snapshots-v1"),
+        }
+    )
+    assert generation_migration._GEN2_METADATA == frozenset(
+        {
+            ("holdings_snapshot_schema_version", "2"),
+            ("holdings_snapshot_adapter", "tokmo-holdings-snapshots-v1"),
+        }
+    )
 
 
 def imported_modules(path: Path) -> set[str]:
@@ -1353,14 +1497,24 @@ def test_frozen_decoder_import_isolation():
     never FactStore, facts, composition, live, network, or any module that
     could write (no os/pathlib/io in its import graph)."""
     names = imported_modules(DECODER_SOURCE_PATH)
-    assert names <= {"json", "hashlib", "dataclasses", "datetime", "decimal",
-                     "tokmo.values"}
+    assert names <= {
+        "json",
+        "hashlib",
+        "dataclasses",
+        "datetime",
+        "decimal",
+        "tokmo.values",
+    }
 
 
 def test_frozen_decoder_no_factstore_reuse():
     source_text = DECODER_SOURCE_PATH.read_text()
-    for token in ("fact_store", "_validate_toss_holding", "_holding_records",
-                  "FactStore"):
+    for token in (
+        "fact_store",
+        "_validate_toss_holding",
+        "_holding_records",
+        "FactStore",
+    ):
         assert token not in source_text
 
 
@@ -1388,6 +1542,10 @@ def test_runtime_composition_cannot_reach_migration():
     runtime_files.extend((ROOT / "src" / "tokmo" / "programs").glob("*.py"))
     for path in runtime_files:
         source_text = path.read_text()
-        for token in ("authorize_legacy_migration", "import_legacy",
-                      "legacy_holdings_v1", "migrate_holdings_factstore"):
+        for token in (
+            "authorize_legacy_migration",
+            "import_legacy",
+            "legacy_holdings_v1",
+            "migrate_holdings_factstore",
+        ):
             assert token not in source_text, (path.name, token)

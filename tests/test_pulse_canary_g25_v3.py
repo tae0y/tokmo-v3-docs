@@ -22,26 +22,28 @@ An environment variable is explicitly NOT proof, and these tests assert that:
 setting one cannot make the CLI proceed, and the source reads no environment.
 """
 
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
 import os
 import shutil
 import sqlite3
 import stat
 import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 
-T0 = datetime(2026, 8, 11, 0, 0, tzinfo=timezone.utc)
+T0 = datetime(2026, 8, 11, 0, 0, tzinfo=UTC)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 WRAPPER = PROJECT_ROOT / "tools" / "run_tokmo_pulse_canary_sandboxed.sh"
 
-_MACOS_SANDBOX = (sys.platform == "darwin"
-                  and os.access("/usr/bin/sandbox-exec", os.X_OK))
+_MACOS_SANDBOX = sys.platform == "darwin" and os.access(
+    "/usr/bin/sandbox-exec", os.X_OK
+)
 requires_macos_sandbox = pytest.mark.skipif(
-    not _MACOS_SANDBOX, reason="requires macOS /usr/bin/sandbox-exec")
+    not _MACOS_SANDBOX, reason="requires macOS /usr/bin/sandbox-exec"
+)
 
 
 def _make_success_quotes_fetch():
@@ -49,21 +51,32 @@ def _make_success_quotes_fetch():
     from tokmo.values.market_observations import TossCurrentPriceFact
 
     def quotes_fetch(market, symbols, *, bearer=None):
-        return PulseQuoteBatchOutcomeV1("success", tuple(
-            TossCurrentPriceFact(
-                source="toss-current-price-v1", symbol=sym,
-                last_price="231500", currency_raw="KRW",
-                timestamp=T0, fetched_at=T0,
-            ) for sym in symbols
-        ), ())
+        return PulseQuoteBatchOutcomeV1(
+            "success",
+            tuple(
+                TossCurrentPriceFact(
+                    source="toss-current-price-v1",
+                    symbol=sym,
+                    last_price="231500",
+                    currency_raw="KRW",
+                    timestamp=T0,
+                    fetched_at=T0,
+                )
+                for sym in symbols
+            ),
+            (),
+        )
+
     return quotes_fetch
 
 
 def _config():
     from tokmo.programs.pulse_canary import CanaryConfigV1
     from tokmo.values.session_gate import Market
-    return CanaryConfigV1(market=Market.KR, symbol="005930",
-                          max_ticks=5, max_provider_starts=22)
+
+    return CanaryConfigV1(
+        market=Market.KR, symbol="005930", max_ticks=5, max_provider_starts=22
+    )
 
 
 def _denied_attestation(root):
@@ -73,19 +86,22 @@ def _denied_attestation(root):
     caller — it produces its own (see the CLI tests below).
     """
     from tokmo.programs.canary_sandbox_attestation import (
-        CanonicalWriteDenyAttestation, SANDBOX_MECHANISM,
+        SANDBOX_MECHANISM,
+        CanonicalWriteDenyAttestation,
     )
+
     return CanonicalWriteDenyAttestation(
-        denied=True, reason="all_write_probes_denied_by_os",
-        mechanism=SANDBOX_MECHANISM, canonical_root=str(root),
+        denied=True,
+        reason="all_write_probes_denied_by_os",
+        mechanism=SANDBOX_MECHANISM,
+        canonical_root=str(root),
         probes=(("chmod_root_same_mode", "eperm"),),
     )
 
 
 def _git_project(root: Path) -> str:
     root.mkdir(parents=True, exist_ok=True)
-    run = lambda *a: subprocess.run(a, cwd=str(root), capture_output=True,
-                                    text=True)
+    run = lambda *a: subprocess.run(a, cwd=str(root), capture_output=True, text=True)
     run("git", "init")
     run("git", "config", "user.email", "t@t.com")
     run("git", "config", "user.name", "T")
@@ -99,6 +115,7 @@ def _git_project(root: Path) -> str:
 # Family accounting: inherited 12 + local 10 = 22
 # ══════════════════════════════════════════════════════════════════════
 
+
 def test_inherited_12_plus_local_10_reaches_exactly_22(tmp_path):
     from tokmo.programs.pulse_canary import CanaryDepsV1, run_canary_session
 
@@ -109,12 +126,16 @@ def test_inherited_12_plus_local_10_reaches_exactly_22(tmp_path):
         return f"token-tick-{token_calls['n']}"
 
     deps = CanaryDepsV1(
-        clock=lambda: T0, token_fetch=token_fetch,
+        clock=lambda: T0,
+        token_fetch=token_fetch,
         quotes_fetch=_make_success_quotes_fetch(),
         sleep_until=lambda t: None,
     )
     result = run_canary_session(
-        root=tmp_path / "evidence", config=_config(), deps=deps, t0=T0,
+        root=tmp_path / "evidence",
+        config=_config(),
+        deps=deps,
+        t0=T0,
         inherited_provider_starts=12,
     )
     assert result.stop_reason == "all_ticks_complete"
@@ -137,10 +158,17 @@ def test_inherited_13_blocks_before_any_outbound_call(tmp_path):
         outbound["quotes"] += 1
         return _make_success_quotes_fetch()(market, symbols, bearer=bearer)
 
-    deps = CanaryDepsV1(clock=lambda: T0, token_fetch=token_fetch,
-                        quotes_fetch=quotes_fetch, sleep_until=lambda t: None)
+    deps = CanaryDepsV1(
+        clock=lambda: T0,
+        token_fetch=token_fetch,
+        quotes_fetch=quotes_fetch,
+        sleep_until=lambda t: None,
+    )
     result = run_canary_session(
-        root=tmp_path / "evidence", config=_config(), deps=deps, t0=T0,
+        root=tmp_path / "evidence",
+        config=_config(),
+        deps=deps,
+        t0=T0,
         inherited_provider_starts=13,
     )
     # 13 + 10 needed = 23 > 22, so the session cannot complete: refuse first.
@@ -150,25 +178,31 @@ def test_inherited_13_blocks_before_any_outbound_call(tmp_path):
 
 def test_local_starts_are_five_tokens_and_five_price_batches(tmp_path):
     from tokmo.programs.pulse_canary import CanaryDepsV1, run_canary_session
-    from tokmo.records.pulse_canary_evidence import CanaryEvidenceStore
 
     deps = CanaryDepsV1(
-        clock=lambda: T0, token_fetch=lambda: "token",
-        quotes_fetch=_make_success_quotes_fetch(), sleep_until=lambda t: None,
+        clock=lambda: T0,
+        token_fetch=lambda: "token",
+        quotes_fetch=_make_success_quotes_fetch(),
+        sleep_until=lambda t: None,
     )
     evidence_root = tmp_path / "evidence"
     result = run_canary_session(
-        root=evidence_root, config=_config(), deps=deps, t0=T0,
+        root=evidence_root,
+        config=_config(),
+        deps=deps,
+        t0=T0,
         inherited_provider_starts=12,
     )
     assert result.stop_reason == "all_ticks_complete"
 
-    connection = sqlite3.connect(
-        str(evidence_root / "ops" / "canary_evidence.sqlite3"))
+    connection = sqlite3.connect(str(evidence_root / "ops" / "canary_evidence.sqlite3"))
     try:
-        counts = dict(connection.execute(
-            "SELECT operation, COUNT(*) FROM provider_start_intent "
-            "GROUP BY operation").fetchall())
+        counts = dict(
+            connection.execute(
+                "SELECT operation, COUNT(*) FROM provider_start_intent "
+                "GROUP BY operation"
+            ).fetchall()
+        )
     finally:
         connection.close()
     assert counts == {"TOKEN": 5, "PRICE_BATCH": 5}
@@ -197,10 +231,17 @@ def test_token_rotation_by_cadence_no_longer_breaks_a_later_tick(tmp_path):
             raise RuntimeError("provider_auth_rejection")
         return _make_success_quotes_fetch()(market, symbols, bearer=bearer)
 
-    deps = CanaryDepsV1(clock=lambda: T0, token_fetch=token_fetch,
-                        quotes_fetch=quotes_fetch, sleep_until=lambda t: None)
+    deps = CanaryDepsV1(
+        clock=lambda: T0,
+        token_fetch=token_fetch,
+        quotes_fetch=quotes_fetch,
+        sleep_until=lambda t: None,
+    )
     result = run_canary_session(
-        root=tmp_path / "evidence", config=_config(), deps=deps, t0=T0,
+        root=tmp_path / "evidence",
+        config=_config(),
+        deps=deps,
+        t0=T0,
         inherited_provider_starts=12,
     )
     assert result.stop_reason == "all_ticks_complete"
@@ -215,12 +256,16 @@ def test_token_rotation_by_cadence_no_longer_breaks_a_later_tick(tmp_path):
 # Campaign identity
 # ══════════════════════════════════════════════════════════════════════
 
+
 def test_v3_campaign_constants():
     from tokmo.programs.pulse_canary import (
-        CANARY_CAMPAIGN_ID, CANARY_CAMPAIGN_VERSION,
-        CANARY_FAMILY_ID, CANARY_FAMILY_CUMULATIVE_CAP,
+        CANARY_CAMPAIGN_ID,
+        CANARY_CAMPAIGN_VERSION,
+        CANARY_FAMILY_CUMULATIVE_CAP,
+        CANARY_FAMILY_ID,
         CANARY_MAX_PROVIDER_STARTS_LIMIT,
     )
+
     assert CANARY_CAMPAIGN_ID == "g25-quote-kr-005930-v4"
     assert CANARY_CAMPAIGN_VERSION == 4
     assert CANARY_FAMILY_ID == "g25-quote-kr-005930"
@@ -230,6 +275,7 @@ def test_v3_campaign_constants():
 
 def test_current_prior_allowlist_is_exactly_v1_v2_v3():
     from tokmo.programs.pulse_canary import _PRIOR_CAMPAIGN_SPECS
+
     assert [(spec.campaign_id, spec.version) for spec in _PRIOR_CAMPAIGN_SPECS] == [
         ("g25-quote-kr-005930-v1", 1),
         ("g25-quote-kr-005930-v2", 2),
@@ -239,12 +285,14 @@ def test_current_prior_allowlist_is_exactly_v1_v2_v3():
 
 def test_v3_purpose_identity_and_evidence_root_are_version_scoped():
     from tokmo.programs.pulse_canary import (
-        campaign_evidence_anchor_root, compute_purpose_identity,
+        campaign_evidence_anchor_root,
+        compute_purpose_identity,
     )
     from tokmo.values.session_gate import Market
 
     assert compute_purpose_identity(Market.KR, "005930") == (
-        "canary|g25-quote-kr-005930-v4|v4|KR|005930")
+        "canary|g25-quote-kr-005930-v4|v4|KR|005930"
+    )
     root = str(campaign_evidence_anchor_root())
     assert "g25-quote-kr-005930-v4" in root
     assert "g25-quote-kr-005930-v2" not in root
@@ -255,8 +303,10 @@ def test_read_inherited_reads_v1_and_v2_ledgers():
     from tokmo.values.session_gate import Market
 
     base = Path.home() / ".local/share/tokmo-v3-canary/campaigns"
-    ledgers = [base / f"g25-quote-kr-005930-{v}" / "KR/005930/ops"
-               / "canary_evidence.sqlite3" for v in ("v1", "v2")]
+    ledgers = [
+        base / f"g25-quote-kr-005930-{v}" / "KR/005930/ops" / "canary_evidence.sqlite3"
+        for v in ("v1", "v2")
+    ]
     if not all(path.exists() for path in ledgers):
         pytest.skip("v1/v2 runtime ledgers not present")
     assert read_inherited_provider_starts(Market.KR, "005930") == 22
@@ -265,6 +315,7 @@ def test_read_inherited_reads_v1_and_v2_ledgers():
 # ══════════════════════════════════════════════════════════════════════
 # OS write-deny attestation: the proof itself
 # ══════════════════════════════════════════════════════════════════════
+
 
 def test_attestation_refuses_on_writable_root_without_writing_anything(tmp_path):
     """The unsandboxed path must refuse, and must not have mutated anything.
@@ -283,7 +334,8 @@ def test_attestation_refuses_on_writable_root_without_writing_anything(tmp_path)
     mode_before = stat.S_IMODE(root.stat().st_mode)
 
     attestation = attest_canonical_write_denied(
-        root, nested_relatives=("stores/latest_quotes.sqlite3",))
+        root, nested_relatives=("stores/latest_quotes.sqlite3",)
+    )
 
     assert attestation.denied is False
     assert attestation.reason == "root_write_allowed"
@@ -291,14 +343,16 @@ def test_attestation_refuses_on_writable_root_without_writing_anything(tmp_path)
     # No artifact, no mode change: the probe sequence stopped before creating.
     assert sorted(p.relative_to(root).as_posix() for p in root.rglob("*")) == before
     assert stat.S_IMODE(root.stat().st_mode) == mode_before
-    assert not any(p.name.startswith(".canary_write_deny_probe_")
-                   for p in root.rglob("*"))
+    assert not any(
+        p.name.startswith(".canary_write_deny_probe_") for p in root.rglob("*")
+    )
 
 
 def test_attestation_refuses_when_root_is_absent(tmp_path):
     from tokmo.programs.canary_sandbox_attestation import (
         attest_canonical_write_denied,
     )
+
     attestation = attest_canonical_write_denied(tmp_path / "nope")
     assert attestation.denied is False
     assert attestation.reason == "canonical_root_absent"
@@ -314,6 +368,7 @@ def test_attestation_refuses_when_root_is_owned_by_another_user():
     from tokmo.programs.canary_sandbox_attestation import (
         attest_canonical_write_denied,
     )
+
     if os.stat("/").st_uid == os.geteuid():
         pytest.skip("running as the owner of /")
     attestation = attest_canonical_write_denied(Path("/"))
@@ -324,9 +379,6 @@ def test_attestation_refuses_when_root_is_owned_by_another_user():
 @requires_macos_sandbox
 def test_attestation_holds_under_real_sandbox_exec(tmp_path):
     """End-to-end: run the attestation inside a real sandbox-exec process."""
-    from tokmo.programs.canary_sandbox_attestation import (
-        attest_canonical_write_denied,
-    )
 
     # sandbox-exec matches the kernel-resolved path, and pytest's tmp_path is
     # under a symlinked /var on macOS.
@@ -336,8 +388,8 @@ def test_attestation_holds_under_real_sandbox_exec(tmp_path):
 
     profile = tmp_path / "profile.sb"
     profile.write_text(
-        '(version 1)\n(allow default)\n'
-        f'(deny file-write* (subpath "{root}"))\n')
+        f'(version 1)\n(allow default)\n(deny file-write* (subpath "{root}"))\n'
+    )
 
     script = tmp_path / "probe.py"
     script.write_text(
@@ -352,26 +404,39 @@ def test_attestation_holds_under_real_sandbox_exec(tmp_path):
     )
 
     completed = subprocess.run(
-        ["/usr/bin/sandbox-exec", "-f", str(profile),
-         sys.executable, str(script), str(root)],
-        capture_output=True, text=True,
+        [
+            "/usr/bin/sandbox-exec",
+            "-f",
+            str(profile),
+            sys.executable,
+            str(script),
+            str(root),
+        ],
+        capture_output=True,
+        text=True,
         env={**os.environ, "PYTHONPATH": str(PROJECT_ROOT / "src")},
     )
     assert completed.returncode == 0, completed.stderr
 
     import json
+
     payload = json.loads(completed.stdout.strip().splitlines()[-1])
     assert payload["denied"] is True
     assert payload["mechanism"] == "macos_sandbox_exec_file_write_deny"
     assert [probe["probe"] for probe in payload["probes"]] == [
-        "chmod_root_same_mode", "chmod_nested_same_mode", "create_unique_file",
+        "chmod_root_same_mode",
+        "chmod_nested_same_mode",
+        "create_unique_file",
     ]
     assert [probe["verdict"] for probe in payload["probes"]] == [
-        "eperm", "eperm", "eperm_no_artifact",
+        "eperm",
+        "eperm",
+        "eperm_no_artifact",
     ]
     # The create probe left nothing behind.
-    assert not any(p.name.startswith(".canary_write_deny_probe_")
-                   for p in root.rglob("*"))
+    assert not any(
+        p.name.startswith(".canary_write_deny_probe_") for p in root.rglob("*")
+    )
     assert (root / "stores" / "latest_quotes.sqlite3").read_bytes() == b"original"
 
 
@@ -385,8 +450,8 @@ def test_sandbox_denies_a_real_canary_style_write(tmp_path):
 
     profile = tmp_path / "profile.sb"
     profile.write_text(
-        '(version 1)\n(allow default)\n'
-        f'(deny file-write* (subpath "{root}"))\n')
+        f'(version 1)\n(allow default)\n(deny file-write* (subpath "{root}"))\n'
+    )
     script = tmp_path / "write.py"
     script.write_text(
         "import sys, errno\n"
@@ -397,17 +462,27 @@ def test_sandbox_denies_a_real_canary_style_write(tmp_path):
         "    print('DENIED', error.errno)\n"
     )
     completed = subprocess.run(
-        ["/usr/bin/sandbox-exec", "-f", str(profile),
-         sys.executable, str(script), str(target)],
-        capture_output=True, text=True)
+        [
+            "/usr/bin/sandbox-exec",
+            "-f",
+            str(profile),
+            sys.executable,
+            str(script),
+            str(target),
+        ],
+        capture_output=True,
+        text=True,
+    )
     assert completed.stdout.strip() == "DENIED 1"  # EPERM
     assert target.read_bytes() == b"original"
 
 
 def test_attestation_source_reads_no_environment():
     """An env var is a claim, not a proof — neither module may consult one."""
-    for relative in ("programs/canary_sandbox_attestation.py",
-                     "programs/pulse_canary.py"):
+    for relative in (
+        "programs/canary_sandbox_attestation.py",
+        "programs/pulse_canary.py",
+    ):
         text = (PROJECT_ROOT / "src" / "tokmo" / relative).read_text()
         assert "os.environ" not in text, relative
         assert "getenv(" not in text, relative
@@ -416,6 +491,7 @@ def test_attestation_source_reads_no_environment():
 # ══════════════════════════════════════════════════════════════════════
 # CLI: refuses before any credential is assembled
 # ══════════════════════════════════════════════════════════════════════
+
 
 def _cli_refusal(tmp_path, capsys, *, canonical, anchor=None, argv_extra=()):
     from tokmo.programs.pulse_canary import run_canary_cli
@@ -428,16 +504,30 @@ def _cli_refusal(tmp_path, capsys, *, canonical, anchor=None, argv_extra=()):
         factory_calls["n"] += 1
         raise AssertionError("credential assembly must not be reached")
 
-    code = run_canary_cli([
-        "--mode", "bounded-live-canary",
-        "--market", "KR", "--symbol", "005930",
-        "--canonical-root", str(canonical),
-        "--project-root", str(project_root),
-        "--max-ticks", "5", "--max-provider-starts", "32",
-        "--base-commit", head, *argv_extra,
-    ], live_deps_factory=factory,
+    code = run_canary_cli(
+        [
+            "--mode",
+            "bounded-live-canary",
+            "--market",
+            "KR",
+            "--symbol",
+            "005930",
+            "--canonical-root",
+            str(canonical),
+            "--project-root",
+            str(project_root),
+            "--max-ticks",
+            "5",
+            "--max-provider-starts",
+            "32",
+            "--base-commit",
+            head,
+            *argv_extra,
+        ],
+        live_deps_factory=factory,
         evidence_root_override=tmp_path / "evidence",
-        canonical_root_anchor_override=anchor if anchor is not None else canonical)
+        canonical_root_anchor_override=anchor if anchor is not None else canonical,
+    )
     return code, capsys.readouterr().err, factory_calls["n"]
 
 
@@ -452,8 +542,9 @@ def test_cli_refuses_unsandboxed_before_credential(tmp_path, capsys):
     assert "sandbox_write_deny_not_proven:root_write_allowed" in err
     assert factory_calls == 0
     # Refusing must not have mutated the canonical root.
-    assert not any(p.name.startswith(".canary_write_deny_probe_")
-                   for p in canonical.rglob("*"))
+    assert not any(
+        p.name.startswith(".canary_write_deny_probe_") for p in canonical.rglob("*")
+    )
 
 
 def test_env_var_cannot_forge_the_attestation(tmp_path, capsys, monkeypatch):
@@ -485,7 +576,8 @@ def test_cli_refuses_a_decoy_canonical_root(tmp_path, capsys):
     real_anchor.mkdir()
 
     code, err, factory_calls = _cli_refusal(
-        tmp_path, capsys, canonical=decoy, anchor=real_anchor)
+        tmp_path, capsys, canonical=decoy, anchor=real_anchor
+    )
 
     assert code == 1
     assert "canonical_root_must_be_the_derived_anchor" in err
@@ -496,24 +588,42 @@ def test_cli_rejects_any_cap_other_than_22(tmp_path):
     from tokmo.programs.pulse_canary import run_canary_cli
 
     for value in (6, 10, 15, 21, 23, 100):
-        assert run_canary_cli([
-            "--mode", "bounded-live-canary",
-            "--market", "KR", "--symbol", "005930",
-            "--canonical-root", str(tmp_path / "canonical"),
-            "--project-root", str(tmp_path / "project"),
-            "--max-ticks", "5", "--max-provider-starts", str(value),
-            "--base-commit", "deadbeef",
-        ], evidence_root_override=tmp_path / "evidence") == 1, value
+        assert (
+            run_canary_cli(
+                [
+                    "--mode",
+                    "bounded-live-canary",
+                    "--market",
+                    "KR",
+                    "--symbol",
+                    "005930",
+                    "--canonical-root",
+                    str(tmp_path / "canonical"),
+                    "--project-root",
+                    str(tmp_path / "project"),
+                    "--max-ticks",
+                    "5",
+                    "--max-provider-starts",
+                    str(value),
+                    "--base-commit",
+                    "deadbeef",
+                ],
+                evidence_root_override=tmp_path / "evidence",
+            )
+            == 1
+        ), value
 
 
 def test_cli_anchor_defaults_to_the_derived_canonical_root():
     from tokmo.programs.pulse_canary import canonical_root_anchor
+
     assert canonical_root_anchor() == Path.home() / ".local/share/tokmo-v3"
 
 
 # ══════════════════════════════════════════════════════════════════════
 # Cadence receipts: freshness and coverage
 # ══════════════════════════════════════════════════════════════════════
+
 
 def _write_cadence_ledger(canonical: Path, rows) -> None:
     path = canonical / "ops" / "cadence_ticks.sqlite3"
@@ -523,9 +633,11 @@ def _write_cadence_ledger(canonical: Path, rows) -> None:
         connection.execute(
             "CREATE TABLE cadence_tick_receipts("
             "policy_version TEXT, scheduled_for_utc TEXT, status TEXT, "
-            "started_at TEXT, finished_at TEXT)")
+            "started_at TEXT, finished_at TEXT)"
+        )
         connection.executemany(
-            "INSERT INTO cadence_tick_receipts VALUES (?,?,?,?,?)", rows)
+            "INSERT INTO cadence_tick_receipts VALUES (?,?,?,?,?)", rows
+        )
         connection.commit()
     finally:
         connection.close()
@@ -539,9 +651,12 @@ def test_read_cadence_receipts_parses_the_durable_ledger(tmp_path):
     from tokmo.programs.canary_cadence_attribution import read_cadence_receipts
 
     canonical = tmp_path / "canonical"
-    _write_cadence_ledger(canonical, [
-        ("v7", _iso(T0), "COMPLETE", _iso(T0), _iso(T0 + timedelta(seconds=3))),
-    ])
+    _write_cadence_ledger(
+        canonical,
+        [
+            ("v7", _iso(T0), "COMPLETE", _iso(T0), _iso(T0 + timedelta(seconds=3))),
+        ],
+    )
     receipts = read_cadence_receipts(canonical)
     assert len(receipts) == 1
     assert receipts[0].policy_version == "v7"
@@ -551,28 +666,43 @@ def test_read_cadence_receipts_parses_the_durable_ledger(tmp_path):
 
 def test_read_cadence_receipts_returns_empty_when_ledger_absent(tmp_path):
     from tokmo.programs.canary_cadence_attribution import read_cadence_receipts
+
     assert read_cadence_receipts(tmp_path / "canonical") == ()
 
 
 def test_stale_receipts_are_not_fresh(tmp_path):
     from tokmo.programs.canary_cadence_attribution import (
-        CadenceReceiptWindow, fresh_receipts,
+        CadenceReceiptWindow,
+        fresh_receipts,
     )
+
     stale = CadenceReceiptWindow(
-        policy_version="v7", scheduled_for_utc=_iso(T0 - timedelta(hours=2)),
-        status="COMPLETE", started_at=T0 - timedelta(hours=2),
-        finished_at=T0 - timedelta(hours=2) + timedelta(seconds=3))
-    assert fresh_receipts((stale,), window_start=T0,
-                          window_end=T0 + timedelta(minutes=5)) == ()
+        policy_version="v7",
+        scheduled_for_utc=_iso(T0 - timedelta(hours=2)),
+        status="COMPLETE",
+        started_at=T0 - timedelta(hours=2),
+        finished_at=T0 - timedelta(hours=2) + timedelta(seconds=3),
+    )
+    assert (
+        fresh_receipts((stale,), window_start=T0, window_end=T0 + timedelta(minutes=5))
+        == ()
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════
 # Safety adjudication under the OS proof
 # ══════════════════════════════════════════════════════════════════════
 
-def _cadence_mutating_session(tmp_path, *, receipts, attested=True,
-                              mutate_protected=True, mutate_unknown=False,
-                              protected_mtime=None):
+
+def _cadence_mutating_session(
+    tmp_path,
+    *,
+    receipts,
+    attested=True,
+    mutate_protected=True,
+    mutate_unknown=False,
+    protected_mtime=None,
+):
     """Run a full session whose 'cadence' rewrites canonical paths."""
     from tokmo.programs.pulse_canary import CanaryDepsV1, run_canary_session
 
@@ -599,11 +729,16 @@ def _cadence_mutating_session(tmp_path, *, receipts, attested=True,
         return _make_success_quotes_fetch()(market, symbols, bearer=bearer)
 
     deps = CanaryDepsV1(
-        clock=lambda: clock["now"], token_fetch=lambda: "token",
-        quotes_fetch=quotes_fetch, sleep_until=lambda t: None,
+        clock=lambda: clock["now"],
+        token_fetch=lambda: "token",
+        quotes_fetch=quotes_fetch,
+        sleep_until=lambda t: None,
     )
     return run_canary_session(
-        root=tmp_path / "evidence", config=_config(), deps=deps, t0=T0,
+        root=tmp_path / "evidence",
+        config=_config(),
+        deps=deps,
+        t0=T0,
         canonical_root=canonical,
         protected_paths=("stores/latest_quotes.sqlite3",),
         expected_mutable_paths=(),
@@ -615,9 +750,14 @@ def _cadence_mutating_session(tmp_path, *, receipts, attested=True,
 
 def _receipt(started, finished):
     from tokmo.programs.canary_cadence_attribution import CadenceReceiptWindow
+
     return CadenceReceiptWindow(
-        policy_version="v7", scheduled_for_utc=_iso(started),
-        status="COMPLETE", started_at=started, finished_at=finished)
+        policy_version="v7",
+        scheduled_for_utc=_iso(started),
+        status="COMPLETE",
+        started_at=started,
+        finished_at=finished,
+    )
 
 
 def test_protected_change_is_excused_by_os_proof_plus_fresh_receipt(tmp_path):
@@ -642,8 +782,11 @@ def test_protected_change_fails_closed_with_a_missing_reader(tmp_path):
 
 
 def test_protected_change_fails_closed_with_a_stale_receipt(tmp_path):
-    stale = (_receipt(T0 - timedelta(hours=2),
-                      T0 - timedelta(hours=2) + timedelta(seconds=3)),)
+    stale = (
+        _receipt(
+            T0 - timedelta(hours=2), T0 - timedelta(hours=2) + timedelta(seconds=3)
+        ),
+    )
     result = _cadence_mutating_session(tmp_path, receipts=stale)
     assert result.stop_reason == "safety_gate_protected_mutation_no_fresh_receipt"
 
@@ -657,10 +800,13 @@ def test_protected_change_outside_the_cadence_window_fails_closed(tmp_path):
     """
     fresh_but_not_covering = (_receipt(T0, T0 + timedelta(seconds=3)),)
     result = _cadence_mutating_session(
-        tmp_path, receipts=fresh_but_not_covering,
-        protected_mtime=T0 + timedelta(minutes=30))
+        tmp_path,
+        receipts=fresh_but_not_covering,
+        protected_mtime=T0 + timedelta(minutes=30),
+    )
     assert result.stop_reason == (
-        "safety_gate_protected_mutation_outside_cadence_window")
+        "safety_gate_protected_mutation_outside_cadence_window"
+    )
 
 
 def test_protected_change_without_os_proof_fails_closed(tmp_path):
@@ -677,7 +823,8 @@ def test_unattributed_change_passes_with_os_proof_and_receipt(tmp_path):
     and the receipt attributes concurrent cadence activity."""
     covering = (_receipt(T0, T0 + timedelta(minutes=10)),)
     result = _cadence_mutating_session(
-        tmp_path, receipts=covering, mutate_protected=False, mutate_unknown=True)
+        tmp_path, receipts=covering, mutate_protected=False, mutate_unknown=True
+    )
     assert result.stop_reason == "all_ticks_complete"
 
 
@@ -686,7 +833,8 @@ def test_protected_and_unattributed_change_passes_with_os_proof_and_receipt(tmp_
     canary can't write and fresh receipts attribute the activity."""
     covering = (_receipt(T0, T0 + timedelta(minutes=10)),)
     result = _cadence_mutating_session(
-        tmp_path, receipts=covering, mutate_protected=True, mutate_unknown=True)
+        tmp_path, receipts=covering, mutate_protected=True, mutate_unknown=True
+    )
     assert result.stop_reason == "all_ticks_complete"
 
 
@@ -698,11 +846,16 @@ def test_clean_canonical_root_passes_with_os_proof(tmp_path):
     (canonical / "stores" / "latest_quotes.sqlite3").write_bytes(b"prot")
 
     deps = CanaryDepsV1(
-        clock=lambda: T0, token_fetch=lambda: "token",
-        quotes_fetch=_make_success_quotes_fetch(), sleep_until=lambda t: None,
+        clock=lambda: T0,
+        token_fetch=lambda: "token",
+        quotes_fetch=_make_success_quotes_fetch(),
+        sleep_until=lambda t: None,
     )
     result = run_canary_session(
-        root=tmp_path / "evidence", config=_config(), deps=deps, t0=T0,
+        root=tmp_path / "evidence",
+        config=_config(),
+        deps=deps,
+        t0=T0,
         canonical_root=canonical,
         protected_paths=("stores/latest_quotes.sqlite3",),
         expected_mutable_paths=(),
@@ -719,12 +872,18 @@ def test_clean_canonical_root_passes_with_os_proof(tmp_path):
 # The sandbox wrapper
 # ══════════════════════════════════════════════════════════════════════
 
+
 def test_wrapper_is_executable_and_syntactically_valid():
     assert WRAPPER.exists(), WRAPPER
     assert os.access(WRAPPER, os.X_OK), "wrapper must be executable"
-    assert subprocess.run(
-        [shutil.which("bash") or "/bin/bash", "-n", str(WRAPPER)],
-        capture_output=True, text=True).returncode == 0
+    assert (
+        subprocess.run(
+            [shutil.which("bash") or "/bin/bash", "-n", str(WRAPPER)],
+            capture_output=True,
+            text=True,
+        ).returncode
+        == 0
+    )
 
 
 def test_wrapper_denies_writes_to_the_resolved_canonical_root():
@@ -770,7 +929,7 @@ def test_wrapper_refuses_when_head_is_dirty_or_paths_missing(tmp_path):
     os.chmod(fake_project / "tools" / WRAPPER.name, 0o755)
 
     completed = subprocess.run(
-        [str(fake_project / "tools" / WRAPPER.name)],
-        capture_output=True, text=True)
+        [str(fake_project / "tools" / WRAPPER.name)], capture_output=True, text=True
+    )
     assert completed.returncode == 1
     assert "ERROR:" in completed.stderr

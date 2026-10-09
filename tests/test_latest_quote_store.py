@@ -1,21 +1,20 @@
+import ast
 import sqlite3
 import stat
 import time
-import ast
+from datetime import UTC, datetime
 from pathlib import Path
-from datetime import datetime, timezone
 
 import pytest
 
-import tokmo.records.latest_quotes as latest_quotes
+from tokmo.records import latest_quotes
 from tokmo.records.latest_quotes import (
     LatestQuoteStore,
     LatestQuoteStoreReadError,
 )
 from tokmo.values import TossCurrentPriceFact
 
-
-NOW = datetime(2026, 7, 28, 1, 2, 3, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 28, 1, 2, 3, tzinfo=UTC)
 
 
 def fact(
@@ -50,9 +49,7 @@ def test_fresh_store_creates_exact_strict_versioned_schema_and_reopens(tmp_path)
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
     with sqlite3.connect(path) as connection:
-        table_list = {
-            row[1]: row for row in connection.execute("PRAGMA table_list")
-        }
+        table_list = {row[1]: row for row in connection.execute("PRAGMA table_list")}
         assert table_list["latest_quotes"][5] == 1
         assert table_list["storage_metadata"][5] == 1
         assert connection.execute(
@@ -66,7 +63,7 @@ def test_fresh_store_creates_exact_strict_versioned_schema_and_reopens(tmp_path)
 
 def test_insert_read_order_and_update_round_trip_latest_only(tmp_path):
     path = tmp_path / "private" / "quotes.sqlite3"
-    later = datetime(2026, 7, 28, 2, 3, 4, tzinfo=timezone.utc)
+    later = datetime(2026, 7, 28, 2, 3, 4, tzinfo=UTC)
     store = LatestQuoteStore(path, clock=lambda: NOW)
     original = (fact("FixtureA"), fact("FixtureB", price="2"))
 
@@ -89,13 +86,16 @@ def test_insert_read_order_and_update_round_trip_latest_only(tmp_path):
     updated = LatestQuoteStore(path, clock=lambda: later).save_batch(changed)
 
     assert (updated.inserted_count, updated.updated_count) == (0, 2)
-    assert LatestQuoteStore(path, clock=lambda: later).read_latest(
-        source="fixture-source", symbols=("FixtureA", "FixtureB")
-    ) == changed
+    assert (
+        LatestQuoteStore(path, clock=lambda: later).read_latest(
+            source="fixture-source", symbols=("FixtureA", "FixtureB")
+        )
+        == changed
+    )
     with sqlite3.connect(path) as connection:
-        assert connection.execute(
-            "SELECT count(*) FROM latest_quotes"
-        ).fetchone() == (2,)
+        assert connection.execute("SELECT count(*) FROM latest_quotes").fetchone() == (
+            2,
+        )
 
 
 @pytest.mark.parametrize(
@@ -191,9 +191,7 @@ def test_oversized_private_fields_are_invalid_without_creating_file(
 
 def test_naive_clock_is_invalid_without_creating_file(tmp_path):
     path = tmp_path / "private" / "quotes.sqlite3"
-    store = LatestQuoteStore(
-        path, clock=lambda: datetime(2026, 7, 28, 1, 2, 3)
-    )
+    store = LatestQuoteStore(path, clock=lambda: datetime(2026, 7, 28, 1, 2, 3))
 
     receipt = store.save_batch((fact(),))
 
@@ -326,9 +324,9 @@ def test_lock_is_bounded_and_leaves_original_latest_value_unchanged(tmp_path):
 
     assert receipt.reason == "store_locked"
     assert time.monotonic() - started < 3.0
-    assert store.read_latest(
-        source="fixture-source", symbols=("FixtureA",)
-    ) == (original,)
+    assert store.read_latest(source="fixture-source", symbols=("FixtureA",)) == (
+        original,
+    )
 
 
 def test_read_is_read_only_while_another_connection_holds_begin_immediate(
@@ -345,9 +343,7 @@ def test_read_is_read_only_while_another_connection_holds_begin_immediate(
     assert blocker.execute("PRAGMA journal_mode=DELETE").fetchone() == ("delete",)
     blocker.execute("BEGIN IMMEDIATE")
     try:
-        read_back = store.read_latest(
-            source="fixture-source", symbols=("FixtureA",)
-        )
+        read_back = store.read_latest(source="fixture-source", symbols=("FixtureA",))
         assert not journal.exists()
     finally:
         blocker.execute("ROLLBACK")
@@ -382,9 +378,7 @@ def test_save_path_oserror_returns_closed_write_failure(tmp_path):
         ("provider_timestamp", "2026-07-28T01:02:03"),
     ],
 )
-def test_read_semantically_revalidates_manually_malformed_rows(
-    tmp_path, column, value
-):
+def test_read_semantically_revalidates_manually_malformed_rows(tmp_path, column, value):
     path = tmp_path / "private" / "quotes.sqlite3"
     store = LatestQuoteStore(path, clock=lambda: NOW)
     assert store.save_batch((fact(),)).status == "SAVED"
@@ -405,9 +399,10 @@ def test_rollback_journal_is_private_during_transaction_and_removed_after_close(
     tmp_path,
 ):
     path = tmp_path / "private" / "quotes.sqlite3"
-    assert LatestQuoteStore(path, clock=lambda: NOW).save_batch(
-        (fact(),)
-    ).status == "SAVED"
+    assert (
+        LatestQuoteStore(path, clock=lambda: NOW).save_batch((fact(),)).status
+        == "SAVED"
+    )
     journal = path.with_name(path.name + "-journal")
     connection = sqlite3.connect(path, isolation_level=None)
     prior = stat.S_IMODE(path.stat().st_mode)
@@ -448,9 +443,7 @@ class FailingConnection:
         self.connection.close()
 
 
-def test_forced_commit_failure_rolls_back_entire_update(
-    tmp_path, monkeypatch
-):
+def test_forced_commit_failure_rolls_back_entire_update(tmp_path, monkeypatch):
     path = tmp_path / "private" / "quotes.sqlite3"
     original = (fact("FixtureA"), fact("FixtureB", price="2"))
     store = LatestQuoteStore(path, clock=lambda: NOW)
@@ -458,9 +451,7 @@ def test_forced_commit_failure_rolls_back_entire_update(
     real_connect = sqlite3.connect
 
     def failing_connect(*args, **kwargs):
-        return FailingConnection(
-            real_connect(*args, **kwargs), "COMMIT"
-        )
+        return FailingConnection(real_connect(*args, **kwargs), "COMMIT")
 
     monkeypatch.setattr(latest_quotes.sqlite3, "connect", failing_connect)
     receipt = store.save_batch(
@@ -469,9 +460,10 @@ def test_forced_commit_failure_rolls_back_entire_update(
     monkeypatch.setattr(latest_quotes.sqlite3, "connect", real_connect)
 
     assert receipt.reason == "store_write_failed"
-    assert store.read_latest(
-        source="fixture-source", symbols=("FixtureA", "FixtureB")
-    ) == original
+    assert (
+        store.read_latest(source="fixture-source", symbols=("FixtureA", "FixtureB"))
+        == original
+    )
 
 
 def test_failure_between_ddl_statements_rolls_back_and_clean_reopen_saves(
@@ -532,16 +524,18 @@ def test_consumer_read_preserves_store_locked_reason(monkeypatch, tmp_path):
     monkeypatch.setattr(store, "_connect", locked_connect)
     with pytest.raises(LatestQuoteStoreReadError) as captured:
         store.read_latest_with_stored_at(
-            source="fixture-source", symbols=("FixtureA",),
+            source="fixture-source",
+            symbols=("FixtureA",),
         )
     assert captured.value.reason == "store_locked"
 
 
 def test_connection_pragmas_and_pilot_import_boundaries(tmp_path):
     path = tmp_path / "private" / "quotes.sqlite3"
-    assert LatestQuoteStore(path, clock=lambda: NOW).save_batch(
-        (fact(),)
-    ).status == "SAVED"
+    assert (
+        LatestQuoteStore(path, clock=lambda: NOW).save_batch((fact(),)).status
+        == "SAVED"
+    )
     with sqlite3.connect(path) as connection:
         assert connection.execute("PRAGMA journal_mode").fetchone() == ("delete",)
         assert connection.execute("PRAGMA synchronous").fetchone() == (2,)
@@ -559,9 +553,7 @@ def test_connection_pragmas_and_pilot_import_boundaries(tmp_path):
                 result.add(node.module)
         return result
 
-    assert not any(
-        name.startswith("tokmo.facts") for name in imports(records_path)
-    )
+    assert not any(name.startswith("tokmo.facts") for name in imports(records_path))
     forbidden = (
         "live",
         "transport",

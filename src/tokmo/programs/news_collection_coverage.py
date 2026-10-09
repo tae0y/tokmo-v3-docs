@@ -1,7 +1,7 @@
 """Bounded, read-only coverage evidence from the existing polling receipts."""
 
-from datetime import timedelta, timezone
 import json
+from datetime import UTC, timedelta
 from pathlib import Path
 
 from tokmo.programs.news_poll_policy import NewsGroup, news_tick_id
@@ -17,7 +17,7 @@ def recent_complete_polls(receipts, *, now):
     This reads a fixed number of known slots, never the whole receipt history.
     """
     latest = {}
-    minute = now.astimezone(timezone.utc).replace(second=0, microsecond=0)
+    minute = now.astimezone(UTC).replace(second=0, microsecond=0)
     for offset in range(61):
         scheduled = minute - timedelta(minutes=offset)
         for group in NewsGroup:
@@ -36,8 +36,10 @@ def recent_complete_polls(receipts, *, now):
                     for source, entries in grouped.items():
                         if source in latest:
                             continue
-                        if all(collection_complete(entry)
-                               and entry.get("conflict", 0) == 0 for entry in entries):
+                        if all(
+                            collection_complete(entry) and entry.get("conflict", 0) == 0
+                            for entry in entries
+                        ):
                             latest[source] = scheduled
                 except (OSError, ValueError, KeyError, TypeError, AttributeError):
                     # An unreadable receipt is not proof of successful coverage.

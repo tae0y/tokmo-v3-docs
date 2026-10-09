@@ -11,21 +11,21 @@ universe is derived exclusively from the injected CompleteHoldingsSnapshot.
 Transport and clock are mandatory injections.
 """
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
-import json
 
 from tokmo.facts.eia import LiveAttemptOutcome
 from tokmo.facts.sec import (
+    _FAILURE_REASONS,
     CIK_DIGITS,
     SecRequest,
     SecTickerMapping,
     SecTransport,
+    _aligned_recent,
     _SecTransportFailure,
     _SecTransportSuccess,
-    _FAILURE_REASONS,
-    _aligned_recent,
     build_submissions_request,
     build_tickers_request,
 )
@@ -35,12 +35,13 @@ from tokmo.values.holdings import CompleteHoldingsSnapshot
 from tokmo.values.session_gate import Market
 
 SOURCE = SEC_SOURCE
-from tokmo.values.sec_provenance import (  # noqa: E402
+from tokmo.values.sec_provenance import (
     COMBINED_PROVENANCE,
     TARGET_PROVENANCE,
     VALID_TARGET_PROVENANCE,
     WATCHLIST_PROVENANCE,
 )
+
 MIN_FILING_DATE = date(2026, 8, 3)
 MAX_ADMITTED_TARGETS = 20
 MAX_REQUESTS_PER_TICK = MAX_ADMITTED_TARGETS + 1  # 1 registry + 20 submissions
@@ -53,6 +54,7 @@ Clock = Callable[[], datetime]
 # ---------------------------------------------------------------------------
 # Result types
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class TickerRegistryResult:
@@ -73,6 +75,7 @@ class SecTargetedQueryResult:
 # ---------------------------------------------------------------------------
 # Pure: target universe extraction from holdings snapshot
 # ---------------------------------------------------------------------------
+
 
 def extract_us_holdings_symbols(
     snapshot: CompleteHoldingsSnapshot,
@@ -139,6 +142,7 @@ def merge_fallback_target_provenance(
 # Pure: multi-ticker registry parser
 # ---------------------------------------------------------------------------
 
+
 def parse_company_tickers_multi(
     body: bytes,
     *,
@@ -171,7 +175,7 @@ def parse_company_tickers_multi(
         if ticker not in tickers:
             continue
         cik_number = entry["cik_str"]
-        if not 0 < cik_number < 10 ** CIK_DIGITS or not entry["title"]:
+        if not 0 < cik_number < 10**CIK_DIGITS or not entry["title"]:
             return UnavailableFact(SOURCE, "contract_mismatch", observed_at)
         mappings[ticker] = SecTickerMapping(
             ticker=ticker,
@@ -185,6 +189,7 @@ def parse_company_tickers_multi(
 # ---------------------------------------------------------------------------
 # Pure: multi-filing submissions parser (ALL rows >= min_filing_date)
 # ---------------------------------------------------------------------------
+
 
 def parse_submissions_all(
     body: bytes,
@@ -237,9 +242,7 @@ def parse_submissions_all(
             if not isinstance(value, str) or not value:
                 return UnavailableFact(SOURCE, "contract_mismatch", observed_at)
 
-        raw_report_date = (
-            raw_report_dates[i] if raw_report_dates is not None else None
-        )
+        raw_report_date = raw_report_dates[i] if raw_report_dates is not None else None
         raw_is_xbrl = raw_is_xbrls[i] if raw_is_xbrls is not None else None
 
         if raw_is_xbrl is not None and raw_is_xbrl not in (0, 1):
@@ -275,6 +278,7 @@ def parse_submissions_all(
 # ---------------------------------------------------------------------------
 # Query wrappers (transport + parse, one call each)
 # ---------------------------------------------------------------------------
+
 
 def query_company_tickers_multi(
     *,
@@ -341,23 +345,17 @@ def _query(
         parsed = parse(outcome.body, observed_at)
         del outcome
         if isinstance(parsed, success_type):
-            return SecTargetedQueryResult(
-                parsed, LiveAttemptOutcome(code="success")
-            )
+            return SecTargetedQueryResult(parsed, LiveAttemptOutcome(code="success"))
         return SecTargetedQueryResult(
             parsed, LiveAttemptOutcome(code="response_contract_failure")
         )
 
     if isinstance(outcome, _SecTransportFailure):
         reason = _FAILURE_REASONS[outcome.code]
-        fact = UnavailableFact(
-            SOURCE, reason, observed_at, outcome.retry_after
-        )
+        fact = UnavailableFact(SOURCE, reason, observed_at, outcome.retry_after)
         return SecTargetedQueryResult(
             fact,
-            LiveAttemptOutcome(
-                code=outcome.code, retry_after=outcome.retry_after
-            ),
+            LiveAttemptOutcome(code=outcome.code, retry_after=outcome.retry_after),
         )
 
     return SecTargetedQueryResult(

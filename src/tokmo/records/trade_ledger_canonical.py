@@ -86,16 +86,15 @@ def canonical_payload_bytes(event: TradeLedgerEvent) -> bytes:
         "medium_raw": _nfc(event.medium_raw),
         "currency_raw": _nfc(event.currency_raw),
         "settlement_date": (
-            None if event.settlement_date is None
-            else event.settlement_date.isoformat()
+            None if event.settlement_date is None else event.settlement_date.isoformat()
         ),
         "fee": canonical_decimal_string(event.fee),
         "tax": canonical_decimal_string(event.tax),
         "supersedes_source_record_key": _nfc(event.supersedes_source_record_key),
     }
-    return json.dumps(
-        payload, separators=(",", ":"), ensure_ascii=False
-    ).encode("utf-8")
+    return json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode(
+        "utf-8"
+    )
 
 
 def payload_hash_hex(payload: bytes) -> str:

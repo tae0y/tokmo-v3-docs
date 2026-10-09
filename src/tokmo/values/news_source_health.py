@@ -34,9 +34,13 @@ MAX_ATTEMPTS_PER_NOTIFICATION = 8
 MAX_DEGRADED_ROWS_PER_INCIDENT = 3
 HEALTH_TZ_KEY = "Asia/Seoul"
 
-DELIVERY_FAILURE_REASONS = frozenset({
-    "provider_timeout", "provider_failure", "attempt_stale_crash",
-})
+DELIVERY_FAILURE_REASONS = frozenset(
+    {
+        "provider_timeout",
+        "provider_failure",
+        "attempt_stale_crash",
+    }
+)
 
 # Static sanitized coverage-impact lines keyed by CLI source slug. The
 # finnhub-company wording reflects the 2-calendar-day request window that

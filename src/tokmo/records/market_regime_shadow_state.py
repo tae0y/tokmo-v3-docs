@@ -1,12 +1,11 @@
 """Private identity-scoped state for the market-regime shadow lane."""
 
-from dataclasses import dataclass
-from datetime import date, datetime
 import fcntl
 import json
 import os
-from pathlib import Path
 import sqlite3
+from dataclasses import dataclass
+from pathlib import Path
 
 from tokmo.values.ops_kernel import iso
 
@@ -72,8 +71,11 @@ class MarketRegimeShadowStateStore:
         os.chmod(self.path, 0o600)
 
     def acquire_identity_lease(self, identity_digest) -> IdentityLeaseV1 | None:
-        if (type(identity_digest) is not str or len(identity_digest) != 64
-                or any(char not in "0123456789abcdef" for char in identity_digest)):
+        if (
+            type(identity_digest) is not str
+            or len(identity_digest) != 64
+            or any(char not in "0123456789abcdef" for char in identity_digest)
+        ):
             raise ValueError("invalid identity digest")
         lease_dir = self.path.with_name(self.path.name + ".leases")
         lease_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -98,7 +100,8 @@ class MarketRegimeShadowStateStore:
             row = connection.execute(
                 "SELECT c.state,r.input_digest FROM market_regime_shadow_claim c "
                 "LEFT JOIN market_regime_shadow_result r USING(identity_digest) "
-                "WHERE c.identity_digest=?", (identity_digest,),
+                "WHERE c.identity_digest=?",
+                (identity_digest,),
             ).fetchone()
         finally:
             connection.close()
@@ -116,13 +119,28 @@ class MarketRegimeShadowStateStore:
         lease.close()
         return None
 
-    def claim(self, *, identity_digest, program_id, spec_digest, policy_version,
-              market, symbol, completed_session_date, adjustment_mode,
-              request_identity, owner_invocation_id, owner_started_at,
-              owner_lease_key, identity_lease) -> ShadowClaimV1:
-        if (not isinstance(identity_lease, IdentityLeaseV1)
-                or identity_lease.key != owner_lease_key
-                or identity_lease._descriptor is None):
+    def claim(
+        self,
+        *,
+        identity_digest,
+        program_id,
+        spec_digest,
+        policy_version,
+        market,
+        symbol,
+        completed_session_date,
+        adjustment_mode,
+        request_identity,
+        owner_invocation_id,
+        owner_started_at,
+        owner_lease_key,
+        identity_lease,
+    ) -> ShadowClaimV1:
+        if (
+            not isinstance(identity_lease, IdentityLeaseV1)
+            or identity_lease.key != owner_lease_key
+            or identity_lease._descriptor is None
+        ):
             raise ValueError("live identity lease required")
         connection = sqlite3.connect(self.path, isolation_level=None)
         try:
@@ -131,12 +149,14 @@ class MarketRegimeShadowStateStore:
             row = connection.execute(
                 "SELECT c.state,r.input_digest FROM market_regime_shadow_claim c "
                 "LEFT JOIN market_regime_shadow_result r USING(identity_digest) "
-                "WHERE c.identity_digest=?", (identity_digest,),
+                "WHERE c.identity_digest=?",
+                (identity_digest,),
             ).fetchone()
             if row is not None and row["state"] == "CLAIMED":
                 owner = connection.execute(
                     "SELECT owner_invocation_id FROM market_regime_shadow_claim "
-                    "WHERE identity_digest=?", (identity_digest,),
+                    "WHERE identity_digest=?",
+                    (identity_digest,),
                 ).fetchone()[0]
                 if owner != owner_invocation_id:
                     connection.execute(
@@ -150,26 +170,50 @@ class MarketRegimeShadowStateStore:
             if row is not None:
                 connection.execute("COMMIT")
                 return ShadowClaimV1(
-                    "reused" if row["state"] == "SUCCEEDED" else
-                    "failed" if row["state"] == "FAILED" else "in_progress",
-                    identity_digest, row["input_digest"],
+                    "reused"
+                    if row["state"] == "SUCCEEDED"
+                    else "failed"
+                    if row["state"] == "FAILED"
+                    else "in_progress",
+                    identity_digest,
+                    row["input_digest"],
                 )
             connection.execute(
                 "INSERT INTO market_regime_shadow_claim VALUES(?,?,?,?,?,?,?,?,?,"
                 "'CLAIMED',?,?,?,?,NULL,NULL)",
-                (identity_digest, program_id, spec_digest, policy_version,
-                 market.value, symbol, completed_session_date.isoformat(), adjustment_mode.value,
-                 request_identity, owner_invocation_id, iso(owner_started_at),
-                 owner_lease_key, iso(owner_started_at)),
+                (
+                    identity_digest,
+                    program_id,
+                    spec_digest,
+                    policy_version,
+                    market.value,
+                    symbol,
+                    completed_session_date.isoformat(),
+                    adjustment_mode.value,
+                    request_identity,
+                    owner_invocation_id,
+                    iso(owner_started_at),
+                    owner_lease_key,
+                    iso(owner_started_at),
+                ),
             )
             connection.execute("COMMIT")
         finally:
             connection.close()
         return ShadowClaimV1("owner", identity_digest)
 
-    def succeed(self, identity_digest, *, input_digest, pack_digest, fetched_at,
-                evaluated_at, completed_session_date, normalized_bar_count,
-                result_payload):
+    def succeed(
+        self,
+        identity_digest,
+        *,
+        input_digest,
+        pack_digest,
+        fetched_at,
+        evaluated_at,
+        completed_session_date,
+        normalized_bar_count,
+        result_payload,
+    ):
         encoded = json.dumps(result_payload, sort_keys=True, separators=(",", ":"))
         if len(encoded.encode()) > 65536:
             raise ValueError("result payload cap")
@@ -178,12 +222,21 @@ class MarketRegimeShadowStateStore:
             connection.execute("BEGIN IMMEDIATE")
             connection.execute(
                 "INSERT INTO market_regime_shadow_result VALUES(?,?,?,?,?,?,?,?)",
-                (identity_digest, input_digest, pack_digest, iso(fetched_at), iso(evaluated_at),
-                 completed_session_date.isoformat(), normalized_bar_count, encoded),
+                (
+                    identity_digest,
+                    input_digest,
+                    pack_digest,
+                    iso(fetched_at),
+                    iso(evaluated_at),
+                    completed_session_date.isoformat(),
+                    normalized_bar_count,
+                    encoded,
+                ),
             )
             changed = connection.execute(
                 "UPDATE market_regime_shadow_claim SET state='SUCCEEDED',finished_at=? "
-                "WHERE identity_digest=? AND state='CLAIMED'", (iso(evaluated_at), identity_digest),
+                "WHERE identity_digest=? AND state='CLAIMED'",
+                (iso(evaluated_at), identity_digest),
             ).rowcount
             if changed != 1:
                 connection.execute("ROLLBACK")

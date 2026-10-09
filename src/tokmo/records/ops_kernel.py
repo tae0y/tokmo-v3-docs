@@ -1,57 +1,117 @@
 """Hardened, closed-command SQLite store for Slice D operational transitions."""
 
-from contextlib import contextmanager
-from collections import Counter
-from datetime import date, datetime, timedelta, timezone
 import fcntl
 import hashlib
 import json
 import os
 import re
-from pathlib import Path
 import sqlite3
 import stat
 import uuid
-from typing import Mapping, NamedTuple
+from collections import Counter
+from collections.abc import Mapping
+from contextlib import contextmanager
+from datetime import UTC, date, datetime, timedelta, timezone
+from pathlib import Path
+from typing import NamedTuple
 
 from tokmo.records.durability import fsync_directory
-from tokmo.records.private_sqlite import prepare_private_path, private_creation, sqlite_locked
+from tokmo.records.private_sqlite import (
+    prepare_private_path,
+    private_creation,
+    sqlite_locked,
+)
 from tokmo.values.cadence_policy import (
-    CADENCE_CHILD_LIMIT_FIELDS, CALENDAR_ATTEMPT_MAX, CALENDAR_RETRY_DELAY_MINUTES,
-    CADENCE_OPERATIONS, CadencePolicyV1, GROUP_LIMIT_FIELDS, TICK_REQUEST_LIMITS_V1,
-    TradesChildLimitsV1, policy_digest, policy_snapshot, validate_cadence_operation,
+    CADENCE_CHILD_LIMIT_FIELDS,
+    CADENCE_OPERATIONS,
+    CALENDAR_ATTEMPT_MAX,
+    CALENDAR_RETRY_DELAY_MINUTES,
+    GROUP_LIMIT_FIELDS,
+    TICK_REQUEST_LIMITS_V1,
+    CadencePolicyV1,
+    TradesChildLimitsV1,
+    policy_digest,
+    policy_snapshot,
+    validate_cadence_operation,
 )
 from tokmo.values.material_pack import JobKind, canonical_decode, canonical_encode
 from tokmo.values.ops_kernel import (
-    AlertChannel, AlertOrigin, AlertOutboxV1, AlertResolution, AlertStatus,
-    AuditBacklogV1, AuditCompletionV1, CadenceBindingError, CadenceBudgetExceeded,
-    CadenceCalendarBackoffError, CadenceCalendarClosedError,
-    CadenceCalendarExhaustedError, CadenceDuplicateError,
-    CadencePolicyMismatchError, CadenceTransitionError, CalendarStartReceiptV1,
-    CandidateAssignment, CandidateManifestV1, CandidateState,
-    DeferredAttemptV1, DeferredCandidateV1, DispositionAction, DispositionV1, FeedbackEventKind,
-    FeedbackInboundV1, IncidentKeyV1, IncidentObservationV1, IncidentState,
-    IncidentV1, ManifestState, ManifestSummaryV1, Market, MaterialKindV1,
+    _HYPOTHESIS_TERMINAL_STATES,
+    _HYPOTHESIS_TRANSITIONS,
+    AdmissionDecisionV1,
+    AlertChannel,
+    AlertOrigin,
+    AlertOutboxV1,
+    AlertResolution,
+    AlertStatus,
+    AuditBacklogV1,
+    AuditCompletionV1,
+    CadenceBindingError,
+    CadenceBudgetExceeded,
+    CadenceCalendarBackoffError,
+    CadenceCalendarClosedError,
+    CadenceCalendarExhaustedError,
+    CadenceDuplicateError,
+    CadencePolicyMismatchError,
+    CadenceTransitionError,
+    CalendarStartReceiptV1,
+    CandidateAssignment,
+    CandidateManifestV1,
+    CandidateState,
+    DeferredAttemptV1,
+    DeferredCandidateV1,
+    DeferredTerminalState,
+    DispositionAction,
+    DispositionV1,
+    FeedbackEventKind,
+    FeedbackInboundV1,
+    HypothesisMergeOutcome,
+    HypothesisRelationV1,
+    HypothesisSightingV1,
+    HypothesisState,
+    HypothesisV1,
+    IncidentKeyV1,
+    IncidentObservationV1,
+    IncidentState,
+    IncidentV1,
+    ManifestState,
+    ManifestSummaryV1,
+    Market,
+    MaterialKindV1,
+    MergeReviewV1,
     OpsKernelBudgetExceeded,
-    OpsKernelConflictError, OpsKernelCooldownActive, OpsKernelCorruptError,
-    OpsKernelLockedError, OpsKernelRoleError, OpsKernelTransitionError,
+    OpsKernelConflictError,
+    OpsKernelCooldownActive,
+    OpsKernelCorruptError,
+    OpsKernelLockedError,
     OpsKernelMigrationRequiredError,
-    ProducerRole, ReplayResult, RequestEndpointV1, ReservationCountsV1,
-    DeferredTerminalState, HypothesisMergeOutcome, HypothesisSightingV1,
-    HypothesisState, HypothesisV1, TrackingCandidateV1, TriggerKind,
-    canonical_index_keys, created_on_or_after, hypothesis_identity_digest,
-    iso, parse_iso,
-    validate_failure_reason, validate_resolution_reason, require_token,
-    _HYPOTHESIS_TRANSITIONS, _HYPOTHESIS_TERMINAL_STATES,
-    HypothesisRelationV1, MergeReviewV1, SemanticDecisionV1,
-    SemanticClassification, AdmissionDecisionV1,
-    WeeklyReviewRunV1, WeeklyReviewPairV1,
+    OpsKernelRoleError,
+    OpsKernelTransitionError,
+    ProducerRole,
+    ReplayResult,
+    ReservationCountsV1,
+    SemanticClassification,
+    SemanticDecisionV1,
+    TrackingCandidateV1,
+    TriggerKind,
+    WeeklyReviewPairV1,
+    WeeklyReviewRunV1,
+    created_on_or_after,
+    iso,
+    parse_iso,
+    require_token,
+    validate_failure_reason,
+    validate_resolution_reason,
 )
 from tokmo.values.request_parity import (
-    PROVIDER_HOST, REQUEST_JOB_SCOPES, REQUEST_OPERATION_SPECS, REQUEST_PATHS,
-    RequestOperation, canonical_params_digest, validate_canonical_params,
+    PROVIDER_HOST,
+    REQUEST_JOB_SCOPES,
+    REQUEST_OPERATION_SPECS,
+    REQUEST_PATHS,
+    RequestOperation,
+    canonical_params_digest,
+    validate_canonical_params,
 )
-
 
 SCHEMA_VERSION = 15
 DEFERRED_ATTEMPTS_MAX = 8640
@@ -66,7 +126,6 @@ class _ReconciledAnalysisResultV1(NamedTuple):
     decision_id: None
     artifact_digest: None
     analyzed_at: datetime
-
 
 
 def _ts27(column):
@@ -87,43 +146,104 @@ def _ts27(column):
 
 def _sha256(raw):
     constants = (
-        0x428A2F98, 0x71374491, 0xB5C0FBCF, 0xE9B5DBA5, 0x3956C25B, 0x59F111F1,
-        0x923F82A4, 0xAB1C5ED5, 0xD807AA98, 0x12835B01, 0x243185BE, 0x550C7DC3,
-        0x72BE5D74, 0x80DEB1FE, 0x9BDC06A7, 0xC19BF174, 0xE49B69C1, 0xEFBE4786,
-        0x0FC19DC6, 0x240CA1CC, 0x2DE92C6F, 0x4A7484AA, 0x5CB0A9DC, 0x76F988DA,
-        0x983E5152, 0xA831C66D, 0xB00327C8, 0xBF597FC7, 0xC6E00BF3, 0xD5A79147,
-        0x06CA6351, 0x14292967, 0x27B70A85, 0x2E1B2138, 0x4D2C6DFC, 0x53380D13,
-        0x650A7354, 0x766A0ABB, 0x81C2C92E, 0x92722C85, 0xA2BFE8A1, 0xA81A664B,
-        0xC24B8B70, 0xC76C51A3, 0xD192E819, 0xD6990624, 0xF40E3585, 0x106AA070,
-        0x19A4C116, 0x1E376C08, 0x2748774C, 0x34B0BCB5, 0x391C0CB3, 0x4ED8AA4A,
-        0x5B9CCA4F, 0x682E6FF3, 0x748F82EE, 0x78A5636F, 0x84C87814, 0x8CC70208,
-        0x90BEFFFA, 0xA4506CEB, 0xBEF9A3F7, 0xC67178F2,
+        0x428A2F98,
+        0x71374491,
+        0xB5C0FBCF,
+        0xE9B5DBA5,
+        0x3956C25B,
+        0x59F111F1,
+        0x923F82A4,
+        0xAB1C5ED5,
+        0xD807AA98,
+        0x12835B01,
+        0x243185BE,
+        0x550C7DC3,
+        0x72BE5D74,
+        0x80DEB1FE,
+        0x9BDC06A7,
+        0xC19BF174,
+        0xE49B69C1,
+        0xEFBE4786,
+        0x0FC19DC6,
+        0x240CA1CC,
+        0x2DE92C6F,
+        0x4A7484AA,
+        0x5CB0A9DC,
+        0x76F988DA,
+        0x983E5152,
+        0xA831C66D,
+        0xB00327C8,
+        0xBF597FC7,
+        0xC6E00BF3,
+        0xD5A79147,
+        0x06CA6351,
+        0x14292967,
+        0x27B70A85,
+        0x2E1B2138,
+        0x4D2C6DFC,
+        0x53380D13,
+        0x650A7354,
+        0x766A0ABB,
+        0x81C2C92E,
+        0x92722C85,
+        0xA2BFE8A1,
+        0xA81A664B,
+        0xC24B8B70,
+        0xC76C51A3,
+        0xD192E819,
+        0xD6990624,
+        0xF40E3585,
+        0x106AA070,
+        0x19A4C116,
+        0x1E376C08,
+        0x2748774C,
+        0x34B0BCB5,
+        0x391C0CB3,
+        0x4ED8AA4A,
+        0x5B9CCA4F,
+        0x682E6FF3,
+        0x748F82EE,
+        0x78A5636F,
+        0x84C87814,
+        0x8CC70208,
+        0x90BEFFFA,
+        0xA4506CEB,
+        0xBEF9A3F7,
+        0xC67178F2,
     )
     state = [
-        0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A,
-        0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19,
+        0x6A09E667,
+        0xBB67AE85,
+        0x3C6EF372,
+        0xA54FF53A,
+        0x510E527F,
+        0x9B05688C,
+        0x1F83D9AB,
+        0x5BE0CD19,
     ]
     bit_length = len(raw) * 8
     padded = raw + b"\x80"
     padded += b"\0" * ((55 - len(raw)) % 64) + bit_length.to_bytes(8, "big")
     rotate = lambda value, count: (
-        (value >> count) | (value << (32 - count))
-    ) & 0xFFFFFFFF
+        ((value >> count) | (value << (32 - count))) & 0xFFFFFFFF
+    )
     for offset in range(0, len(padded), 64):
         words = [
-            int.from_bytes(padded[offset + index:offset + index + 4], "big")
+            int.from_bytes(padded[offset + index : offset + index + 4], "big")
             for index in range(0, 64, 4)
         ]
         for index in range(16, 64):
-            s0 = rotate(words[index - 15], 7) ^ rotate(words[index - 15], 18) ^ (
-                words[index - 15] >> 3
+            s0 = (
+                rotate(words[index - 15], 7)
+                ^ rotate(words[index - 15], 18)
+                ^ (words[index - 15] >> 3)
             )
-            s1 = rotate(words[index - 2], 17) ^ rotate(words[index - 2], 19) ^ (
-                words[index - 2] >> 10
+            s1 = (
+                rotate(words[index - 2], 17)
+                ^ rotate(words[index - 2], 19)
+                ^ (words[index - 2] >> 10)
             )
-            words.append(
-                (words[index - 16] + s0 + words[index - 7] + s1) & 0xFFFFFFFF
-            )
+            words.append((words[index - 16] + s0 + words[index - 7] + s1) & 0xFFFFFFFF)
         a, b, c, d, e, f, g, h = state
         for index in range(64):
             upper = rotate(e, 6) ^ rotate(e, 11) ^ rotate(e, 25)
@@ -132,9 +252,16 @@ def _sha256(raw):
             lower = rotate(a, 2) ^ rotate(a, 13) ^ rotate(a, 22)
             majority = (a & b) ^ (a & c) ^ (b & c)
             second = (lower + majority) & 0xFFFFFFFF
-            h, g, f, e, d, c, b, a = g, f, e, (d + first) & 0xFFFFFFFF, c, b, a, (
-                first + second
-            ) & 0xFFFFFFFF
+            h, g, f, e, d, c, b, a = (
+                g,
+                f,
+                e,
+                (d + first) & 0xFFFFFFFF,
+                c,
+                b,
+                a,
+                (first + second) & 0xFFFFFFFF,
+            )
         state = [
             (left + right) & 0xFFFFFFFF
             for left, right in zip(state, (a, b, c, d, e, f, g, h))
@@ -142,13 +269,33 @@ def _sha256(raw):
     return "".join(f"{value:08x}" for value in state)
 
 
-def _checkpoint_binding_digest(*, schema_version, tick_id, job_scope, ordinal,
-                               account_scope, window_from, window_to,
-                               request_cursor, page_digest, has_next, next_cursor):
+def _checkpoint_binding_digest(
+    *,
+    schema_version,
+    tick_id,
+    job_scope,
+    ordinal,
+    account_scope,
+    window_from,
+    window_to,
+    request_cursor,
+    page_digest,
+    has_next,
+    next_cursor,
+):
     """Bind page content and every durable primitive without importing value types."""
     projection = (
-        schema_version, tick_id, job_scope, ordinal, account_scope, window_from,
-        window_to, request_cursor, page_digest, has_next, next_cursor,
+        schema_version,
+        tick_id,
+        job_scope,
+        ordinal,
+        account_scope,
+        window_from,
+        window_to,
+        request_cursor,
+        page_digest,
+        has_next,
+        next_cursor,
     )
     encoded = bytearray()
     for value in projection:
@@ -443,7 +590,7 @@ CREATE TABLE planned_requests(
     (length(checkpoint_digest)=64 AND NOT checkpoint_digest GLOB '*[^0-9a-f]*')),
   PRIMARY KEY(tick_id,job_scope,ordinal),
   CHECK((operation='TOKEN')=(method='POST')),
-  CHECK((operation='TOKEN')=(normalized_path_template={REQUEST_OPERATION_SPECS['TOKEN'][1]!r})),
+  CHECK((operation='TOKEN')=(normalized_path_template={REQUEST_OPERATION_SPECS["TOKEN"][1]!r})),
   CHECK((operation='ACCOUNT_HOLDINGS')=(account_ordinal IS NOT NULL)),
   CHECK((operation IN ('CALENDAR_DAY_KR','CALENDAR_DAY_US'))=
         (market IS NOT NULL AND local_trade_date IS NOT NULL)),
@@ -839,41 +986,81 @@ CREATE INDEX hypothesis_admission_decisions_hypothesis
 
 
 SCHEMA_SQL = (
-    _CORE_SCHEMA_SQL + _CADENCE_SCHEMA_SQL + _V7_ANALYSIS_SCHEMA_SQL
-    + _HYPOTHESIS_SCHEMA_BLOCK + _SEMANTIC_SCHEMA_BLOCK
+    _CORE_SCHEMA_SQL
+    + _CADENCE_SCHEMA_SQL
+    + _V7_ANALYSIS_SCHEMA_SQL
+    + _HYPOTHESIS_SCHEMA_BLOCK
+    + _SEMANTIC_SCHEMA_BLOCK
     + f"PRAGMA user_version={SCHEMA_VERSION};\n"
 )
-TABLES = frozenset({
-    "manifest_runs", "candidate_manifest", "dispositions", "alert_outbox",
-    "incidents", "deferred_candidates", "sample_rotation", "audit_coverage",
-    "audit_backlog", "request_day_counters", "runtime_request_reservations",
-    "development_request_reservations", "endpoint_cooldowns", "feedback_inbound",
-    "analysis_batches", "subject_baselines", "quote_state_history",
-    "deferred_attempts", "planned_requests",
-    "calendar_request_counters", "planned_request_pages",
-    "cadence_ticks", "cadence_wire_starts",
-    "cadence_calendar_slots", "cadence_calendar_attempts",
-    "analysis_requests", "analysis_coverage",
-    "hypotheses", "hypothesis_sightings", "hypothesis_index",
-    "hypothesis_lifecycle", "shadow_recall_records", "candidate_failures",
-    "hypothesis_relations", "merge_review_queue", "weekly_review_runs",
-    "weekly_review_pairs", "hypothesis_admission_decisions",
-})
-INDEXES = frozenset({
-    "alert_outbox_decision_open", "alert_outbox_dedupe_open",
-    "deferred_attempts_candidate", "analysis_batches_open",
-    "analysis_batches_started_run", "subject_baselines_scope",
-    "quote_state_history_subject", "planned_requests_open",
-    "cadence_wire_starts_open", "cadence_calendar_attempts_open",
-    "analysis_coverage_latest",
-    "hypotheses_open", "hypothesis_sightings_hypothesis",
-    "hypothesis_index_hypothesis", "hypothesis_lifecycle_hypothesis",
-    "candidate_failures_source",
-    "hypothesis_relations_a", "hypothesis_relations_b",
-    "merge_review_queue_open", "merge_review_queue_a",
-    "weekly_review_pairs_week",
-    "hypothesis_admission_decisions_hypothesis",
-})
+TABLES = frozenset(
+    {
+        "manifest_runs",
+        "candidate_manifest",
+        "dispositions",
+        "alert_outbox",
+        "incidents",
+        "deferred_candidates",
+        "sample_rotation",
+        "audit_coverage",
+        "audit_backlog",
+        "request_day_counters",
+        "runtime_request_reservations",
+        "development_request_reservations",
+        "endpoint_cooldowns",
+        "feedback_inbound",
+        "analysis_batches",
+        "subject_baselines",
+        "quote_state_history",
+        "deferred_attempts",
+        "planned_requests",
+        "calendar_request_counters",
+        "planned_request_pages",
+        "cadence_ticks",
+        "cadence_wire_starts",
+        "cadence_calendar_slots",
+        "cadence_calendar_attempts",
+        "analysis_requests",
+        "analysis_coverage",
+        "hypotheses",
+        "hypothesis_sightings",
+        "hypothesis_index",
+        "hypothesis_lifecycle",
+        "shadow_recall_records",
+        "candidate_failures",
+        "hypothesis_relations",
+        "merge_review_queue",
+        "weekly_review_runs",
+        "weekly_review_pairs",
+        "hypothesis_admission_decisions",
+    }
+)
+INDEXES = frozenset(
+    {
+        "alert_outbox_decision_open",
+        "alert_outbox_dedupe_open",
+        "deferred_attempts_candidate",
+        "analysis_batches_open",
+        "analysis_batches_started_run",
+        "subject_baselines_scope",
+        "quote_state_history_subject",
+        "planned_requests_open",
+        "cadence_wire_starts_open",
+        "cadence_calendar_attempts_open",
+        "analysis_coverage_latest",
+        "hypotheses_open",
+        "hypothesis_sightings_hypothesis",
+        "hypothesis_index_hypothesis",
+        "hypothesis_lifecycle_hypothesis",
+        "candidate_failures_source",
+        "hypothesis_relations_a",
+        "hypothesis_relations_b",
+        "merge_review_queue_open",
+        "merge_review_queue_a",
+        "weekly_review_pairs_week",
+        "hypothesis_admission_decisions_hypothesis",
+    }
+)
 
 # Committed baseline schema (v4): identical core tables except the day-counter
 # CHECK still embedded the removed 3,744 aggregate cap, and no cadence tables.
@@ -888,40 +1075,76 @@ _LEGACY_SCHEMA_SQL_V4 = (
     )
     + f"PRAGMA user_version={_LEGACY_SCHEMA_VERSION_V4};\n"
 )
-_CADENCE_TABLES = frozenset({
-    "cadence_ticks", "cadence_wire_starts",
-    "cadence_calendar_slots", "cadence_calendar_attempts",
-})
+_CADENCE_TABLES = frozenset(
+    {
+        "cadence_ticks",
+        "cadence_wire_starts",
+        "cadence_calendar_slots",
+        "cadence_calendar_attempts",
+    }
+)
 # Tables/indexes added by schema v10 (YouTube hypothesis tracking); excluded
 # from every earlier legacy table set computed by difference below.
-_V10_TABLES = frozenset({
-    "hypotheses", "hypothesis_sightings", "hypothesis_index",
-    "hypothesis_lifecycle", "shadow_recall_records", "candidate_failures",
-})
-_V10_INDEXES = frozenset({
-    "hypotheses_open", "hypothesis_sightings_hypothesis",
-    "hypothesis_index_hypothesis", "hypothesis_lifecycle_hypothesis",
-    "candidate_failures_source",
-})
+_V10_TABLES = frozenset(
+    {
+        "hypotheses",
+        "hypothesis_sightings",
+        "hypothesis_index",
+        "hypothesis_lifecycle",
+        "shadow_recall_records",
+        "candidate_failures",
+    }
+)
+_V10_INDEXES = frozenset(
+    {
+        "hypotheses_open",
+        "hypothesis_sightings_hypothesis",
+        "hypothesis_index_hypothesis",
+        "hypothesis_lifecycle_hypothesis",
+        "candidate_failures_source",
+    }
+)
 # Tables/indexes added by schema v11 (semantic dedupe + weekly review);
 # excluded from every earlier legacy table set computed by difference below.
-_V11_TABLES = frozenset({
-    "hypothesis_relations", "merge_review_queue", "weekly_review_runs",
-    "weekly_review_pairs", "hypothesis_admission_decisions",
-})
-_V11_INDEXES = frozenset({
-    "hypothesis_relations_a", "hypothesis_relations_b",
-    "merge_review_queue_open", "merge_review_queue_a",
-    "weekly_review_pairs_week",
-    "hypothesis_admission_decisions_hypothesis",
-})
-_LEGACY_TABLES_V4 = TABLES - _CADENCE_TABLES - {
-    "analysis_requests", "analysis_coverage",
-} - _V10_TABLES - _V11_TABLES
-_LEGACY_INDEXES_V4 = INDEXES - {
-    "cadence_wire_starts_open", "cadence_calendar_attempts_open",
-    "analysis_coverage_latest",
-} - _V10_INDEXES - _V11_INDEXES
+_V11_TABLES = frozenset(
+    {
+        "hypothesis_relations",
+        "merge_review_queue",
+        "weekly_review_runs",
+        "weekly_review_pairs",
+        "hypothesis_admission_decisions",
+    }
+)
+_V11_INDEXES = frozenset(
+    {
+        "hypothesis_relations_a",
+        "hypothesis_relations_b",
+        "merge_review_queue_open",
+        "merge_review_queue_a",
+        "weekly_review_pairs_week",
+        "hypothesis_admission_decisions_hypothesis",
+    }
+)
+_LEGACY_TABLES_V4 = (
+    TABLES
+    - _CADENCE_TABLES
+    - {
+        "analysis_requests",
+        "analysis_coverage",
+    }
+    - _V10_TABLES
+    - _V11_TABLES
+)
+_LEGACY_INDEXES_V4 = (
+    INDEXES
+    - {
+        "cadence_wire_starts_open",
+        "cadence_calendar_attempts_open",
+        "analysis_coverage_latest",
+    }
+    - _V10_INDEXES
+    - _V11_INDEXES
+)
 # Deterministic copy order: exactly the v4 creation order.
 _LEGACY_TABLE_ORDER_V4 = tuple(
     re.findall(r"CREATE TABLE (\w+)\(", _LEGACY_SCHEMA_SQL_V4)
@@ -932,7 +1155,8 @@ _LEGACY_TABLE_ORDER_V4 = tuple(
 # database is refused by ordinary construction and requires reviewed migration.
 _LEGACY_SCHEMA_VERSION_V6 = 6
 _LEGACY_SCHEMA_SQL_V6 = (
-    _CORE_SCHEMA_SQL + _CADENCE_SCHEMA_SQL
+    _CORE_SCHEMA_SQL
+    + _CADENCE_SCHEMA_SQL
     + f"PRAGMA user_version={_LEGACY_SCHEMA_VERSION_V6};\n"
 )
 _V7_TABLES = frozenset({"analysis_requests", "analysis_coverage"})
@@ -946,9 +1170,7 @@ _LEGACY_TABLE_ORDER_V6 = tuple(
 # The pre-v10 (canonical) schema SQL: SCHEMA_SQL minus the hypothesis block.
 # Canonical v7/v8 legacy schemas derive from this base so they stay exactly
 # the committed Market/Quant schemas without any v10 hypothesis tables.
-_PRE_V10_SCHEMA_SQL = (
-    _CORE_SCHEMA_SQL + _CADENCE_SCHEMA_SQL + _V7_ANALYSIS_SCHEMA_SQL
-)
+_PRE_V10_SCHEMA_SQL = _CORE_SCHEMA_SQL + _CADENCE_SCHEMA_SQL + _V7_ANALYSIS_SCHEMA_SQL
 
 # Exact committed v8 schema: the Toss request vocabulary still (incorrectly)
 # governed cadence-wire rows and MEMBERSHIP was absent from the group CHECK.
@@ -963,17 +1185,22 @@ _LEGACY_SCHEMA_SQL_V8 = (
     )
     + f"PRAGMA user_version={_LEGACY_SCHEMA_VERSION_V8};\n"
 )
-_LEGACY_TABLES_V8 = set(
-    re.findall(r"CREATE TABLE (\w+)\(", _LEGACY_SCHEMA_SQL_V8)
+_LEGACY_TABLES_V8 = set(re.findall(r"CREATE TABLE (\w+)\(", _LEGACY_SCHEMA_SQL_V8))
+_LEGACY_INDEXES_V8 = frozenset(
+    {
+        "alert_outbox_decision_open",
+        "alert_outbox_dedupe_open",
+        "deferred_attempts_candidate",
+        "analysis_batches_open",
+        "analysis_batches_started_run",
+        "subject_baselines_scope",
+        "quote_state_history_subject",
+        "planned_requests_open",
+        "cadence_wire_starts_open",
+        "cadence_calendar_attempts_open",
+        "analysis_coverage_latest",
+    }
 )
-_LEGACY_INDEXES_V8 = frozenset({
-    "alert_outbox_decision_open", "alert_outbox_dedupe_open",
-    "deferred_attempts_candidate", "analysis_batches_open",
-    "analysis_batches_started_run", "subject_baselines_scope",
-    "quote_state_history_subject", "planned_requests_open",
-    "cadence_wire_starts_open", "cadence_calendar_attempts_open",
-    "analysis_coverage_latest",
-})
 _LEGACY_TABLE_ORDER_V8 = tuple(
     re.findall(r"CREATE TABLE (\w+)\(", _LEGACY_SCHEMA_SQL_V8)
 )
@@ -984,45 +1211,57 @@ _LEGACY_SCHEMA_SQL_V7 = (
     _LEGACY_SCHEMA_SQL_V8.replace(
         "('TOKEN','CALENDAR','HOLDINGS','QUOTES','TRADES','DAILY_CANDLES')",
         "('TOKEN','CALENDAR','HOLDINGS','QUOTES','TRADES')",
-    ).replace(
-        ",'STOCK_CANDLES_DAILY'", "",
-    ).replace(
-        ",'DAILY_CANDLES'", "",
-    ).replace(
-        f",{REQUEST_OPERATION_SPECS['STOCK_CANDLES_DAILY'][1]!r}", "",
-    ).replace(
-        "PRAGMA user_version=8", "PRAGMA user_version=7",
+    )
+    .replace(
+        ",'STOCK_CANDLES_DAILY'",
+        "",
+    )
+    .replace(
+        ",'DAILY_CANDLES'",
+        "",
+    )
+    .replace(
+        f",{REQUEST_OPERATION_SPECS['STOCK_CANDLES_DAILY'][1]!r}",
+        "",
+    )
+    .replace(
+        "PRAGMA user_version=8",
+        "PRAGMA user_version=7",
     )
     + f"PRAGMA user_version={_LEGACY_SCHEMA_VERSION_V7};\n"
 )
-_LEGACY_TABLES_V7 = set(
+_LEGACY_TABLES_V7 = set(re.findall(r"CREATE TABLE (\w+)\(", _LEGACY_SCHEMA_SQL_V7))
+_LEGACY_INDEXES_V7 = frozenset(
+    {
+        "alert_outbox_decision_open",
+        "alert_outbox_dedupe_open",
+        "deferred_attempts_candidate",
+        "analysis_batches_open",
+        "analysis_batches_started_run",
+        "subject_baselines_scope",
+        "quote_state_history_subject",
+        "planned_requests_open",
+        "cadence_wire_starts_open",
+        "cadence_calendar_attempts_open",
+        "analysis_coverage_latest",
+    }
+)
+_LEGACY_TABLE_ORDER_V7 = tuple(
     re.findall(r"CREATE TABLE (\w+)\(", _LEGACY_SCHEMA_SQL_V7)
 )
-_LEGACY_INDEXES_V7 = frozenset({
-    "alert_outbox_decision_open", "alert_outbox_dedupe_open",
-    "deferred_attempts_candidate", "analysis_batches_open",
-    "analysis_batches_started_run", "subject_baselines_scope",
-    "quote_state_history_subject", "planned_requests_open",
-    "cadence_wire_starts_open", "cadence_calendar_attempts_open",
-    "analysis_coverage_latest",
-})
-_LEGACY_TABLE_ORDER_V7 = tuple(re.findall(r"CREATE TABLE (\w+)\(", _LEGACY_SCHEMA_SQL_V7))
 
 # Every committed schema from v9 through v12 predates the CONDITIONAL_ORDERS
 # / CONDITIONAL_ORDER_HISTORY registration (conditional-order SDS v0.4
 # §4.4), so their generated cadence-wire CHECK lists are the
 # pre-conditional bytes. v13 (current) carries the widened lists.
 _PRE_CONDITIONAL_WIRE_OPERATIONS_SQL = ",".join(
-    repr(value) for value in CADENCE_OPERATIONS
-    if value != "CONDITIONAL_ORDERS"
+    repr(value) for value in CADENCE_OPERATIONS if value != "CONDITIONAL_ORDERS"
 )
 _PRE_CONDITIONAL_WIRE_GROUPS_SQL = ",".join(
-    repr(value) for value in GROUP_LIMIT_FIELDS
-    if value != "CONDITIONAL_ORDER_HISTORY"
+    repr(value) for value in GROUP_LIMIT_FIELDS if value != "CONDITIONAL_ORDER_HISTORY"
 )
 _PRE_MEMBERSHIP_TOSS_STOCKS_WIRE_OPERATIONS_SQL = ",".join(
-    repr(value) for value in CADENCE_OPERATIONS
-    if value != "MEMBERSHIP_TOSS_STOCKS"
+    repr(value) for value in CADENCE_OPERATIONS if value != "MEMBERSHIP_TOSS_STOCKS"
 )
 
 
@@ -1040,9 +1279,12 @@ def _pre_conditional_wire_checks(sql: str) -> str:
 # hypothesis-tracking tables/indexes. A valid v9 database is refused by
 # ordinary construction and requires reviewed migration.
 _LEGACY_SCHEMA_VERSION_V9 = 9
-_LEGACY_SCHEMA_SQL_V9 = _pre_conditional_wire_checks(
-    _CORE_SCHEMA_SQL + _CADENCE_SCHEMA_SQL + _V7_ANALYSIS_SCHEMA_SQL
-) + f"PRAGMA user_version={_LEGACY_SCHEMA_VERSION_V9};\n"
+_LEGACY_SCHEMA_SQL_V9 = (
+    _pre_conditional_wire_checks(
+        _CORE_SCHEMA_SQL + _CADENCE_SCHEMA_SQL + _V7_ANALYSIS_SCHEMA_SQL
+    )
+    + f"PRAGMA user_version={_LEGACY_SCHEMA_VERSION_V9};\n"
+)
 _LEGACY_TABLES_V9 = TABLES - _V10_TABLES - _V11_TABLES
 _LEGACY_INDEXES_V9 = INDEXES - _V10_INDEXES - _V11_INDEXES
 _LEGACY_TABLE_ORDER_V9 = tuple(
@@ -1054,13 +1296,19 @@ _LEGACY_TABLE_ORDER_V9 = tuple(
 # the same pair to overwrite history. v12 widens that key with the queueing
 # instant so resolution history is append-only.
 _LEGACY_SCHEMA_VERSION_V11 = 11
-_LEGACY_SCHEMA_SQL_V11 = _pre_conditional_wire_checks(
-    _CORE_SCHEMA_SQL + _CADENCE_SCHEMA_SQL + _V7_ANALYSIS_SCHEMA_SQL
-    + _HYPOTHESIS_SCHEMA_BLOCK + _SEMANTIC_SCHEMA_BLOCK
-).replace(
-    "UNIQUE(hypothesis_a,hypothesis_b,status,origin,created_at),",
-    "UNIQUE(hypothesis_a,hypothesis_b,status,origin),",
-) + f"PRAGMA user_version={_LEGACY_SCHEMA_VERSION_V11};\n"
+_LEGACY_SCHEMA_SQL_V11 = (
+    _pre_conditional_wire_checks(
+        _CORE_SCHEMA_SQL
+        + _CADENCE_SCHEMA_SQL
+        + _V7_ANALYSIS_SCHEMA_SQL
+        + _HYPOTHESIS_SCHEMA_BLOCK
+        + _SEMANTIC_SCHEMA_BLOCK
+    ).replace(
+        "UNIQUE(hypothesis_a,hypothesis_b,status,origin,created_at),",
+        "UNIQUE(hypothesis_a,hypothesis_b,status,origin),",
+    )
+    + f"PRAGMA user_version={_LEGACY_SCHEMA_VERSION_V11};\n"
+)
 _LEGACY_TABLES_V11 = TABLES
 _LEGACY_INDEXES_V11 = INDEXES
 _LEGACY_TABLE_ORDER_V11 = tuple(
@@ -1071,10 +1319,16 @@ _LEGACY_TABLE_ORDER_V11 = tuple(
 # two generated cadence-wire CHECK lists lack the conditional entries. A
 # valid v12 database is refused by ordinary construction and requires an explicit reviewed offline migration.
 _LEGACY_SCHEMA_VERSION_V12 = 12
-_LEGACY_SCHEMA_SQL_V12 = _pre_conditional_wire_checks(
-    _CORE_SCHEMA_SQL + _CADENCE_SCHEMA_SQL + _V7_ANALYSIS_SCHEMA_SQL
-    + _HYPOTHESIS_SCHEMA_BLOCK + _SEMANTIC_SCHEMA_BLOCK
-) + f"PRAGMA user_version={_LEGACY_SCHEMA_VERSION_V12};\n"
+_LEGACY_SCHEMA_SQL_V12 = (
+    _pre_conditional_wire_checks(
+        _CORE_SCHEMA_SQL
+        + _CADENCE_SCHEMA_SQL
+        + _V7_ANALYSIS_SCHEMA_SQL
+        + _HYPOTHESIS_SCHEMA_BLOCK
+        + _SEMANTIC_SCHEMA_BLOCK
+    )
+    + f"PRAGMA user_version={_LEGACY_SCHEMA_VERSION_V12};\n"
+)
 _LEGACY_TABLES_V12 = TABLES
 _LEGACY_INDEXES_V12 = INDEXES
 _LEGACY_TABLE_ORDER_V12 = tuple(
@@ -1086,8 +1340,11 @@ _LEGACY_TABLE_ORDER_V12 = tuple(
 # silently changing this CHECK under the same version.
 _LEGACY_SCHEMA_VERSION_V13 = 13
 _LEGACY_SCHEMA_SQL_V13 = (
-    _CORE_SCHEMA_SQL + _CADENCE_SCHEMA_SQL + _V7_ANALYSIS_SCHEMA_SQL
-    + _HYPOTHESIS_SCHEMA_BLOCK + _SEMANTIC_SCHEMA_BLOCK
+    _CORE_SCHEMA_SQL
+    + _CADENCE_SCHEMA_SQL
+    + _V7_ANALYSIS_SCHEMA_SQL
+    + _HYPOTHESIS_SCHEMA_BLOCK
+    + _SEMANTIC_SCHEMA_BLOCK
 ).replace(
     f"operation IN ({_V15_CADENCE_WIRE_OPERATIONS_SQL})",
     f"operation IN ({_PRE_MEMBERSHIP_TOSS_STOCKS_WIRE_OPERATIONS_SQL})",
@@ -1105,8 +1362,11 @@ _LEGACY_TABLE_ORDER_V13 = tuple(
 # The inferred narrowed-v14 source shape is not deployed and fails closed.
 _LEGACY_SCHEMA_VERSION_V14 = 14
 _LEGACY_SCHEMA_SQL_V14 = (
-    _CORE_SCHEMA_SQL + _CADENCE_SCHEMA_SQL + _V7_ANALYSIS_SCHEMA_SQL
-    + _HYPOTHESIS_SCHEMA_BLOCK + _SEMANTIC_SCHEMA_BLOCK
+    _CORE_SCHEMA_SQL
+    + _CADENCE_SCHEMA_SQL
+    + _V7_ANALYSIS_SCHEMA_SQL
+    + _HYPOTHESIS_SCHEMA_BLOCK
+    + _SEMANTIC_SCHEMA_BLOCK
 ) + f"PRAGMA user_version={_LEGACY_SCHEMA_VERSION_V14};\n"
 _LEGACY_TABLES_V14 = TABLES
 _LEGACY_INDEXES_V14 = INDEXES
@@ -1118,10 +1378,15 @@ _LEGACY_TABLE_ORDER_V14 = tuple(
 # minus the semantic-dedupe/weekly-review tables and indexes. A valid v10
 # database is refused by ordinary construction and requires an explicit reviewed offline migration.
 _LEGACY_SCHEMA_VERSION_V10 = 10
-_LEGACY_SCHEMA_SQL_V10 = _pre_conditional_wire_checks(
-    _CORE_SCHEMA_SQL + _CADENCE_SCHEMA_SQL + _V7_ANALYSIS_SCHEMA_SQL
-    + _HYPOTHESIS_SCHEMA_BLOCK
-) + f"PRAGMA user_version={_LEGACY_SCHEMA_VERSION_V10};\n"
+_LEGACY_SCHEMA_SQL_V10 = (
+    _pre_conditional_wire_checks(
+        _CORE_SCHEMA_SQL
+        + _CADENCE_SCHEMA_SQL
+        + _V7_ANALYSIS_SCHEMA_SQL
+        + _HYPOTHESIS_SCHEMA_BLOCK
+    )
+    + f"PRAGMA user_version={_LEGACY_SCHEMA_VERSION_V10};\n"
+)
 _LEGACY_TABLES_V10 = TABLES - _V11_TABLES
 _LEGACY_INDEXES_V10 = INDEXES - _V11_INDEXES
 _LEGACY_TABLE_ORDER_V10 = tuple(
@@ -1129,49 +1394,96 @@ _LEGACY_TABLE_ORDER_V10 = tuple(
 )
 
 ROLE_METHODS = {
-    ProducerRole.COLLECTOR: frozenset({
-        "reserve_request", "record_cooldown", "observe_incident", "resolve_incident",
-        "plan_requests", "arm_account_rows", "start_request", "settle_request",
-        "settle_unstarted_account_rows", "checkpoint_orders_page", "begin_page_apply",
-        "reconcile_requests", "prune_request_parity",
-        "pin_cadence_tick", "plan_cadence_requests", "start_cadence_request",
-        "settle_cadence_request", "reconcile_cadence",
-        "plan_calendar_slot", "start_calendar_attempt", "settle_calendar_attempt",
-        "record_pension_reminder_outbox",
-    }),
-    ProducerRole.ANALYSIS: frozenset({
-        "create_manifest", "seal_manifest", "fail_manifest",
-        "create_manifest_with_baselines", "plan_analysis_batches",
-        "start_analysis_batch", "settle_analysis_batch",
-        "reconcile_analysis_batches",
-        "observe_incident_with_shadow_outbox",
-        "resolve_incident_with_shadow_outbox",
-        "write_audit_survey", "complete_audit",
-        "record_disposition_with_outbox", "upsert_deferred", "terminalize_deferred",
-        "upsert_audit_backlog", "update_sample_rotation",
-        "observe_incident", "resolve_incident", "reserve_request", "record_cooldown",
-        "create_analysis_requests_with_manifest",
-        "start_analysis_request",
-        "settle_analysis_result_with_coverage",
-        "reconcile_analysis_requests",
-        "read_latest_analysis_coverage",
-        "upsert_hypothesis", "record_sighting", "merge_hypotheses",
-        "transition_hypothesis", "record_shadow_recall",
-        "record_candidate_failure",
-        "record_hypothesis_relation", "queue_merge_review",
-        "record_admission_decision", "read_admission_decisions",
-        "read_hypothesis_relations", "read_merge_reviews",
-        "resolve_merge_review",
-        "reserve_weekly_review", "complete_weekly_review",
-        "record_weekly_pair_adjudication", "read_weekly_review_summary",
-    }),
-    ProducerRole.HERMES: frozenset({
-        "claim_pending_telegram", "mark_sent", "mark_failed", "mark_unknown", "acknowledge_failed",
-        "promote_stale_attempting", "resolve_unknown", "requeue_unknown",
-        "resolve_incident", "record_incident_outbox",
-        "record_news_alert_outbox", "record_news_ops_failure_outbox",
-        "record_quant_market_close_outbox",
-    }),
+    ProducerRole.COLLECTOR: frozenset(
+        {
+            "reserve_request",
+            "record_cooldown",
+            "observe_incident",
+            "resolve_incident",
+            "plan_requests",
+            "arm_account_rows",
+            "start_request",
+            "settle_request",
+            "settle_unstarted_account_rows",
+            "checkpoint_orders_page",
+            "begin_page_apply",
+            "reconcile_requests",
+            "prune_request_parity",
+            "pin_cadence_tick",
+            "plan_cadence_requests",
+            "start_cadence_request",
+            "settle_cadence_request",
+            "reconcile_cadence",
+            "plan_calendar_slot",
+            "start_calendar_attempt",
+            "settle_calendar_attempt",
+            "record_pension_reminder_outbox",
+        }
+    ),
+    ProducerRole.ANALYSIS: frozenset(
+        {
+            "create_manifest",
+            "seal_manifest",
+            "fail_manifest",
+            "create_manifest_with_baselines",
+            "plan_analysis_batches",
+            "start_analysis_batch",
+            "settle_analysis_batch",
+            "reconcile_analysis_batches",
+            "observe_incident_with_shadow_outbox",
+            "resolve_incident_with_shadow_outbox",
+            "write_audit_survey",
+            "complete_audit",
+            "record_disposition_with_outbox",
+            "upsert_deferred",
+            "terminalize_deferred",
+            "upsert_audit_backlog",
+            "update_sample_rotation",
+            "observe_incident",
+            "resolve_incident",
+            "reserve_request",
+            "record_cooldown",
+            "create_analysis_requests_with_manifest",
+            "start_analysis_request",
+            "settle_analysis_result_with_coverage",
+            "reconcile_analysis_requests",
+            "read_latest_analysis_coverage",
+            "upsert_hypothesis",
+            "record_sighting",
+            "merge_hypotheses",
+            "transition_hypothesis",
+            "record_shadow_recall",
+            "record_candidate_failure",
+            "record_hypothesis_relation",
+            "queue_merge_review",
+            "record_admission_decision",
+            "read_admission_decisions",
+            "read_hypothesis_relations",
+            "read_merge_reviews",
+            "resolve_merge_review",
+            "reserve_weekly_review",
+            "complete_weekly_review",
+            "record_weekly_pair_adjudication",
+            "read_weekly_review_summary",
+        }
+    ),
+    ProducerRole.HERMES: frozenset(
+        {
+            "claim_pending_telegram",
+            "mark_sent",
+            "mark_failed",
+            "mark_unknown",
+            "acknowledge_failed",
+            "promote_stale_attempting",
+            "resolve_unknown",
+            "requeue_unknown",
+            "resolve_incident",
+            "record_incident_outbox",
+            "record_news_alert_outbox",
+            "record_news_ops_failure_outbox",
+            "record_quant_market_close_outbox",
+        }
+    ),
     ProducerRole.FEEDBACK: frozenset({"append_feedback"}),
 }
 
@@ -1227,11 +1539,18 @@ def _file_sha256_for_receipt(path) -> str:
 
 
 class OpsKernelStore:
-    def __init__(self, path: Path | None = None, *,
-                 stable_phase_ids: frozenset[str] = frozenset()):
+    def __init__(
+        self,
+        path: Path | None = None,
+        *,
+        stable_phase_ids: frozenset[str] = frozenset(),
+    ):
         self.path = (
-            (Path.home() / ".local" / "share" / "tokmo-v3").resolve() / "ops" / "ops_kernel.sqlite3"
-            if path is None else Path(path)
+            (Path.home() / ".local" / "share" / "tokmo-v3").resolve()
+            / "ops"
+            / "ops_kernel.sqlite3"
+            if path is None
+            else Path(path)
         )
         self._stable_phase_ids = stable_phase_ids
         try:
@@ -1257,7 +1576,8 @@ class OpsKernelStore:
                 if len(header) != 100 or not header.startswith(b"SQLite format 3\0"):
                     raise OpsKernelCorruptError("operations kernel unavailable")
                 readonly = sqlite3.connect(
-                    f"{self.path.resolve().as_uri()}?mode=ro", uri=True,
+                    f"{self.path.resolve().as_uri()}?mode=ro",
+                    uri=True,
                     isolation_level=None,
                 )
                 readonly.row_factory = sqlite3.Row
@@ -1265,63 +1585,83 @@ class OpsKernelStore:
                     version = readonly.execute("PRAGMA user_version").fetchone()[0]
                     if version == _LEGACY_SCHEMA_VERSION_V4:
                         self._validate_schema(
-                            readonly, reference_sql=_LEGACY_SCHEMA_SQL_V4,
+                            readonly,
+                            reference_sql=_LEGACY_SCHEMA_SQL_V4,
                             version=_LEGACY_SCHEMA_VERSION_V4,
-                            tables=_LEGACY_TABLES_V4, indexes=_LEGACY_INDEXES_V4,
+                            tables=_LEGACY_TABLES_V4,
+                            indexes=_LEGACY_INDEXES_V4,
                         )
                     elif version == _LEGACY_SCHEMA_VERSION_V6:
                         self._validate_schema(
-                            readonly, reference_sql=_LEGACY_SCHEMA_SQL_V6,
+                            readonly,
+                            reference_sql=_LEGACY_SCHEMA_SQL_V6,
                             version=_LEGACY_SCHEMA_VERSION_V6,
-                            tables=_LEGACY_TABLES_V6, indexes=_LEGACY_INDEXES_V6,
+                            tables=_LEGACY_TABLES_V6,
+                            indexes=_LEGACY_INDEXES_V6,
                         )
                     elif version == _LEGACY_SCHEMA_VERSION_V7:
                         self._validate_schema(
-                            readonly, reference_sql=_LEGACY_SCHEMA_SQL_V7,
+                            readonly,
+                            reference_sql=_LEGACY_SCHEMA_SQL_V7,
                             version=_LEGACY_SCHEMA_VERSION_V7,
-                            tables=_LEGACY_TABLES_V7, indexes=_LEGACY_INDEXES_V7,
+                            tables=_LEGACY_TABLES_V7,
+                            indexes=_LEGACY_INDEXES_V7,
                         )
                     elif version == _LEGACY_SCHEMA_VERSION_V8:
                         self._validate_schema(
-                            readonly, reference_sql=_LEGACY_SCHEMA_SQL_V8,
+                            readonly,
+                            reference_sql=_LEGACY_SCHEMA_SQL_V8,
                             version=_LEGACY_SCHEMA_VERSION_V8,
-                            tables=_LEGACY_TABLES_V8, indexes=_LEGACY_INDEXES_V8,
+                            tables=_LEGACY_TABLES_V8,
+                            indexes=_LEGACY_INDEXES_V8,
                         )
                     elif version == _LEGACY_SCHEMA_VERSION_V9:
                         self._validate_schema(
-                            readonly, reference_sql=_LEGACY_SCHEMA_SQL_V9,
+                            readonly,
+                            reference_sql=_LEGACY_SCHEMA_SQL_V9,
                             version=_LEGACY_SCHEMA_VERSION_V9,
-                            tables=_LEGACY_TABLES_V9, indexes=_LEGACY_INDEXES_V9,
+                            tables=_LEGACY_TABLES_V9,
+                            indexes=_LEGACY_INDEXES_V9,
                         )
                     elif version == _LEGACY_SCHEMA_VERSION_V10:
                         self._validate_schema(
-                            readonly, reference_sql=_LEGACY_SCHEMA_SQL_V10,
+                            readonly,
+                            reference_sql=_LEGACY_SCHEMA_SQL_V10,
                             version=_LEGACY_SCHEMA_VERSION_V10,
-                            tables=_LEGACY_TABLES_V10, indexes=_LEGACY_INDEXES_V10,
+                            tables=_LEGACY_TABLES_V10,
+                            indexes=_LEGACY_INDEXES_V10,
                         )
                     elif version == _LEGACY_SCHEMA_VERSION_V11:
                         self._validate_schema(
-                            readonly, reference_sql=_LEGACY_SCHEMA_SQL_V11,
+                            readonly,
+                            reference_sql=_LEGACY_SCHEMA_SQL_V11,
                             version=_LEGACY_SCHEMA_VERSION_V11,
-                            tables=_LEGACY_TABLES_V11, indexes=_LEGACY_INDEXES_V11,
+                            tables=_LEGACY_TABLES_V11,
+                            indexes=_LEGACY_INDEXES_V11,
                         )
                     elif version == _LEGACY_SCHEMA_VERSION_V12:
                         self._validate_schema(
-                            readonly, reference_sql=_LEGACY_SCHEMA_SQL_V12,
+                            readonly,
+                            reference_sql=_LEGACY_SCHEMA_SQL_V12,
                             version=_LEGACY_SCHEMA_VERSION_V12,
-                            tables=_LEGACY_TABLES_V12, indexes=_LEGACY_INDEXES_V12,
+                            tables=_LEGACY_TABLES_V12,
+                            indexes=_LEGACY_INDEXES_V12,
                         )
                     elif version == _LEGACY_SCHEMA_VERSION_V13:
                         self._validate_schema(
-                            readonly, reference_sql=_LEGACY_SCHEMA_SQL_V13,
+                            readonly,
+                            reference_sql=_LEGACY_SCHEMA_SQL_V13,
                             version=_LEGACY_SCHEMA_VERSION_V13,
-                            tables=_LEGACY_TABLES_V13, indexes=_LEGACY_INDEXES_V13,
+                            tables=_LEGACY_TABLES_V13,
+                            indexes=_LEGACY_INDEXES_V13,
                         )
                     elif version == _LEGACY_SCHEMA_VERSION_V14:
                         self._validate_schema(
-                            readonly, reference_sql=_LEGACY_SCHEMA_SQL_V14,
+                            readonly,
+                            reference_sql=_LEGACY_SCHEMA_SQL_V14,
                             version=_LEGACY_SCHEMA_VERSION_V14,
-                            tables=_LEGACY_TABLES_V14, indexes=_LEGACY_INDEXES_V14,
+                            tables=_LEGACY_TABLES_V14,
+                            indexes=_LEGACY_INDEXES_V14,
                         )
                     else:
                         self._validate_schema(readonly)
@@ -1353,7 +1693,9 @@ class OpsKernelStore:
         try:
             with private_creation():
                 descriptor = os.open(
-                    temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600
+                    temporary,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                    0o600,
                 )
             os.close(descriptor)
             connection = self._connect_path(temporary, create=True)
@@ -1395,19 +1737,15 @@ class OpsKernelStore:
     @staticmethod
     def _copy_table_fingerprint(connection, schema, table):
         quoted_table = '"' + table.replace('"', '""') + '"'
-        columns = list(connection.execute(
-            f"PRAGMA {schema}.table_info({quoted_table})"
-        ))
+        columns = list(
+            connection.execute(f"PRAGMA {schema}.table_info({quoted_table})")
+        )
         if not columns:
             raise OpsKernelCorruptError("copy verification failed")
         names = [row[1] for row in columns]
-        primary = [
-            row[1] for row in sorted(columns, key=lambda row: row[5]) if row[5]
-        ]
+        primary = [row[1] for row in sorted(columns, key=lambda row: row[5]) if row[5]]
         ordering = primary or names
-        select_columns = ",".join(
-            '"' + name.replace('"', '""') + '"' for name in names
-        )
+        select_columns = ",".join('"' + name.replace('"', '""') + '"' for name in names)
         order_columns = ",".join(
             '"' + name.replace('"', '""') + '"' for name in ordering
         )
@@ -1428,9 +1766,12 @@ class OpsKernelStore:
                     # encode the exact bits losslessly via float.hex().
                     encoded.append({"type": "float", "value": value.hex()})
                 else:
-                    encoded.append({
-                        "type": type(value).__name__, "value": value,
-                    })
+                    encoded.append(
+                        {
+                            "type": type(value).__name__,
+                            "value": value,
+                        }
+                    )
             encoded_rows.extend(canonical_encode(encoded))
             encoded_rows.extend(b"\n")
             count += 1
@@ -1443,8 +1784,12 @@ class OpsKernelStore:
         if connection.execute("PRAGMA legacy.quick_check").fetchone()[0] != "ok":
             raise OpsKernelCorruptError("copy verification failed")
         for table in tables:
-            if self._copy_table_fingerprint(connection, "main", table) != self._copy_table_fingerprint(
-                connection, "legacy", table,
+            if self._copy_table_fingerprint(
+                connection, "main", table
+            ) != self._copy_table_fingerprint(
+                connection,
+                "legacy",
+                table,
             ):
                 raise OpsKernelCorruptError("copy verification failed")
 
@@ -1472,8 +1817,11 @@ class OpsKernelStore:
         if not path.exists() or path.is_symlink() or path.is_dir():
             raise OpsKernelCorruptError("unsafe private store")
         value = os.lstat(path)
-        if (not stat.S_ISREG(value.st_mode) or value.st_nlink != 1
-                or stat.S_IMODE(value.st_mode) != 0o600):
+        if (
+            not stat.S_ISREG(value.st_mode)
+            or value.st_nlink != 1
+            or stat.S_IMODE(value.st_mode) != 0o600
+        ):
             raise OpsKernelCorruptError("unsafe private store")
         # M3: migration is a root-privileged operation; accept the exact
         # current owner only, refusing e.g. root-owned artifacts.
@@ -1485,20 +1833,19 @@ class OpsKernelStore:
         # is an immediate pre-lock refusal (never auto-checkpointed).
         if path.with_name(path.name + "-journal").exists():
             raise OpsKernelCorruptError("journal sidecar present")
-        if (snapshot_path.exists() or snapshot_path.is_symlink()):
+        if snapshot_path.exists() or snapshot_path.is_symlink():
             # An already-v15 replay must report its specific reason even when
             # the operator reused the previous snapshot path (Matrix 12).
             probe = sqlite3.connect(
-                f"{path.resolve().as_uri()}?mode=ro", uri=True,
+                f"{path.resolve().as_uri()}?mode=ro",
+                uri=True,
                 isolation_level=None,
             )
             try:
                 if probe.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION:
                     raise OpsKernelCorruptError("already-v15-no-receipt")
             except sqlite3.Error as error:
-                raise OpsKernelCorruptError(
-                    "operations kernel unavailable"
-                ) from error
+                raise OpsKernelCorruptError("operations kernel unavailable") from error
             finally:
                 probe.close()
             raise OpsKernelCorruptError("snapshot target exists")
@@ -1541,7 +1888,8 @@ class OpsKernelStore:
                 raise OpsKernelCorruptError("source identity changed under lock")
             # --- verify the exact deployed-v14 source (read-only) --------
             recheck = sqlite3.connect(
-                f"{path.resolve().as_uri()}?mode=ro", uri=True,
+                f"{path.resolve().as_uri()}?mode=ro",
+                uri=True,
                 isolation_level=None,
             )
             recheck.row_factory = sqlite3.Row
@@ -1552,9 +1900,11 @@ class OpsKernelStore:
                 if version != _LEGACY_SCHEMA_VERSION_V14:
                     raise OpsKernelCorruptError("schema mismatch")
                 store._validate_schema(
-                    recheck, reference_sql=_LEGACY_SCHEMA_SQL_V14,
+                    recheck,
+                    reference_sql=_LEGACY_SCHEMA_SQL_V14,
                     version=_LEGACY_SCHEMA_VERSION_V14,
-                    tables=_LEGACY_TABLES_V14, indexes=_LEGACY_INDEXES_V14,
+                    tables=_LEGACY_TABLES_V14,
+                    indexes=_LEGACY_INDEXES_V14,
                 )
             finally:
                 recheck.close()
@@ -1564,7 +1914,8 @@ class OpsKernelStore:
             pre_wal_path = path.with_name(path.name + "-wal")
             pre_wal_sha256 = (
                 _file_sha256_for_receipt(pre_wal_path)
-                if pre_wal_path.exists() else None
+                if pre_wal_path.exists()
+                else None
             )
             # --- exact DB/main/WAL/SHM snapshot for rollback -------------
             # M2: build the snapshot with the SQLite backup API so the
@@ -1573,38 +1924,43 @@ class OpsKernelStore:
             # WAL-mode pair yields torn snapshots).
             snapshot_descriptor = os.open(
                 snapshot_path,
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o600,
             )
             os.close(snapshot_descriptor)
             source_connection = None
             snapshot_connection = None
             try:
                 source_connection = sqlite3.connect(
-                    f"{path.resolve().as_uri()}?mode=ro", uri=True,
+                    f"{path.resolve().as_uri()}?mode=ro",
+                    uri=True,
                     isolation_level=None,
                 )
                 try:
                     source_connection.execute("PRAGMA busy_timeout=0")
                     snapshot_connection = sqlite3.connect(
-                        snapshot_path, isolation_level=None,
+                        snapshot_path,
+                        isolation_level=None,
                     )
                     source_connection.backup(snapshot_connection)
                 finally:
                     source_connection.close()
                 try:
-                    if snapshot_connection.execute(
-                        "PRAGMA wal_checkpoint(TRUNCATE)"
-                    ).fetchone() is None:  # pragma: no cover - defensive
+                    if (
+                        snapshot_connection.execute(
+                            "PRAGMA wal_checkpoint(TRUNCATE)"
+                        ).fetchone()
+                        is None
+                    ):  # pragma: no cover - defensive
                         raise OpsKernelCorruptError("snapshot checkpoint failed")
-                    snapshot_connection.execute(
-                        "PRAGMA journal_mode=DELETE"
-                    )
+                    snapshot_connection.execute("PRAGMA journal_mode=DELETE")
                     snapshot_connection.close()
                 except BaseException:
                     snapshot_connection.close()
                     raise
                 snapshot_descriptor = os.open(
-                    snapshot_path, os.O_RDONLY | os.O_NOFOLLOW,
+                    snapshot_path,
+                    os.O_RDONLY | os.O_NOFOLLOW,
                 )
                 try:
                     os.fsync(snapshot_descriptor)
@@ -1623,25 +1979,35 @@ class OpsKernelStore:
             snapshot_sha256 = _file_sha256_for_receipt(snapshot_path)
             snapshot_probe = sqlite3.connect(
                 f"{snapshot_path.resolve().as_uri()}?mode=ro",
-                uri=True, isolation_level=None,
+                uri=True,
+                isolation_level=None,
             )
             snapshot_probe.row_factory = sqlite3.Row
             try:
-                if snapshot_probe.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                if (
+                    snapshot_probe.execute("PRAGMA integrity_check").fetchone()[0]
+                    != "ok"
+                ):
                     raise OpsKernelCorruptError("snapshot integrity check failed")
-                if snapshot_probe.execute("PRAGMA foreign_key_check").fetchone() is not None:
+                if (
+                    snapshot_probe.execute("PRAGMA foreign_key_check").fetchone()
+                    is not None
+                ):
                     raise OpsKernelCorruptError("snapshot foreign key check failed")
                 store._validate_schema(
-                    snapshot_probe, reference_sql=_LEGACY_SCHEMA_SQL_V14,
+                    snapshot_probe,
+                    reference_sql=_LEGACY_SCHEMA_SQL_V14,
                     version=_LEGACY_SCHEMA_VERSION_V14,
-                    tables=_LEGACY_TABLES_V14, indexes=_LEGACY_INDEXES_V14,
+                    tables=_LEGACY_TABLES_V14,
+                    indexes=_LEGACY_INDEXES_V14,
                 )
             finally:
                 snapshot_probe.close()
             # --- candidate v15 copy --------------------------------------
             with private_creation():
                 descriptor = os.open(
-                    temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                    temporary,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                     0o600,
                 )
             os.close(descriptor)
@@ -1651,8 +2017,8 @@ class OpsKernelStore:
             # M7: attach the verified snapshot read-only so a candidate-side
             # fault can never write through the rollback artifact.
             connection.execute(
-                "ATTACH DATABASE ? AS legacy", (
-                    f"file:{snapshot_path.resolve()}?mode=ro",),
+                "ATTACH DATABASE ? AS legacy",
+                (f"file:{snapshot_path.resolve()}?mode=ro",),
             )
             connection.execute("BEGIN IMMEDIATE")
             for table in _LEGACY_TABLE_ORDER_V14:
@@ -1661,7 +2027,9 @@ class OpsKernelStore:
                 )
             connection.execute("COMMIT")
             store._verify_migration_copy(
-                connection, _LEGACY_TABLE_ORDER_V14, _LEGACY_SCHEMA_VERSION_V14,
+                connection,
+                _LEGACY_TABLE_ORDER_V14,
+                _LEGACY_SCHEMA_VERSION_V14,
             )
             connection.execute("DETACH DATABASE legacy")
             connection.execute("PRAGMA foreign_keys=ON")
@@ -1706,28 +2074,39 @@ class OpsKernelStore:
                 if installed_main_sha256 != candidate_sha256:
                     raise OpsKernelCorruptError("installed hash mismatch")
                 readback = sqlite3.connect(
-                    f"{path.resolve().as_uri()}?mode=ro", uri=True,
+                    f"{path.resolve().as_uri()}?mode=ro",
+                    uri=True,
                     isolation_level=None,
                 )
                 readback.row_factory = sqlite3.Row
                 try:
                     if readback.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                         raise OpsKernelCorruptError("installed integrity check failed")
-                    if readback.execute("PRAGMA foreign_key_check").fetchone() is not None:
-                        raise OpsKernelCorruptError("installed foreign key check failed")
+                    if (
+                        readback.execute("PRAGMA foreign_key_check").fetchone()
+                        is not None
+                    ):
+                        raise OpsKernelCorruptError(
+                            "installed foreign key check failed"
+                        )
                     store._validate_schema(readback)
                     # M7: re-verify the full row fingerprints installed-side.
                     for table in _LEGACY_TABLE_ORDER_V14:
                         installed = store._copy_table_fingerprint(
-                            readback, "main", table,
+                            readback,
+                            "main",
+                            table,
                         )
                         snapshot_probe = sqlite3.connect(
                             f"{snapshot_path.resolve().as_uri()}?mode=ro",
-                            uri=True, isolation_level=None,
+                            uri=True,
+                            isolation_level=None,
                         )
                         try:
                             source_fp = store._copy_table_fingerprint(
-                                snapshot_probe, "main", table,
+                                snapshot_probe,
+                                "main",
+                                table,
                             )
                         finally:
                             snapshot_probe.close()
@@ -1788,7 +2167,10 @@ class OpsKernelStore:
         with private_creation():
             uri = f"{path.resolve().as_uri()}?mode={'rwc' if create else 'rw'}"
             connection = sqlite3.connect(
-                uri, uri=True, timeout=BUSY_TIMEOUT_MS / 1000, isolation_level=None,
+                uri,
+                uri=True,
+                timeout=BUSY_TIMEOUT_MS / 1000,
+                isolation_level=None,
             )
             try:
                 os.chmod(path, 0o600)
@@ -1796,7 +2178,10 @@ class OpsKernelStore:
                 connection.execute("PRAGMA busy_timeout=250")
                 connection.execute("PRAGMA foreign_keys=ON")
                 connection.execute("PRAGMA trusted_schema=OFF")
-                if connection.execute("PRAGMA journal_mode=WAL").fetchone()[0].lower() != "wal":
+                if (
+                    connection.execute("PRAGMA journal_mode=WAL").fetchone()[0].lower()
+                    != "wal"
+                ):
                     raise OpsKernelCorruptError("journal mode mismatch")
                 connection.execute("PRAGMA synchronous=FULL")
                 if connection.execute("PRAGMA synchronous").fetchone()[0] != 2:
@@ -1814,7 +2199,7 @@ class OpsKernelStore:
     def _secure_path_files(path):
         if path.exists():
             value = os.lstat(path)
-            if (not stat.S_ISREG(value.st_mode) or value.st_nlink != 1):
+            if not stat.S_ISREG(value.st_mode) or value.st_nlink != 1:
                 raise OpsKernelCorruptError("unsafe private store")
             os.chmod(path, 0o600)
         for suffix in ("-wal", "-shm"):
@@ -1825,8 +2210,9 @@ class OpsKernelStore:
                     raise OpsKernelCorruptError("unsafe sidecar")
                 os.chmod(sidecar, 0o600)
 
-    def _validate_schema(self, connection, *, reference_sql=None, version=None,
-                         tables=None, indexes=None):
+    def _validate_schema(
+        self, connection, *, reference_sql=None, version=None, tables=None, indexes=None
+    ):
         reference_sql = SCHEMA_SQL if reference_sql is None else reference_sql
         version = SCHEMA_VERSION if version is None else version
         tables = TABLES if tables is None else tables
@@ -1836,13 +2222,23 @@ class OpsKernelStore:
         if connection.execute("PRAGMA user_version").fetchone()[0] != version:
             raise OpsKernelCorruptError("schema mismatch")
         rows = list(connection.execute("PRAGMA table_list"))
-        actual = {row["name"] for row in rows if row["schema"] == "main" and row["type"] == "table"
-                  and not row["name"].startswith("sqlite_")}
-        if actual != tables or any(row["strict"] != 1 for row in rows if row["name"] in tables):
+        actual = {
+            row["name"]
+            for row in rows
+            if row["schema"] == "main"
+            and row["type"] == "table"
+            and not row["name"].startswith("sqlite_")
+        }
+        if actual != tables or any(
+            row["strict"] != 1 for row in rows if row["name"] in tables
+        ):
             raise OpsKernelCorruptError("schema mismatch")
-        actual_indexes = {row[0] for row in connection.execute(
-            "SELECT name FROM sqlite_schema WHERE type='index' AND sql IS NOT NULL"
-        )}
+        actual_indexes = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_schema WHERE type='index' AND sql IS NOT NULL"
+            )
+        }
         if actual_indexes != indexes:
             raise OpsKernelCorruptError("schema mismatch")
         reference = sqlite3.connect(":memory:")
@@ -1850,17 +2246,23 @@ class OpsKernelStore:
         try:
             reference.executescript(reference_sql)
             for table in tables:
-                actual_info = [tuple(row) for row in connection.execute(
-                    f"PRAGMA table_info({table})"
-                )]
-                expected_info = [tuple(row) for row in reference.execute(
-                    f"PRAGMA table_info({table})"
-                )]
+                actual_info = [
+                    tuple(row)
+                    for row in connection.execute(f"PRAGMA table_info({table})")
+                ]
+                expected_info = [
+                    tuple(row)
+                    for row in reference.execute(f"PRAGMA table_info({table})")
+                ]
                 if actual_info != expected_info:
                     raise OpsKernelCorruptError("schema mismatch")
-                actual_fk = list(connection.execute(f"PRAGMA foreign_key_list({table})"))
+                actual_fk = list(
+                    connection.execute(f"PRAGMA foreign_key_list({table})")
+                )
                 wanted_fk = list(reference.execute(f"PRAGMA foreign_key_list({table})"))
-                if [tuple(row) for row in actual_fk] != [tuple(row) for row in wanted_fk]:
+                if [tuple(row) for row in actual_fk] != [
+                    tuple(row) for row in wanted_fk
+                ]:
                     raise OpsKernelCorruptError("schema mismatch")
             actual_index_sql = {
                 row["name"]: " ".join(row["sql"].split())
@@ -1876,15 +2278,21 @@ class OpsKernelStore:
             }
             if actual_index_sql != expected_index_sql:
                 raise OpsKernelCorruptError("schema mismatch")
+
             def objects(database):
                 return {
-                    (row["type"], row["name"], row["tbl_name"],
-                     None if row["sql"] is None else " ".join(row["sql"].split()))
+                    (
+                        row["type"],
+                        row["name"],
+                        row["tbl_name"],
+                        None if row["sql"] is None else " ".join(row["sql"].split()),
+                    )
                     for row in database.execute(
                         "SELECT type,name,tbl_name,sql FROM sqlite_schema"
                         " WHERE name NOT LIKE 'sqlite_stat%'"
                     )
                 }
+
             if objects(connection) != objects(reference):
                 raise OpsKernelCorruptError("schema mismatch")
         finally:
@@ -1892,9 +2300,17 @@ class OpsKernelStore:
 
     @staticmethod
     def _map_error(error):
-        if isinstance(error, (OpsKernelCorruptError, OpsKernelConflictError,
-                              OpsKernelTransitionError, OpsKernelRoleError,
-                              OpsKernelBudgetExceeded, OpsKernelCooldownActive)):
+        if isinstance(
+            error,
+            (
+                OpsKernelCorruptError,
+                OpsKernelConflictError,
+                OpsKernelTransitionError,
+                OpsKernelRoleError,
+                OpsKernelBudgetExceeded,
+                OpsKernelCooldownActive,
+            ),
+        ):
             return error
         if isinstance(error, sqlite3.Error) and sqlite_locked(error):
             return OpsKernelLockedError("operations kernel busy")
@@ -1903,7 +2319,9 @@ class OpsKernelStore:
         return OpsKernelCorruptError("operations kernel unavailable")
 
     def _role(self, role, method):
-        if not isinstance(role, ProducerRole) or method not in ROLE_METHODS.get(role, ()):
+        if not isinstance(role, ProducerRole) or method not in ROLE_METHODS.get(
+            role, ()
+        ):
             raise OpsKernelRoleError("producer role denied")
 
     @contextmanager
@@ -1973,25 +2391,47 @@ class OpsKernelStore:
                 if connection is not None:
                     connection.close()
 
-    def create_manifest(self, role, tick_id, started_at, material_ticks,
-                        material_binding_digest, candidates,
-                        *, inject_crash_at=None):
+    def create_manifest(
+        self,
+        role,
+        tick_id,
+        started_at,
+        material_ticks,
+        material_binding_digest,
+        candidates,
+        *,
+        inject_crash_at=None,
+    ):
         self._role(role, "create_manifest")
         candidates = tuple(candidates)
         if type(tick_id) is not int or tick_id < 0:
             raise ValueError("invalid tick")
-        if (type(material_binding_digest) is not str
-                or len(material_binding_digest) != 64):
+        if (
+            type(material_binding_digest) is not str
+            or len(material_binding_digest) != 64
+        ):
             raise ValueError("invalid material binding digest")
         if any(row.state is not CandidateState.PENDING for row in candidates):
             raise OpsKernelTransitionError("candidate initial state must be pending")
         counts = dict(sorted(Counter(row.kind for row in candidates).items()))
         immutable = (
-            iso(started_at), _ticks_json(material_ticks), material_binding_digest,
-            _json(counts), len(candidates),
-            tuple((row.candidate_id, row.subject_id, row.kind, _json(row.evidence_refs),
-                   row.assignment.value, row.state.value, iso(row.created_at))
-                  for row in candidates),
+            iso(started_at),
+            _ticks_json(material_ticks),
+            material_binding_digest,
+            _json(counts),
+            len(candidates),
+            tuple(
+                (
+                    row.candidate_id,
+                    row.subject_id,
+                    row.kind,
+                    _json(row.evidence_refs),
+                    row.assignment.value,
+                    row.state.value,
+                    iso(row.created_at),
+                )
+                for row in candidates
+            ),
         )
         with self._transaction() as connection:
             existing = connection.execute(
@@ -2005,12 +2445,23 @@ class OpsKernelStore:
                     (tick_id,),
                 ).fetchall()
                 stored = (
-                    existing["started_at"], existing["material_ticks_json"],
-                    existing["material_binding_digest"], existing["counts_json"],
+                    existing["started_at"],
+                    existing["material_ticks_json"],
+                    existing["material_binding_digest"],
+                    existing["counts_json"],
                     existing["total_count"],
-                    tuple((row["candidate_id"], row["subject_id"], row["kind"],
-                           row["evidence_refs_json"], row["assignment"], row["state"],
-                           row["created_at"]) for row in rows),
+                    tuple(
+                        (
+                            row["candidate_id"],
+                            row["subject_id"],
+                            row["kind"],
+                            row["evidence_refs_json"],
+                            row["assignment"],
+                            row["state"],
+                            row["created_at"],
+                        )
+                        for row in rows
+                    ),
                 )
                 requested = immutable[:-1] + (tuple(sorted(immutable[-1])),)
                 if stored != requested:
@@ -2029,9 +2480,19 @@ class OpsKernelStore:
             return ReplayResult.CREATED
 
     def create_manifest_with_baselines(
-        self, role, tick_id, started_at, material_ticks, material_binding_digest,
-        candidates, baseline_advances, deferred_writes, *,
-        history_advances=(), analysis_requests=(), inject_crash_at=None,
+        self,
+        role,
+        tick_id,
+        started_at,
+        material_ticks,
+        material_binding_digest,
+        candidates,
+        baseline_advances,
+        deferred_writes,
+        *,
+        history_advances=(),
+        analysis_requests=(),
+        inject_crash_at=None,
     ):
         self._role(role, "create_manifest_with_baselines")
         candidates = tuple(candidates)
@@ -2041,39 +2502,84 @@ class OpsKernelStore:
         requests = tuple(analysis_requests)
         if type(tick_id) is not int or tick_id < 0:
             raise ValueError("invalid tick")
-        if type(material_binding_digest) is not str or len(material_binding_digest) != 64:
+        if (
+            type(material_binding_digest) is not str
+            or len(material_binding_digest) != 64
+        ):
             raise ValueError("invalid material binding digest")
         if any(row.state is not CandidateState.PENDING for row in candidates):
             raise OpsKernelTransitionError("candidate initial state must be pending")
         counts = dict(sorted(Counter(row.kind for row in candidates).items()))
         manifest_values = (
-            iso(started_at), _ticks_json(material_ticks), material_binding_digest,
-            _json(counts), len(candidates),
+            iso(started_at),
+            _ticks_json(material_ticks),
+            material_binding_digest,
+            _json(counts),
+            len(candidates),
         )
-        candidate_values = tuple(sorted(
-            (row.candidate_id, row.subject_id, row.kind, _json(row.evidence_refs),
-             row.assignment.value, row.state.value, iso(row.created_at))
-            for row in candidates
-        ))
-        baseline_values = tuple(sorted((
-            _field(row, "kind").value, _field(row, "subject_id"),
-            _field(row, "baseline_hash"), _json(_field(row, "fields")),
-            _field(row, "account_scope"), _field(row, "source_tick_id"), iso(started_at),
-        ) for row in baselines))
-        history_values = tuple(sorted((
-            _field(row, "subject_id"), _field(row, "tick_id"),
-            iso(_field(row, "observed_at")), _field(row, "last_price"),
-        ) for row in history))
-        request_values = tuple(sorted((
-            row.request_id, row.tick_id, row.candidate_id,
-            row.analysis_kind.value, row.trigger_kind.value, row.delta_id,
-            row.subject_id, row.material_binding_digest,
-            row.admission_policy_version, row.admission_policy_digest,
-            _json(list(row.admission_reason_codes)),
-            _json([item.canonical_payload for item in row.expected_coverage]),
-            row.request_digest,
-            "PENDING", iso(row.requested_at), None, None,
-        ) for row in requests))
+        candidate_values = tuple(
+            sorted(
+                (
+                    row.candidate_id,
+                    row.subject_id,
+                    row.kind,
+                    _json(row.evidence_refs),
+                    row.assignment.value,
+                    row.state.value,
+                    iso(row.created_at),
+                )
+                for row in candidates
+            )
+        )
+        baseline_values = tuple(
+            sorted(
+                (
+                    _field(row, "kind").value,
+                    _field(row, "subject_id"),
+                    _field(row, "baseline_hash"),
+                    _json(_field(row, "fields")),
+                    _field(row, "account_scope"),
+                    _field(row, "source_tick_id"),
+                    iso(started_at),
+                )
+                for row in baselines
+            )
+        )
+        history_values = tuple(
+            sorted(
+                (
+                    _field(row, "subject_id"),
+                    _field(row, "tick_id"),
+                    iso(_field(row, "observed_at")),
+                    _field(row, "last_price"),
+                )
+                for row in history
+            )
+        )
+        request_values = tuple(
+            sorted(
+                (
+                    row.request_id,
+                    row.tick_id,
+                    row.candidate_id,
+                    row.analysis_kind.value,
+                    row.trigger_kind.value,
+                    row.delta_id,
+                    row.subject_id,
+                    row.material_binding_digest,
+                    row.admission_policy_version,
+                    row.admission_policy_digest,
+                    _json(list(row.admission_reason_codes)),
+                    _json([item.canonical_payload for item in row.expected_coverage]),
+                    row.request_digest,
+                    "PENDING",
+                    iso(row.requested_at),
+                    None,
+                    None,
+                )
+                for row in requests
+            )
+        )
         if any(value[1] != tick_id for value in request_values):
             raise ValueError("request tick mismatch")
         with self._transaction() as connection:
@@ -2083,11 +2589,15 @@ class OpsKernelStore:
             if existing is not None:
                 if existing["state"] != "OPEN":
                     raise OpsKernelTransitionError("manifest is terminal")
-                stored_candidates = tuple(tuple(row) for row in connection.execute(
-                    "SELECT candidate_id,subject_id,kind,evidence_refs_json,assignment,"
-                    "state,created_at FROM candidate_manifest WHERE tick_id=? "
-                    "ORDER BY candidate_id", (tick_id,),
-                ))
+                stored_candidates = tuple(
+                    tuple(row)
+                    for row in connection.execute(
+                        "SELECT candidate_id,subject_id,kind,evidence_refs_json,assignment,"
+                        "state,created_at FROM candidate_manifest WHERE tick_id=? "
+                        "ORDER BY candidate_id",
+                        (tick_id,),
+                    )
+                )
                 stored_candidates = tuple(
                     (*row[:5], "PENDING", row[6])
                     if row[4] == CandidateAssignment.EXPLICITLY_DEFERRED.value
@@ -2104,9 +2614,11 @@ class OpsKernelStore:
                     if row is None:
                         raise OpsKernelConflictError("baseline replay conflict")
                     stored_baselines.append(tuple(row))
-                if (tuple(existing)[1:6] != manifest_values
-                        or stored_candidates != candidate_values
-                        or tuple(stored_baselines) != baseline_values):
+                if (
+                    tuple(existing)[1:6] != manifest_values
+                    or stored_candidates != candidate_values
+                    or tuple(stored_baselines) != baseline_values
+                ):
                     raise OpsKernelConflictError("manifest identity conflict")
                 for value in history_values:
                     row = connection.execute(
@@ -2120,10 +2632,13 @@ class OpsKernelStore:
                     result = self._upsert_deferred(connection, attempt)
                     if result is not ReplayResult.DUPLICATE:
                         raise OpsKernelConflictError("deferred replay conflict")
-                stored_requests = tuple(tuple(row) for row in connection.execute(
-                    "SELECT * FROM analysis_requests WHERE tick_id=? ORDER BY request_id",
-                    (tick_id,),
-                ))
+                stored_requests = tuple(
+                    tuple(row)
+                    for row in connection.execute(
+                        "SELECT * FROM analysis_requests WHERE tick_id=? ORDER BY request_id",
+                        (tick_id,),
+                    )
+                )
                 if stored_requests != request_values:
                     raise OpsKernelConflictError("request replay conflict")
                 return ReplayResult.DUPLICATE
@@ -2163,7 +2678,8 @@ class OpsKernelStore:
                 raise RuntimeError("injected")
             for value in history_values:
                 connection.execute(
-                    "INSERT INTO quote_state_history VALUES(?,?,?,?)", value,
+                    "INSERT INTO quote_state_history VALUES(?,?,?,?)",
+                    value,
                 )
                 connection.execute(
                     "DELETE FROM quote_state_history WHERE subject_id=? "
@@ -2196,14 +2712,18 @@ class OpsKernelStore:
             rows = connection.execute(
                 "SELECT * FROM quote_state_history WHERE subject_id IN ("
                 + ",".join("?" for _ in subject_ids)
-                + ") ORDER BY subject_id, tick_id DESC", subject_ids,
+                + ") ORDER BY subject_id, tick_id DESC",
+                subject_ids,
             ).fetchall()
         for row in rows:
-            result[row["subject_id"]] += ({
-                "subject_id": row["subject_id"], "tick_id": row["tick_id"],
-                "observed_at": parse_iso(row["observed_at"]),
-                "last_price": row["last_price_text"],
-            },)
+            result[row["subject_id"]] += (
+                {
+                    "subject_id": row["subject_id"],
+                    "tick_id": row["tick_id"],
+                    "observed_at": parse_iso(row["observed_at"]),
+                    "last_price": row["last_price_text"],
+                },
+            )
         return result
 
     def read_subject_baselines(self, kind, *, subject_ids=None, account_scopes=None):
@@ -2221,21 +2741,29 @@ class OpsKernelStore:
             account_scopes = tuple(account_scopes)
             if not account_scopes:
                 return ()
-            clauses.append("account_scope IN (" + ",".join("?" for _ in account_scopes) + ")")
+            clauses.append(
+                "account_scope IN (" + ",".join("?" for _ in account_scopes) + ")"
+            )
             values.extend(account_scopes)
         with self._read() as connection:
             rows = connection.execute(
-                "SELECT * FROM subject_baselines WHERE " + " AND ".join(clauses)
-                + " ORDER BY subject_id", values,
+                "SELECT * FROM subject_baselines WHERE "
+                + " AND ".join(clauses)
+                + " ORDER BY subject_id",
+                values,
             ).fetchall()
-        return tuple({
-            "kind": row["kind"], "subject_id": row["subject_id"],
-            "baseline_hash": row["baseline_hash"],
-            "fields": _decode(row["baseline_fields_json"]),
-            "account_scope": row["account_scope"],
-            "source_tick_id": row["source_tick_id"],
-            "updated_at": parse_iso(row["updated_at"]),
-        } for row in rows)
+        return tuple(
+            {
+                "kind": row["kind"],
+                "subject_id": row["subject_id"],
+                "baseline_hash": row["baseline_hash"],
+                "fields": _decode(row["baseline_fields_json"]),
+                "account_scope": row["account_scope"],
+                "source_tick_id": row["source_tick_id"],
+                "updated_at": parse_iso(row["updated_at"]),
+            }
+            for row in rows
+        )
 
     def read_carryover_candidates(self, before_tick_id):
         with self._read() as connection:
@@ -2250,8 +2778,11 @@ class OpsKernelStore:
 
     @staticmethod
     def _validate_invocation(invocation_id):
-        if (type(invocation_id) is not str or len(invocation_id) != 32
-                or any(char not in "0123456789abcdef" for char in invocation_id)):
+        if (
+            type(invocation_id) is not str
+            or len(invocation_id) != 32
+            or any(char not in "0123456789abcdef" for char in invocation_id)
+        ):
             raise ValueError("invalid invocation id")
 
     def plan_requests(self, role, tick_id, job_scope, rows, *, invocation_id, now):
@@ -2289,45 +2820,96 @@ class OpsKernelStore:
                 )
                 spec = (
                     REQUEST_OPERATION_SPECS.get(operation)
-                    if type(operation) is str else None
+                    if type(operation) is str
+                    else None
                 )
                 valid_digest = (
-                    type(params_digest) is str and len(params_digest) == 64
+                    type(params_digest) is str
+                    and len(params_digest) == 64
                     and all(char in "0123456789abcdef" for char in params_digest)
                 )
                 if (
-                    type(tick_id) is not int or not 0 <= tick_id <= 2147483647
+                    type(tick_id) is not int
+                    or not 0 <= tick_id <= 2147483647
                     or job_scope not in REQUEST_JOB_SCOPES
-                    or type(ordinal) is not int or not 0 <= ordinal <= 11
-                    or spec is None or (method, path) != spec[:2]
-                    or host != PROVIDER_HOST or not valid_digest
+                    or type(ordinal) is not int
+                    or not 0 <= ordinal <= 11
+                    or spec is None
+                    or (method, path) != spec[:2]
+                    or host != PROVIDER_HOST
+                    or not valid_digest
                     or ((account_ordinal is not None) != spec[2])
-                    or (account_ordinal is not None and
-                        (type(account_ordinal) is not int or not 1 <= account_ordinal <= 5))
-                    or canonical_params_digest(operation, canonical_params) != params_digest
-                    or (operation == "ACCOUNT_HOLDINGS" and
-                        canonical_params["account_ordinal"] != account_ordinal)
-                    or (operation == "ACCOUNT_HOLDINGS" and
-                        (job_scope != "HOLDINGS" or ordinal != (account_ordinal or 0) + 1))
+                    or (
+                        account_ordinal is not None
+                        and (
+                            type(account_ordinal) is not int
+                            or not 1 <= account_ordinal <= 5
+                        )
+                    )
+                    or canonical_params_digest(operation, canonical_params)
+                    != params_digest
+                    or (
+                        operation == "ACCOUNT_HOLDINGS"
+                        and canonical_params["account_ordinal"] != account_ordinal
+                    )
+                    or (
+                        operation == "ACCOUNT_HOLDINGS"
+                        and (
+                            job_scope != "HOLDINGS"
+                            or ordinal != (account_ordinal or 0) + 1
+                        )
+                    )
                     or (operation != "ACCOUNT_HOLDINGS" and account_ordinal is not None)
                     or (operation == "ORDERS_PAGE" and job_scope != "TRADES")
-                    or (job_scope == "TRADES" and operation == "ORDERS_PAGE"
-                        and not 0 <= ordinal <= 9)
-                    or (job_scope == "TRADES" and operation == "ORDER_DETAIL"
-                        and not 10 <= ordinal <= 11)
-                    or (operation.startswith("CALENDAR_DAY_") and (
-                        market != canonical_params["market"]
-                        or local_trade_date != canonical_params["local_trade_date"]
-                    ))
-                    or (not operation.startswith("CALENDAR_DAY_") and
-                        (market is not None or local_trade_date is not None))
+                    or (
+                        job_scope == "TRADES"
+                        and operation == "ORDERS_PAGE"
+                        and not 0 <= ordinal <= 9
+                    )
+                    or (
+                        job_scope == "TRADES"
+                        and operation == "ORDER_DETAIL"
+                        and not 10 <= ordinal <= 11
+                    )
+                    or (
+                        operation.startswith("CALENDAR_DAY_")
+                        and (
+                            market != canonical_params["market"]
+                            or local_trade_date != canonical_params["local_trade_date"]
+                        )
+                    )
+                    or (
+                        not operation.startswith("CALENDAR_DAY_")
+                        and (market is not None or local_trade_date is not None)
+                    )
                 ):
                     raise OpsKernelConflictError("invalid request plan")
-                requested.append((
-                    tick_id, job_scope, ordinal, operation, params_digest, market,
-                    local_trade_date, method, host, path, "PLANNED", account_ordinal, planned_at,
-                    None, None, None, None, None, invocation_id, None, None, None,
-                ))
+                requested.append(
+                    (
+                        tick_id,
+                        job_scope,
+                        ordinal,
+                        operation,
+                        params_digest,
+                        market,
+                        local_trade_date,
+                        method,
+                        host,
+                        path,
+                        "PLANNED",
+                        account_ordinal,
+                        planned_at,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        invocation_id,
+                        None,
+                        None,
+                        None,
+                    )
+                )
                 canonical_by_identity[(tick_id, job_scope, ordinal)] = canonical_params
         except (KeyError, AttributeError) as error:
             raise OpsKernelConflictError("missing field in request plan") from error
@@ -2348,77 +2930,131 @@ class OpsKernelStore:
                     values[:3],
                 ).fetchone()
                 requested_identity = values[:5] + values[7:10]
-                if prior is not None and tuple(prior[name] for name in (
-                    "tick_id", "job_scope", "ordinal", "operation", "params_digest",
-                    "method", "host", "normalized_path_template",
-                )) == requested_identity:
+                if (
+                    prior is not None
+                    and tuple(
+                        prior[name]
+                        for name in (
+                            "tick_id",
+                            "job_scope",
+                            "ordinal",
+                            "operation",
+                            "params_digest",
+                            "method",
+                            "host",
+                            "normalized_path_template",
+                        )
+                    )
+                    == requested_identity
+                ):
                     # An exact eight-tuple replay is its own row, never a new page admission.
                     continue
                 pages = connection.execute(
                     "SELECT p.*,r.state,r.exit,r.checkpoint_digest FROM planned_request_pages p "
                     "JOIN planned_requests r USING(tick_id,job_scope,ordinal) "
                     "WHERE p.tick_id=? AND p.job_scope='TRADES' AND p.account_scope=? "
-                    "ORDER BY p.ordinal", (tick_id, params["account_scope"]),
+                    "ORDER BY p.ordinal",
+                    (tick_id, params["account_scope"]),
                 ).fetchall()
                 for page in pages:
                     binding = _checkpoint_binding_digest(
-                        schema_version=page["schema_version"], tick_id=page["tick_id"],
-                        job_scope=page["job_scope"], ordinal=page["ordinal"],
-                        account_scope=page["account_scope"], window_from=page["window_from"],
-                        window_to=page["window_to"], request_cursor=page["request_cursor"],
-                        page_digest=page["page_digest"], has_next=bool(page["has_next"]),
-                        next_cursor=page["next_cursor"])
-                    if (_sha256(page["orders_json"].encode()) != page["page_digest"]
-                            or binding != page["checkpoint_digest"]):
+                        schema_version=page["schema_version"],
+                        tick_id=page["tick_id"],
+                        job_scope=page["job_scope"],
+                        ordinal=page["ordinal"],
+                        account_scope=page["account_scope"],
+                        window_from=page["window_from"],
+                        window_to=page["window_to"],
+                        request_cursor=page["request_cursor"],
+                        page_digest=page["page_digest"],
+                        has_next=bool(page["has_next"]),
+                        next_cursor=page["next_cursor"],
+                    )
+                    if (
+                        _sha256(page["orders_json"].encode()) != page["page_digest"]
+                        or binding != page["checkpoint_digest"]
+                    ):
                         raise OpsKernelCorruptError("orders page checkpoint corrupt")
                 if params["request_cursor"] is None:
-                    if pages or connection.execute(
-                        "SELECT count(*) FROM planned_requests WHERE tick_id=? "
-                        "AND job_scope='TRADES' AND operation='ORDERS_PAGE' "
-                        "AND params_digest=? AND ordinal<>?",
-                        (tick_id, values[4], values[2]),
-                    ).fetchone()[0]:
+                    if (
+                        pages
+                        or connection.execute(
+                            "SELECT count(*) FROM planned_requests WHERE tick_id=? "
+                            "AND job_scope='TRADES' AND operation='ORDERS_PAGE' "
+                            "AND params_digest=? AND ordinal<>?",
+                            (tick_id, values[4], values[2]),
+                        ).fetchone()[0]
+                    ):
                         raise OpsKernelConflictError("duplicate orders first page")
                     continue
                 if len(pages) >= 2:
                     raise OpsKernelBudgetExceeded("orders page ceiling exceeded")
-                parents = [page for page in pages if (
-                    page["window_from"] == params["window_from"]
-                    and page["window_to"] == params["window_to"]
-                    and page["next_cursor"] == params["request_cursor"])]
+                parents = [
+                    page
+                    for page in pages
+                    if (
+                        page["window_from"] == params["window_from"]
+                        and page["window_to"] == params["window_to"]
+                        and page["next_cursor"] == params["request_cursor"]
+                    )
+                ]
                 if len(parents) != 1:
                     raise OpsKernelConflictError("orders child parent binding conflict")
                 parent = parents[0]
-                if (parent["has_next"] != 1 or not (
-                        parent["state"] == "CHECKPOINTED" or
-                        (parent["state"] == "SETTLED" and
-                         parent["exit"] in ("OK", "EMPTY_OK")))):
+                if parent["has_next"] != 1 or not (
+                    parent["state"] == "CHECKPOINTED"
+                    or (
+                        parent["state"] == "SETTLED"
+                        and parent["exit"] in ("OK", "EMPTY_OK")
+                    )
+                ):
                     raise OpsKernelConflictError("orders child parent not eligible")
                 if connection.execute(
                     "SELECT count(*) FROM planned_requests WHERE tick_id=? "
                     "AND job_scope='TRADES' AND operation='ORDERS_PAGE' "
-                    "AND params_digest=? AND ordinal<>?", (tick_id, values[4], values[2]),
+                    "AND params_digest=? AND ordinal<>?",
+                    (tick_id, values[4], values[2]),
                 ).fetchone()[0]:
                     raise OpsKernelConflictError("orders child cardinality conflict")
             outcome = ReplayResult.DUPLICATE
             for values in requested:
                 prior = connection.execute(
                     "SELECT * FROM planned_requests "
-                    "WHERE tick_id=? AND job_scope=? AND ordinal=?", values[:3],
+                    "WHERE tick_id=? AND job_scope=? AND ordinal=?",
+                    values[:3],
                 ).fetchone()
                 if prior is not None:
                     # Only the immutable eight-field plan is replay identity.
-                    stored_identity = tuple(prior[name] for name in (
-                        "tick_id", "job_scope", "ordinal", "operation", "params_digest",
-                        "method", "host", "normalized_path_template",
-                    ))
+                    stored_identity = tuple(
+                        prior[name]
+                        for name in (
+                            "tick_id",
+                            "job_scope",
+                            "ordinal",
+                            "operation",
+                            "params_digest",
+                            "method",
+                            "host",
+                            "normalized_path_template",
+                        )
+                    )
                     requested_identity = values[:5] + values[7:10]
                     if stored_identity != requested_identity:
-                        raise OpsKernelConflictError("planned request identity conflict")
-                    if (prior["account_ordinal"], prior["market"], prior["local_trade_date"]) != (
-                        values[11], values[5], values[6],
+                        raise OpsKernelConflictError(
+                            "planned request identity conflict"
+                        )
+                    if (
+                        prior["account_ordinal"],
+                        prior["market"],
+                        prior["local_trade_date"],
+                    ) != (
+                        values[11],
+                        values[5],
+                        values[6],
                     ):
-                        raise OpsKernelCorruptError("planned request raw projection corrupt")
+                        raise OpsKernelCorruptError(
+                            "planned request raw projection corrupt"
+                        )
                     continue
                 connection.execute(
                     "INSERT INTO planned_requests VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -2441,18 +3077,28 @@ class OpsKernelStore:
             raise OpsKernelCorruptError("planned request raw projection corrupt")
         calendar = value["operation"] in ("CALENDAR_DAY_KR", "CALENDAR_DAY_US")
         expected_market = value["operation"].rsplit("_", 1)[1] if calendar else None
-        if ((value["market"] is not None or value["local_trade_date"] is not None) != calendar
-                or (calendar and value["market"] != expected_market)):
+        if (
+            value["market"] is not None or value["local_trade_date"] is not None
+        ) != calendar or (calendar and value["market"] != expected_market):
             raise OpsKernelCorruptError("planned request raw projection corrupt")
         if calendar:
             try:
-                if date.fromisoformat(value["local_trade_date"]).isoformat() != value["local_trade_date"]:
+                if (
+                    date.fromisoformat(value["local_trade_date"]).isoformat()
+                    != value["local_trade_date"]
+                ):
                     raise ValueError
             except (TypeError, ValueError):
-                raise OpsKernelCorruptError("planned request raw projection corrupt") from None
+                raise OpsKernelCorruptError(
+                    "planned request raw projection corrupt"
+                ) from None
         for name in (
-            "planned_at", "armed_at", "started_at", "checkpointed_at",
-            "applying_at", "settled_at",
+            "planned_at",
+            "armed_at",
+            "started_at",
+            "checkpointed_at",
+            "applying_at",
+            "settled_at",
         ):
             value[name] = parse_iso(value[name])
         return value
@@ -2462,12 +3108,14 @@ class OpsKernelStore:
             if job_scope is None:
                 rows = connection.execute(
                     "SELECT * FROM planned_requests WHERE tick_id=? "
-                    "ORDER BY job_scope,ordinal", (tick_id,),
+                    "ORDER BY job_scope,ordinal",
+                    (tick_id,),
                 ).fetchall()
             else:
                 rows = connection.execute(
                     "SELECT * FROM planned_requests WHERE tick_id=? AND job_scope=? "
-                    "ORDER BY ordinal", (tick_id, job_scope),
+                    "ORDER BY ordinal",
+                    (tick_id, job_scope),
                 ).fetchall()
         return tuple(self._planned_request(row) for row in rows)
 
@@ -2475,14 +3123,19 @@ class OpsKernelStore:
     def _account_rows(connection, tick_id, invocation_id=None):
         rows = connection.execute(
             "SELECT * FROM planned_requests WHERE tick_id=? AND job_scope='HOLDINGS' "
-            "AND operation='ACCOUNT_HOLDINGS' ORDER BY account_ordinal", (tick_id,),
+            "AND operation='ACCOUNT_HOLDINGS' ORDER BY account_ordinal",
+            (tick_id,),
         ).fetchall()
         account_ordinals = tuple(row["account_ordinal"] for row in rows)
-        if (len(rows) > 5
-                or any(type(value) is not int or not 1 <= value <= 5
-                       for value in account_ordinals)
-                or len(set(account_ordinals)) != len(account_ordinals)
-                or any(row["ordinal"] != row["account_ordinal"] + 1 for row in rows)):
+        if (
+            len(rows) > 5
+            or any(
+                type(value) is not int or not 1 <= value <= 5
+                for value in account_ordinals
+            )
+            or len(set(account_ordinals)) != len(account_ordinals)
+            or any(row["ordinal"] != row["account_ordinal"] + 1 for row in rows)
+        ):
             raise OpsKernelCorruptError("account request shape corrupt")
         if len(rows) != 5:
             raise OpsKernelTransitionError("account rows unavailable")
@@ -2493,7 +3146,13 @@ class OpsKernelStore:
         return rows
 
     def arm_account_rows(
-        self, role, tick_id, account_count, *, invocation_id, now,
+        self,
+        role,
+        tick_id,
+        account_count,
+        *,
+        invocation_id,
+        now,
     ) -> tuple[dict, ...]:
         """LEGACY-ONLY G2 acceptance API: arms historical account rows."""
         self._role(role, "arm_account_rows")
@@ -2521,12 +3180,18 @@ class OpsKernelStore:
             )
             updated = connection.execute(
                 "SELECT * FROM planned_requests WHERE tick_id=? AND job_scope='HOLDINGS' "
-                "AND operation='ACCOUNT_HOLDINGS' ORDER BY account_ordinal", (tick_id,),
+                "AND operation='ACCOUNT_HOLDINGS' ORDER BY account_ordinal",
+                (tick_id,),
             ).fetchall()
             return tuple(self._planned_request(row) for row in updated)
 
     def settle_unstarted_account_rows(
-        self, role, tick_id, *, invocation_id, now,
+        self,
+        role,
+        tick_id,
+        *,
+        invocation_id,
+        now,
     ) -> tuple[dict, ...]:
         self._role(role, "settle_unstarted_account_rows")
         self._validate_invocation(invocation_id)
@@ -2536,7 +3201,9 @@ class OpsKernelStore:
         with self._transaction() as connection:
             rows = self._account_rows(connection, tick_id)
             open_ordinals = tuple(
-                row["account_ordinal"] for row in rows if row["state"] in ("PLANNED", "ARMED")
+                row["account_ordinal"]
+                for row in rows
+                if row["state"] in ("PLANNED", "ARMED")
             )
             if not open_ordinals:
                 return ()
@@ -2549,7 +3216,8 @@ class OpsKernelStore:
             updated = connection.execute(
                 "SELECT * FROM planned_requests WHERE tick_id=? AND job_scope='HOLDINGS' "
                 "AND operation='ACCOUNT_HOLDINGS' AND account_ordinal IN ("
-                + ",".join("?" for _ in open_ordinals) + ") ORDER BY account_ordinal",
+                + ",".join("?" for _ in open_ordinals)
+                + ") ORDER BY account_ordinal",
                 (tick_id, *open_ordinals),
             ).fetchall()
             return tuple(self._planned_request(row) for row in updated)
@@ -2566,7 +3234,7 @@ class OpsKernelStore:
         self._role(role, "start_request")
         self._validate_invocation(invocation_id)
         timestamp = iso(now)
-        runtime_day = now.astimezone(timezone.utc).date().isoformat()
+        runtime_day = now.astimezone(UTC).date().isoformat()
         with self._transaction() as connection:
             row = connection.execute(
                 "SELECT * FROM planned_requests "
@@ -2588,14 +3256,17 @@ class OpsKernelStore:
                 raise OpsKernelTransitionError("planned request not startable")
 
             endpoint = (
-                "toss", row["method"], row["host"],
+                "toss",
+                row["method"],
+                row["host"],
                 row["normalized_path_template"],
             )
             if row["method"] == "GET":
                 cooldown = connection.execute(
                     "SELECT next_eligible_at FROM endpoint_cooldowns "
                     "WHERE source=? AND method=? AND host=? "
-                    "AND normalized_path_template=?", endpoint,
+                    "AND normalized_path_template=?",
+                    endpoint,
                 ).fetchone()
                 if cooldown and parse_iso(cooldown[0]) > now:
                     raise OpsKernelCooldownActive("endpoint cooldown active")
@@ -2605,7 +3276,8 @@ class OpsKernelStore:
                 tick_used = connection.execute(
                     "SELECT count(*) FROM planned_requests WHERE tick_id=? AND "
                     "operation IN ('CALENDAR_DAY_KR','CALENDAR_DAY_US') "
-                    "AND started_at IS NOT NULL", (tick_id,),
+                    "AND started_at IS NOT NULL",
+                    (tick_id,),
                 ).fetchone()[0]
                 if tick_used >= TICK_REQUEST_LIMITS_V1.calendar_starts:
                     raise OpsKernelBudgetExceeded("calendar request budget exceeded")
@@ -2636,9 +3308,21 @@ class OpsKernelStore:
             return self._planned_request(started)
 
     def checkpoint_orders_page(
-        self, role, tick_id, ordinal, *, account_scope, window_from, window_to,
-        request_cursor, orders_json, has_next, next_cursor, page_digest,
-        invocation_id, now,
+        self,
+        role,
+        tick_id,
+        ordinal,
+        *,
+        account_scope,
+        window_from,
+        window_to,
+        request_cursor,
+        orders_json,
+        has_next,
+        next_cursor,
+        page_digest,
+        invocation_id,
+        now,
     ) -> dict:
         self._role(role, "checkpoint_orders_page")
         self._validate_invocation(invocation_id)
@@ -2646,61 +3330,94 @@ class OpsKernelStore:
         try:
             decoded = json.loads(orders_json)
             canonical = json.dumps(
-                decoded, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+                decoded,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
             )
         except (TypeError, ValueError, json.JSONDecodeError) as error:
             raise OpsKernelConflictError("invalid orders page checkpoint") from error
         valid_digest = (
-            type(page_digest) is str and len(page_digest) == 64
+            type(page_digest) is str
+            and len(page_digest) == 64
             and all(character in "0123456789abcdef" for character in page_digest)
         )
-        valid_cursor_shape = (
-            type(has_next) is bool
-            and ((not has_next and next_cursor is None)
-                 or (has_next and type(next_cursor) is str
-                     and 1 <= len(next_cursor) <= 4096
-                     and next_cursor != request_cursor))
+        valid_cursor_shape = type(has_next) is bool and (
+            (not has_next and next_cursor is None)
+            or (
+                has_next
+                and type(next_cursor) is str
+                and 1 <= len(next_cursor) <= 4096
+                and next_cursor != request_cursor
+            )
         )
         params = {
-            "account_scope": account_scope, "window_from": window_from,
-            "window_to": window_to, "request_cursor": request_cursor,
+            "account_scope": account_scope,
+            "window_from": window_from,
+            "window_to": window_to,
+            "request_cursor": request_cursor,
         }
         try:
             params = validate_canonical_params("ORDERS_PAGE", params)
         except (TypeError, ValueError) as error:
             raise OpsKernelConflictError("invalid orders page checkpoint") from error
         if (
-            type(tick_id) is not int or not 0 <= tick_id <= 2147483647
-            or type(ordinal) is not int or not 0 <= ordinal <= 9
-            or type(orders_json) is not str or not isinstance(decoded, list)
+            type(tick_id) is not int
+            or not 0 <= tick_id <= 2147483647
+            or type(ordinal) is not int
+            or not 0 <= ordinal <= 9
+            or type(orders_json) is not str
+            or not isinstance(decoded, list)
             or canonical != orders_json
             or not 2 <= len(orders_json.encode()) <= 2097152
-            or not valid_digest or _sha256(orders_json.encode()) != page_digest
+            or not valid_digest
+            or _sha256(orders_json.encode()) != page_digest
             or not valid_cursor_shape
         ):
             raise OpsKernelConflictError("invalid orders page checkpoint")
         requested_page = (
-            tick_id, "TRADES", ordinal, 1, account_scope, window_from, window_to,
-            request_cursor, orders_json, int(has_next), next_cursor, page_digest,
+            tick_id,
+            "TRADES",
+            ordinal,
+            1,
+            account_scope,
+            window_from,
+            window_to,
+            request_cursor,
+            orders_json,
+            int(has_next),
+            next_cursor,
+            page_digest,
         )
         checkpoint_digest = _checkpoint_binding_digest(
-            schema_version=1, tick_id=tick_id, job_scope="TRADES", ordinal=ordinal,
-            account_scope=account_scope, window_from=window_from, window_to=window_to,
-            request_cursor=request_cursor, page_digest=page_digest,
-            has_next=has_next, next_cursor=next_cursor,
+            schema_version=1,
+            tick_id=tick_id,
+            job_scope="TRADES",
+            ordinal=ordinal,
+            account_scope=account_scope,
+            window_from=window_from,
+            window_to=window_to,
+            request_cursor=request_cursor,
+            page_digest=page_digest,
+            has_next=has_next,
+            next_cursor=next_cursor,
         )
         with self._transaction() as connection:
             row = connection.execute(
                 "SELECT * FROM planned_requests WHERE tick_id=? AND job_scope='TRADES' "
-                "AND ordinal=?", (tick_id, ordinal),
+                "AND ordinal=?",
+                (tick_id, ordinal),
             ).fetchone()
             if row is None or row["operation"] != "ORDERS_PAGE":
                 raise OpsKernelTransitionError("orders page request unavailable")
             if row["started_invocation_id"] != invocation_id:
-                raise OpsKernelTransitionError("orders page request invocation mismatch")
+                raise OpsKernelTransitionError(
+                    "orders page request invocation mismatch"
+                )
             page = connection.execute(
                 "SELECT * FROM planned_request_pages WHERE tick_id=? AND job_scope='TRADES' "
-                "AND ordinal=?", (tick_id, ordinal),
+                "AND ordinal=?",
+                (tick_id, ordinal),
             ).fetchone()
             if row["state"] == "CHECKPOINTED":
                 if page is None or tuple(page)[:12] != requested_page:
@@ -2708,7 +3425,10 @@ class OpsKernelStore:
                 if row["checkpoint_digest"] != checkpoint_digest:
                     raise OpsKernelConflictError("orders page checkpoint conflict")
                 return self._planned_request(row)
-            if row["state"] != "STARTED" or row["started_invocation_id"] != invocation_id:
+            if (
+                row["state"] != "STARTED"
+                or row["started_invocation_id"] != invocation_id
+            ):
                 raise OpsKernelTransitionError("orders page request cannot checkpoint")
             if page is not None:
                 raise OpsKernelCorruptError("orders page checkpoint torn")
@@ -2728,12 +3448,19 @@ class OpsKernelStore:
                 raise OpsKernelTransitionError("orders page request cannot checkpoint")
             fresh = connection.execute(
                 "SELECT * FROM planned_requests WHERE tick_id=? AND job_scope='TRADES' "
-                "AND ordinal=?", (tick_id, ordinal),
+                "AND ordinal=?",
+                (tick_id, ordinal),
             ).fetchone()
             return self._planned_request(fresh)
 
     def begin_page_apply(
-        self, role, tick_id, ordinal, *, invocation_id, now,
+        self,
+        role,
+        tick_id,
+        ordinal,
+        *,
+        invocation_id,
+        now,
     ) -> dict:
         self._role(role, "begin_page_apply")
         self._validate_invocation(invocation_id)
@@ -2741,7 +3468,8 @@ class OpsKernelStore:
         with self._transaction() as connection:
             row = connection.execute(
                 "SELECT * FROM planned_requests WHERE tick_id=? AND job_scope='TRADES' "
-                "AND ordinal=?", (tick_id, ordinal),
+                "AND ordinal=?",
+                (tick_id, ordinal),
             ).fetchone()
             if row is None or row["operation"] != "ORDERS_PAGE":
                 raise OpsKernelTransitionError("orders page request unavailable")
@@ -2749,13 +3477,15 @@ class OpsKernelStore:
                 raise OpsKernelTransitionError("orders page request cannot apply")
             page = connection.execute(
                 "SELECT * FROM planned_request_pages WHERE tick_id=? AND job_scope='TRADES' "
-                "AND ordinal=?", (tick_id, ordinal),
+                "AND ordinal=?",
+                (tick_id, ordinal),
             ).fetchone()
             if page is None:
                 raise OpsKernelCorruptError("orders page checkpoint missing")
             params = {
                 "account_scope": page["account_scope"],
-                "window_from": page["window_from"], "window_to": page["window_to"],
+                "window_from": page["window_from"],
+                "window_to": page["window_to"],
                 "request_cursor": page["request_cursor"],
             }
             try:
@@ -2764,33 +3494,42 @@ class OpsKernelStore:
                 raise OpsKernelCorruptError("orders page checkpoint corrupt") from error
             payload = page["orders_json"]
             checkpoint_digest = _checkpoint_binding_digest(
-                schema_version=page["schema_version"], tick_id=page["tick_id"],
-                job_scope=page["job_scope"], ordinal=page["ordinal"],
-                account_scope=page["account_scope"], window_from=page["window_from"],
-                window_to=page["window_to"], request_cursor=page["request_cursor"],
-                page_digest=page["page_digest"], has_next=bool(page["has_next"]),
+                schema_version=page["schema_version"],
+                tick_id=page["tick_id"],
+                job_scope=page["job_scope"],
+                ordinal=page["ordinal"],
+                account_scope=page["account_scope"],
+                window_from=page["window_from"],
+                window_to=page["window_to"],
+                request_cursor=page["request_cursor"],
+                page_digest=page["page_digest"],
+                has_next=bool(page["has_next"]),
                 next_cursor=page["next_cursor"],
             )
-            valid_cursor_shape = (
-                page["has_next"] in (0, 1)
-                and ((page["has_next"] == 0 and page["next_cursor"] is None)
-                     or (page["has_next"] == 1 and type(page["next_cursor"]) is str
-                         and 1 <= len(page["next_cursor"]) <= 4096
-                         and page["next_cursor"] != page["request_cursor"]))
+            valid_cursor_shape = page["has_next"] in (0, 1) and (
+                (page["has_next"] == 0 and page["next_cursor"] is None)
+                or (
+                    page["has_next"] == 1
+                    and type(page["next_cursor"]) is str
+                    and 1 <= len(page["next_cursor"]) <= 4096
+                    and page["next_cursor"] != page["request_cursor"]
+                )
             )
             if (
                 page["schema_version"] != 1
                 or type(payload) is not str
                 or _sha256(payload.encode()) != page["page_digest"]
                 or row["checkpoint_digest"] != checkpoint_digest
-                or canonical_params_digest("ORDERS_PAGE", canonical_params) != row["params_digest"]
+                or canonical_params_digest("ORDERS_PAGE", canonical_params)
+                != row["params_digest"]
                 or not valid_cursor_shape
             ):
                 raise OpsKernelCorruptError("orders page checkpoint corrupt")
             try:
                 decoded = json.loads(payload)
-                canonical = json.dumps(decoded, sort_keys=True, separators=(",", ":"),
-                                       ensure_ascii=False)
+                canonical = json.dumps(
+                    decoded, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+                )
             except (TypeError, ValueError, json.JSONDecodeError) as error:
                 raise OpsKernelCorruptError("orders page checkpoint corrupt") from error
             if not isinstance(decoded, list) or canonical != payload:
@@ -2799,21 +3538,28 @@ class OpsKernelStore:
                 changed = connection.execute(
                     "UPDATE planned_requests SET state='APPLYING',applying_at=? "
                     "WHERE tick_id=? AND job_scope='TRADES' AND ordinal=? "
-                    "AND state='CHECKPOINTED'", (timestamp, tick_id, ordinal),
+                    "AND state='CHECKPOINTED'",
+                    (timestamp, tick_id, ordinal),
                 ).rowcount
                 if changed != 1:
                     raise OpsKernelTransitionError("orders page request cannot apply")
                 row = connection.execute(
                     "SELECT * FROM planned_requests WHERE tick_id=? AND job_scope='TRADES' "
-                    "AND ordinal=?", (tick_id, ordinal),
+                    "AND ordinal=?",
+                    (tick_id, ordinal),
                 ).fetchone()
             result = self._planned_request(row)
             result["orders_page"] = {
-                "schema_version": page["schema_version"], "tick_id": page["tick_id"],
-                "request_ordinal": page["ordinal"], "account_scope": page["account_scope"],
-                "window_from": page["window_from"], "window_to": page["window_to"],
-                "request_cursor": page["request_cursor"], "orders_json": payload,
-                "has_next": bool(page["has_next"]), "next_cursor": page["next_cursor"],
+                "schema_version": page["schema_version"],
+                "tick_id": page["tick_id"],
+                "request_ordinal": page["ordinal"],
+                "account_scope": page["account_scope"],
+                "window_from": page["window_from"],
+                "window_to": page["window_to"],
+                "request_cursor": page["request_cursor"],
+                "orders_json": payload,
+                "has_next": bool(page["has_next"]),
+                "next_cursor": page["next_cursor"],
                 "page_digest": page["page_digest"],
             }
             return result
@@ -2823,29 +3569,44 @@ class OpsKernelStore:
         self._validate_invocation(invocation_id)
         timestamp = iso(now)
         with self._transaction() as connection:
-            keys = tuple(connection.execute(
-                "SELECT tick_id,job_scope,ordinal FROM planned_requests "
-                "WHERE state='STARTED' AND started_invocation_id<>? "
-                "ORDER BY tick_id,job_scope,ordinal", (invocation_id,),
-            ).fetchall())
+            keys = tuple(
+                connection.execute(
+                    "SELECT tick_id,job_scope,ordinal FROM planned_requests "
+                    "WHERE state='STARTED' AND started_invocation_id<>? "
+                    "ORDER BY tick_id,job_scope,ordinal",
+                    (invocation_id,),
+                ).fetchall()
+            )
             connection.execute(
                 "UPDATE planned_requests SET state='UNKNOWN',exit='UNKNOWN_OUTCOME',settled_at=? "
                 "WHERE state='STARTED' AND started_invocation_id<>?",
                 (timestamp, invocation_id),
             )
-            return tuple(self._planned_request(connection.execute(
-                "SELECT * FROM planned_requests WHERE tick_id=? AND job_scope=? AND ordinal=?",
-                tuple(key),
-            ).fetchone()) for key in keys)
+            return tuple(
+                self._planned_request(
+                    connection.execute(
+                        "SELECT * FROM planned_requests WHERE tick_id=? AND job_scope=? AND ordinal=?",
+                        tuple(key),
+                    ).fetchone()
+                )
+                for key in keys
+            )
 
     def prune_request_parity(self, role, *, now) -> dict[str, int]:
         """Delete only unpinned terminal request evidence from completed UTC days."""
         self._role(role, "prune_request_parity")
         iso(now)
-        current_day = now.astimezone(timezone.utc).date()
-        day_start = int(datetime.combine(
-            current_day, datetime.min.time(), tzinfo=timezone.utc,
-        ).timestamp()) // 300
+        current_day = now.astimezone(UTC).date()
+        day_start = (
+            int(
+                datetime.combine(
+                    current_day,
+                    datetime.min.time(),
+                    tzinfo=UTC,
+                ).timestamp()
+            )
+            // 300
+        )
         with self._transaction() as connection:
             if connection.execute("PRAGMA foreign_key_check").fetchone() is not None:
                 raise OpsKernelCorruptError("planned request foreign key corrupt")
@@ -2858,24 +3619,29 @@ class OpsKernelStore:
             if torn is not None:
                 raise OpsKernelCorruptError("orders page checkpoint missing")
 
-            eligible = tuple(connection.execute(
-                "SELECT tick_id,job_scope,ordinal FROM planned_requests "
-                "WHERE tick_id<? AND ("
-                "state IN ('UNKNOWN','CANCELLED_UNSTARTED') OR "
-                "(state='SETTLED' AND exit<>'STORE_APPLY_FAILED')) "
-                "ORDER BY tick_id,job_scope,ordinal", (day_start,),
-            ).fetchall())
+            eligible = tuple(
+                connection.execute(
+                    "SELECT tick_id,job_scope,ordinal FROM planned_requests "
+                    "WHERE tick_id<? AND ("
+                    "state IN ('UNKNOWN','CANCELLED_UNSTARTED') OR "
+                    "(state='SETTLED' AND exit<>'STORE_APPLY_FAILED')) "
+                    "ORDER BY tick_id,job_scope,ordinal",
+                    (day_start,),
+                ).fetchall()
+            )
             page_count = 0
             for key in eligible:
                 page_count += connection.execute(
                     "DELETE FROM planned_request_pages "
-                    "WHERE tick_id=? AND job_scope=? AND ordinal=?", tuple(key),
+                    "WHERE tick_id=? AND job_scope=? AND ordinal=?",
+                    tuple(key),
                 ).rowcount
             parent_count = 0
             for key in eligible:
                 parent_count += connection.execute(
                     "DELETE FROM planned_requests "
-                    "WHERE tick_id=? AND job_scope=? AND ordinal=?", tuple(key),
+                    "WHERE tick_id=? AND job_scope=? AND ordinal=?",
+                    tuple(key),
                 ).rowcount
             return {
                 "planned_request_pages": page_count,
@@ -2883,14 +3649,32 @@ class OpsKernelStore:
             }
 
     def settle_request(
-        self, role, tick_id, job_scope, ordinal, exit, *, invocation_id, now,
+        self,
+        role,
+        tick_id,
+        job_scope,
+        ordinal,
+        exit,
+        *,
+        invocation_id,
+        now,
     ) -> dict | ReplayResult:
         """LEGACY-ONLY G2 acceptance API: settles a historical started row."""
         self._role(role, "settle_request")
         self._validate_invocation(invocation_id)
-        exits = {"OK", "EMPTY_OK", "PROVIDER_ERROR", "PARSE_FAIL", "RATE_LIMITED",
-                 "AUTH_FAIL", "REDIRECT", "TRANSPORT_FAIL", "CEILING_DENIED",
-                 "UNKNOWN_OUTCOME", "STORE_APPLY_FAILED"}
+        exits = {
+            "OK",
+            "EMPTY_OK",
+            "PROVIDER_ERROR",
+            "PARSE_FAIL",
+            "RATE_LIMITED",
+            "AUTH_FAIL",
+            "REDIRECT",
+            "TRANSPORT_FAIL",
+            "CEILING_DENIED",
+            "UNKNOWN_OUTCOME",
+            "STORE_APPLY_FAILED",
+        }
         if exit not in exits:
             raise OpsKernelConflictError("invalid request settlement")
         timestamp = iso(now)
@@ -2908,20 +3692,30 @@ class OpsKernelStore:
             if row["state"] == terminal_state:
                 if row["exit"] != exit:
                     raise OpsKernelConflictError("conflicting terminal settlement")
-                if calendar and exit in ("OK", "EMPTY_OK") and connection.execute(
-                    "SELECT 1 FROM calendar_request_counters WHERE market=? AND local_trade_date=?",
-                    (row["market"], row["local_trade_date"]),
-                ).fetchone() is None:
+                if (
+                    calendar
+                    and exit in ("OK", "EMPTY_OK")
+                    and connection.execute(
+                        "SELECT 1 FROM calendar_request_counters WHERE market=? AND local_trade_date=?",
+                        (row["market"], row["local_trade_date"]),
+                    ).fetchone()
+                    is None
+                ):
                     raise OpsKernelCorruptError("calendar settlement counter missing")
                 return ReplayResult.DUPLICATE
             applying = row["state"] == "APPLYING"
             if applying:
-                if (row["operation"] != "ORDERS_PAGE" or job_scope != "TRADES"
-                        or exit not in ("OK", "EMPTY_OK", "STORE_APPLY_FAILED")):
+                if (
+                    row["operation"] != "ORDERS_PAGE"
+                    or job_scope != "TRADES"
+                    or exit not in ("OK", "EMPTY_OK", "STORE_APPLY_FAILED")
+                ):
                     raise OpsKernelTransitionError("planned request cannot settle")
-            elif (row["state"] != "STARTED"
-                  or row["started_invocation_id"] != invocation_id
-                  or exit == "STORE_APPLY_FAILED"):
+            elif (
+                row["state"] != "STARTED"
+                or row["started_invocation_id"] != invocation_id
+                or exit == "STORE_APPLY_FAILED"
+            ):
                 raise OpsKernelTransitionError("planned request cannot settle")
             if calendar and exit in ("OK", "EMPTY_OK"):
                 connection.execute(
@@ -2948,21 +3742,37 @@ class OpsKernelStore:
         for row in rows:
             provider = _field(row, "provider")
             candidate_ids = tuple(_field(row, "candidate_ids"))
-            requested.append((
-                tick_id, _field(row, "ordinal"), provider, _json(candidate_ids),
-                len(candidate_ids), _field(row, "request_digest"), "PLANNED",
-                None, None, None, iso(_field(row, "planned_at")), None, None,
-                invocation_id, None,
-            ))
+            requested.append(
+                (
+                    tick_id,
+                    _field(row, "ordinal"),
+                    provider,
+                    _json(candidate_ids),
+                    len(candidate_ids),
+                    _field(row, "request_digest"),
+                    "PLANNED",
+                    None,
+                    None,
+                    None,
+                    iso(_field(row, "planned_at")),
+                    None,
+                    None,
+                    invocation_id,
+                    None,
+                )
+            )
         if Counter(row[2] for row in requested)["GLM"] > 3:
             raise OpsKernelBudgetExceeded("GLM batch cap")
         if Counter(row[2] for row in requested)["SOL"] > 8:
             raise OpsKernelBudgetExceeded("SOL batch cap")
         with self._transaction() as connection:
-            existing_counts = dict(connection.execute(
-                "SELECT provider,count(*) FROM analysis_batches WHERE tick_id=? "
-                "GROUP BY provider", (tick_id,),
-            ).fetchall())
+            existing_counts = dict(
+                connection.execute(
+                    "SELECT provider,count(*) FROM analysis_batches WHERE tick_id=? "
+                    "GROUP BY provider",
+                    (tick_id,),
+                ).fetchall()
+            )
             new_by_provider = Counter()
             outcome = ReplayResult.DUPLICATE
             for values in requested:
@@ -2986,10 +3796,13 @@ class OpsKernelStore:
             if existing_counts.get("SOL", 0) + new_by_provider["SOL"] > 8:
                 raise OpsKernelBudgetExceeded("SOL batch cap")
             for values in requested:
-                if connection.execute(
-                    "SELECT 1 FROM analysis_batches WHERE tick_id=? AND ordinal=?",
-                    values[:2],
-                ).fetchone() is None:
+                if (
+                    connection.execute(
+                        "SELECT 1 FROM analysis_batches WHERE tick_id=? AND ordinal=?",
+                        values[:2],
+                    ).fetchone()
+                    is None
+                ):
                     connection.execute(
                         "INSERT INTO analysis_batches VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         values,
@@ -2999,13 +3812,17 @@ class OpsKernelStore:
     @staticmethod
     def _analysis_batch(row):
         return {
-            "tick_id": row["tick_id"], "ordinal": row["ordinal"],
+            "tick_id": row["tick_id"],
+            "ordinal": row["ordinal"],
             "provider": row["provider"],
             "candidate_ids": tuple(_decode(row["candidate_ids_json"])),
             "candidate_count": row["candidate_count"],
-            "request_digest": row["request_digest"], "state": row["state"],
+            "request_digest": row["request_digest"],
+            "state": row["state"],
             "exit": row["exit"],
-            "result": None if row["result_json"] is None else _decode(row["result_json"]),
+            "result": None
+            if row["result_json"] is None
+            else _decode(row["result_json"]),
             "result_digest": row["result_digest"],
             "planned_at": parse_iso(row["planned_at"]),
             "started_at": parse_iso(row["started_at"]),
@@ -3040,14 +3857,29 @@ class OpsKernelStore:
             return self._analysis_batch(row)
 
     def settle_analysis_batch(
-        self, role, tick_id, ordinal, provider, exit, result_json, *,
-        invocation_id, now,
+        self,
+        role,
+        tick_id,
+        ordinal,
+        provider,
+        exit,
+        result_json,
+        *,
+        invocation_id,
+        now,
     ):
         self._role(role, "settle_analysis_batch")
         self._validate_invocation(invocation_id)
         exits = {
-            "OK", "TIMEOUT", "CANCELLED", "TRUNCATED", "OVERSIZE",
-            "EMPTY_SUCCESS", "PARSE_FAIL", "RATE_LIMITED", "AUTH_FAIL",
+            "OK",
+            "TIMEOUT",
+            "CANCELLED",
+            "TRUNCATED",
+            "OVERSIZE",
+            "EMPTY_SUCCESS",
+            "PARSE_FAIL",
+            "RATE_LIMITED",
+            "AUTH_FAIL",
             "TRANSPORT_FAIL",
         }
         if exit not in exits or ((exit == "OK") != (result_json is not None)):
@@ -3059,8 +3891,12 @@ class OpsKernelStore:
                 "SELECT * FROM analysis_batches WHERE tick_id=? AND ordinal=?",
                 (tick_id, ordinal),
             ).fetchone()
-            if (row is None or row["provider"] != provider or row["state"] != "STARTED"
-                    or row["started_invocation_id"] != invocation_id):
+            if (
+                row is None
+                or row["provider"] != provider
+                or row["state"] != "STARTED"
+                or row["started_invocation_id"] != invocation_id
+            ):
                 raise OpsKernelTransitionError("analysis batch cannot settle")
             connection.execute(
                 "UPDATE analysis_batches SET state='SETTLED',exit=?,result_json=?,"
@@ -3087,10 +3923,15 @@ class OpsKernelStore:
                 "WHERE state='STARTED' AND started_invocation_id<>?",
                 (iso(now), invocation_id),
             )
-            return tuple(self._analysis_batch(connection.execute(
-                "SELECT * FROM analysis_batches WHERE tick_id=? AND ordinal=?",
-                tuple(key),
-            ).fetchone()) for key in rows)
+            return tuple(
+                self._analysis_batch(
+                    connection.execute(
+                        "SELECT * FROM analysis_batches WHERE tick_id=? AND ordinal=?",
+                        tuple(key),
+                    ).fetchone()
+                )
+                for key in rows
+            )
 
     def seal_manifest(self, role, tick_id, sealed_at):
         self._role(role, "seal_manifest")
@@ -3100,12 +3941,17 @@ class OpsKernelStore:
             ).fetchone()
             if not run or run["state"] != "OPEN":
                 raise OpsKernelTransitionError("manifest cannot seal")
-            counts = dict(connection.execute(
-                "SELECT kind,count(*) FROM candidate_manifest WHERE tick_id=? GROUP BY kind",
-                (tick_id,),
-            ).fetchall())
+            counts = dict(
+                connection.execute(
+                    "SELECT kind,count(*) FROM candidate_manifest WHERE tick_id=? GROUP BY kind",
+                    (tick_id,),
+                ).fetchall()
+            )
             total = sum(counts.values())
-            if total != run["total_count"] or _json(dict(sorted(counts.items()))) != run["counts_json"]:
+            if (
+                total != run["total_count"]
+                or _json(dict(sorted(counts.items()))) != run["counts_json"]
+            ):
                 raise OpsKernelCorruptError("manifest cardinality mismatch")
             connection.execute(
                 "UPDATE manifest_runs SET state='SEALED',sealed_at=? WHERE tick_id=?",
@@ -3118,7 +3964,8 @@ class OpsKernelStore:
         with self._transaction() as connection:
             changed = connection.execute(
                 "UPDATE manifest_runs SET state='FAILED',failure_reason=? "
-                "WHERE tick_id=? AND state='OPEN'", (failure_reason, tick_id),
+                "WHERE tick_id=? AND state='OPEN'",
+                (failure_reason, tick_id),
             ).rowcount
             if changed != 1:
                 raise OpsKernelTransitionError("manifest cannot fail")
@@ -3131,10 +3978,15 @@ class OpsKernelStore:
         if row is None:
             return None
         return ManifestSummaryV1(
-            row["tick_id"], parse_iso(row["started_at"]), _ticks(row["material_ticks_json"]),
-            row["material_binding_digest"], _decode(row["counts_json"]),
-            row["total_count"], ManifestState(row["state"]),
-            parse_iso(row["sealed_at"]), row["failure_reason"],
+            row["tick_id"],
+            parse_iso(row["started_at"]),
+            _ticks(row["material_ticks_json"]),
+            row["material_binding_digest"],
+            _decode(row["counts_json"]),
+            row["total_count"],
+            ManifestState(row["state"]),
+            parse_iso(row["sealed_at"]),
+            row["failure_reason"],
         )
 
     def read_manifest_candidates(self, tick_id):
@@ -3143,21 +3995,42 @@ class OpsKernelStore:
                 "SELECT * FROM candidate_manifest WHERE tick_id=? ORDER BY candidate_id",
                 (tick_id,),
             ).fetchall()
-        return tuple(CandidateManifestV1(
-            row["candidate_id"], row["subject_id"], row["kind"],
-            tuple(_decode(row["evidence_refs_json"])), CandidateAssignment(row["assignment"]),
-            CandidateState(row["state"]), parse_iso(row["created_at"]),
-        ) for row in rows)
+        return tuple(
+            CandidateManifestV1(
+                row["candidate_id"],
+                row["subject_id"],
+                row["kind"],
+                tuple(_decode(row["evidence_refs_json"])),
+                CandidateAssignment(row["assignment"]),
+                CandidateState(row["state"]),
+                parse_iso(row["created_at"]),
+            )
+            for row in rows
+        )
 
     @staticmethod
     def _outbox_values(row):
         return (
-            row.alert_id, row.origin.value, row.decision_id, row.incident_kind,
-            row.incident_subject, row.requeue_of, row.tick_id, row.subject_id,
-            row.dedupe_key, row.channel.value, row.severity, _json(row.body_evidence),
-            iso(row.created_at), iso(row.attempted_at), iso(row.delivered_at),
-            None if row.status is None else row.status.value, row.provider_message_id,
-            row.resolution.value, iso(row.resolved_at), row.resolution_reason,
+            row.alert_id,
+            row.origin.value,
+            row.decision_id,
+            row.incident_kind,
+            row.incident_subject,
+            row.requeue_of,
+            row.tick_id,
+            row.subject_id,
+            row.dedupe_key,
+            row.channel.value,
+            row.severity,
+            _json(row.body_evidence),
+            iso(row.created_at),
+            iso(row.attempted_at),
+            iso(row.delivered_at),
+            None if row.status is None else row.status.value,
+            row.provider_message_id,
+            row.resolution.value,
+            iso(row.resolved_at),
+            row.resolution_reason,
         )
 
     @staticmethod
@@ -3167,35 +4040,58 @@ class OpsKernelStore:
             OpsKernelStore._outbox_values(row),
         )
 
-    def record_disposition_with_outbox(self, role, disposition, outbox_or_none,
-                                       *, activation_enabled=False, inject_crash_at=None):
+    def record_disposition_with_outbox(
+        self,
+        role,
+        disposition,
+        outbox_or_none,
+        *,
+        activation_enabled=False,
+        inject_crash_at=None,
+    ):
         self._role(role, "record_disposition_with_outbox")
-        needs = disposition.action in {DispositionAction.SEND, DispositionAction.ESCALATE}
+        needs = disposition.action in {
+            DispositionAction.SEND,
+            DispositionAction.ESCALATE,
+        }
         if needs != (outbox_or_none is not None):
             raise OpsKernelTransitionError("outbox/action invariant")
         if outbox_or_none is not None:
-            if (outbox_or_none.origin is not AlertOrigin.DISPOSITION
-                    or outbox_or_none.decision_id != disposition.decision_id
-                    or outbox_or_none.tick_id != disposition.tick_id
-                    or outbox_or_none.subject_id != disposition.subject_id
-                    or outbox_or_none.requeue_of is not None
-                    or outbox_or_none.resolution is not AlertResolution.UNRESOLVED
-                    or outbox_or_none.resolved_at is not None
-                    or outbox_or_none.resolution_reason is not None):
+            if (
+                outbox_or_none.origin is not AlertOrigin.DISPOSITION
+                or outbox_or_none.decision_id != disposition.decision_id
+                or outbox_or_none.tick_id != disposition.tick_id
+                or outbox_or_none.subject_id != disposition.subject_id
+                or outbox_or_none.requeue_of is not None
+                or outbox_or_none.resolution is not AlertResolution.UNRESOLVED
+                or outbox_or_none.resolved_at is not None
+                or outbox_or_none.resolution_reason is not None
+            ):
                 raise OpsKernelTransitionError("outbox decision mismatch")
-            if (outbox_or_none.channel is AlertChannel.TELEGRAM
-                    and (outbox_or_none.status is not AlertStatus.PENDING
-                         or outbox_or_none.attempted_at is not None
-                         or outbox_or_none.delivered_at is not None
-                         or outbox_or_none.provider_message_id is not None)):
+            if outbox_or_none.channel is AlertChannel.TELEGRAM and (
+                outbox_or_none.status is not AlertStatus.PENDING
+                or outbox_or_none.attempted_at is not None
+                or outbox_or_none.delivered_at is not None
+                or outbox_or_none.provider_message_id is not None
+            ):
                 raise OpsKernelTransitionError("telegram initial state invariant")
-            if outbox_or_none.channel is AlertChannel.TELEGRAM and not activation_enabled:
+            if (
+                outbox_or_none.channel is AlertChannel.TELEGRAM
+                and not activation_enabled
+            ):
                 raise OpsKernelTransitionError("telegram activation disabled")
         values = (
-            disposition.decision_id, disposition.tick_id, disposition.candidate_id,
-            disposition.subject_id, disposition.action.value, disposition.reason_code,
-            _json(disposition.cited_evidence_ids), _ticks_json(disposition.material_ticks),
-            disposition.glm_status, disposition.sol_status, disposition.policy_version,
+            disposition.decision_id,
+            disposition.tick_id,
+            disposition.candidate_id,
+            disposition.subject_id,
+            disposition.action.value,
+            disposition.reason_code,
+            _json(disposition.cited_evidence_ids),
+            _ticks_json(disposition.material_ticks),
+            disposition.glm_status,
+            disposition.sol_status,
+            disposition.policy_version,
             iso(disposition.decided_at),
         )
         with self._transaction() as connection:
@@ -3212,20 +4108,27 @@ class OpsKernelStore:
                     (disposition.decision_id,),
                 ).fetchall()
                 requested_outbox = (
-                    () if outbox_or_none is None
+                    ()
+                    if outbox_or_none is None
                     else (self._outbox_values(outbox_or_none),)
                 )
                 if tuple(tuple(row) for row in stored_outbox) != requested_outbox:
                     raise OpsKernelConflictError("outbox replay conflict")
                 return ReplayResult.DUPLICATE
             run = connection.execute(
-                "SELECT state FROM manifest_runs WHERE tick_id=?", (disposition.tick_id,)
+                "SELECT state FROM manifest_runs WHERE tick_id=?",
+                (disposition.tick_id,),
             ).fetchone()
             candidate = connection.execute(
                 "SELECT subject_id,state FROM candidate_manifest WHERE tick_id=? AND candidate_id=?",
                 (disposition.tick_id, disposition.candidate_id),
             ).fetchone()
-            if not run or run[0] != "SEALED" or not candidate or candidate[0] != disposition.subject_id:
+            if (
+                not run
+                or run[0] != "SEALED"
+                or not candidate
+                or candidate[0] != disposition.subject_id
+            ):
                 raise OpsKernelTransitionError("candidate not consumable")
             if candidate["state"] != CandidateState.PENDING.value:
                 raise OpsKernelTransitionError("candidate not pending")
@@ -3239,8 +4142,11 @@ class OpsKernelStore:
             if inject_crash_at == "after_outbox":
                 raise RuntimeError("injected")
             state = (
-                "DEFERRED" if disposition.action is DispositionAction.DEFER
-                else "TERMINAL" if disposition.action in {DispositionAction.SKIP, DispositionAction.MERGE}
+                "DEFERRED"
+                if disposition.action is DispositionAction.DEFER
+                else "TERMINAL"
+                if disposition.action
+                in {DispositionAction.SKIP, DispositionAction.MERGE}
                 else "DISPOSITIONED"
             )
             connection.execute(
@@ -3257,10 +4163,17 @@ class OpsKernelStore:
         if not row:
             return None
         return DispositionV1(
-            row["decision_id"], row["tick_id"], row["candidate_id"], row["subject_id"],
-            DispositionAction(row["action"]), row["reason_code"],
-            tuple(_decode(row["cited_evidence_ids_json"])), _ticks(row["material_ticks_json"]),
-            row["glm_status"], row["sol_status"], row["policy_version"],
+            row["decision_id"],
+            row["tick_id"],
+            row["candidate_id"],
+            row["subject_id"],
+            DispositionAction(row["action"]),
+            row["reason_code"],
+            tuple(_decode(row["cited_evidence_ids_json"])),
+            _ticks(row["material_ticks_json"]),
+            row["glm_status"],
+            row["sol_status"],
+            row["policy_version"],
             parse_iso(row["decided_at"]),
         )
 
@@ -3272,40 +4185,72 @@ class OpsKernelStore:
                 "SELECT * FROM dispositions WHERE tick_id=? ORDER BY candidate_id",
                 (tick_id,),
             ).fetchall()
-        return tuple(DispositionV1(
-            row["decision_id"], row["tick_id"], row["candidate_id"], row["subject_id"],
-            DispositionAction(row["action"]), row["reason_code"],
-            tuple(_decode(row["cited_evidence_ids_json"])),
-            _ticks(row["material_ticks_json"]), row["glm_status"],
-            row["sol_status"], row["policy_version"], parse_iso(row["decided_at"]),
-        ) for row in rows)
+        return tuple(
+            DispositionV1(
+                row["decision_id"],
+                row["tick_id"],
+                row["candidate_id"],
+                row["subject_id"],
+                DispositionAction(row["action"]),
+                row["reason_code"],
+                tuple(_decode(row["cited_evidence_ids_json"])),
+                _ticks(row["material_ticks_json"]),
+                row["glm_status"],
+                row["sol_status"],
+                row["policy_version"],
+                parse_iso(row["decided_at"]),
+            )
+            for row in rows
+        )
 
     @staticmethod
     def _outbox(row):
         if row is None:
             return None
         return AlertOutboxV1(
-            row["alert_id"], AlertOrigin(row["origin"]), row["decision_id"],
-            row["incident_kind"], row["incident_subject"], row["requeue_of"],
-            row["tick_id"], row["subject_id"], row["dedupe_key"],
-            AlertChannel(row["channel"]), row["severity"],
-            tuple(_decode(row["body_evidence_json"])), parse_iso(row["created_at"]),
-            parse_iso(row["attempted_at"]), parse_iso(row["delivered_at"]),
+            row["alert_id"],
+            AlertOrigin(row["origin"]),
+            row["decision_id"],
+            row["incident_kind"],
+            row["incident_subject"],
+            row["requeue_of"],
+            row["tick_id"],
+            row["subject_id"],
+            row["dedupe_key"],
+            AlertChannel(row["channel"]),
+            row["severity"],
+            tuple(_decode(row["body_evidence_json"])),
+            parse_iso(row["created_at"]),
+            parse_iso(row["attempted_at"]),
+            parse_iso(row["delivered_at"]),
             None if row["status"] is None else AlertStatus(row["status"]),
-            row["provider_message_id"], AlertResolution(row["resolution"]),
-            parse_iso(row["resolved_at"]), row["resolution_reason"],
+            row["provider_message_id"],
+            AlertResolution(row["resolution"]),
+            parse_iso(row["resolved_at"]),
+            row["resolution_reason"],
         )
 
     def read_outbox(self, alert_id):
         with self._read() as connection:
-            return self._outbox(connection.execute(
-                "SELECT * FROM alert_outbox WHERE alert_id=?", (alert_id,)
-            ).fetchone())
+            return self._outbox(
+                connection.execute(
+                    "SELECT * FROM alert_outbox WHERE alert_id=?", (alert_id,)
+                ).fetchone()
+            )
 
     def create_analysis_requests_with_manifest(
-        self, role, *, tick_id, started_at, material_ticks,
-        material_binding_digest, candidates, requests,
-        baseline_advances=(), deferred_writes=(), history_advances=(),
+        self,
+        role,
+        *,
+        tick_id,
+        started_at,
+        material_ticks,
+        material_binding_digest,
+        candidates,
+        requests,
+        baseline_advances=(),
+        deferred_writes=(),
+        history_advances=(),
         inject_crash_at=None,
     ):
         """Atomic manifest + analysis request creation (§7 Atomic APIs).
@@ -3317,10 +4262,17 @@ class OpsKernelStore:
         """
         self._role(role, "create_analysis_requests_with_manifest")
         return self.create_manifest_with_baselines(
-            role, tick_id, started_at, material_ticks,
-            material_binding_digest, candidates, baseline_advances,
-            deferred_writes, history_advances=history_advances,
-            analysis_requests=tuple(requests), inject_crash_at=inject_crash_at,
+            role,
+            tick_id,
+            started_at,
+            material_ticks,
+            material_binding_digest,
+            candidates,
+            baseline_advances,
+            deferred_writes,
+            history_advances=history_advances,
+            analysis_requests=tuple(requests),
+            inject_crash_at=inject_crash_at,
         )
 
     def start_analysis_request(self, role, request_id, *, now):
@@ -3353,9 +4305,17 @@ class OpsKernelStore:
         return None if row is None else dict(row)
 
     def settle_analysis_result_with_coverage(
-        self, role, *, request_id, result, coverage_rows=(),
-        disposition=None, outbox_or_none=None, unknown_incident_key=None,
-        unknown_outbox_or_none=None, inject_crash_at=None,
+        self,
+        role,
+        *,
+        request_id,
+        result,
+        coverage_rows=(),
+        disposition=None,
+        outbox_or_none=None,
+        unknown_incident_key=None,
+        unknown_outbox_or_none=None,
+        inject_crash_at=None,
     ):
         """Atomic result/disposition/coverage settlement (§7).
 
@@ -3392,9 +4352,7 @@ class OpsKernelStore:
             if req_row["state"] not in ("ANALYZING",):
                 if req_row["state"] == result.status:
                     return ReplayResult.DUPLICATE
-                raise OpsKernelTransitionError(
-                    "request not in analyzing state"
-                )
+                raise OpsKernelTransitionError("request not in analyzing state")
             candidate = connection.execute(
                 "SELECT state,evidence_refs_json,subject_id FROM candidate_manifest "
                 "WHERE tick_id=? AND candidate_id=?",
@@ -3406,19 +4364,22 @@ class OpsKernelStore:
                 raise OpsKernelTransitionError("candidate not pending")
             result_kind = (
                 result.analysis_kind.value
-                if hasattr(result.analysis_kind, "value") else result.analysis_kind
+                if hasattr(result.analysis_kind, "value")
+                else result.analysis_kind
             )
             if result_kind != req_row["analysis_kind"]:
                 raise OpsKernelTransitionError("result analysis kind mismatch")
             expected = tuple(_decode(req_row["expected_coverage_json"]))
-            expected_by_key = {
-                (row["market"], row["symbol"]): row for row in expected
-            }
+            expected_by_key = {(row["market"], row["symbol"]): row for row in expected}
             actual_by_key = {(row.market, row.symbol): row for row in coverage_rows}
             if len(actual_by_key) != len(coverage_rows):
                 raise OpsKernelConflictError("duplicate coverage symbol")
-            if result.status == "SUCCEEDED" and set(actual_by_key) != set(expected_by_key):
-                raise OpsKernelConflictError("coverage must exactly match expected symbols")
+            if result.status == "SUCCEEDED" and set(actual_by_key) != set(
+                expected_by_key
+            ):
+                raise OpsKernelConflictError(
+                    "coverage must exactly match expected symbols"
+                )
             candidate_evidence = set(_decode(candidate["evidence_refs_json"]))
             for key, cov in actual_by_key.items():
                 contract = expected_by_key[key]
@@ -3442,18 +4403,24 @@ class OpsKernelStore:
                 ):
                     raise OpsKernelTransitionError("result disposition mismatch")
                 needs = disposition.action in {
-                    DispositionAction.SEND, DispositionAction.ESCALATE,
+                    DispositionAction.SEND,
+                    DispositionAction.ESCALATE,
                 }
                 if needs != (outbox_or_none is not None):
                     raise OpsKernelTransitionError("outbox/action invariant")
                 values = (
-                    disposition.decision_id, disposition.tick_id,
-                    disposition.candidate_id, disposition.subject_id,
-                    disposition.action.value, disposition.reason_code,
+                    disposition.decision_id,
+                    disposition.tick_id,
+                    disposition.candidate_id,
+                    disposition.subject_id,
+                    disposition.action.value,
+                    disposition.reason_code,
                     _json(disposition.cited_evidence_ids),
                     _ticks_json(disposition.material_ticks),
-                    disposition.glm_status, disposition.sol_status,
-                    disposition.policy_version, iso(disposition.decided_at),
+                    disposition.glm_status,
+                    disposition.sol_status,
+                    disposition.policy_version,
+                    iso(disposition.decided_at),
                 )
                 connection.execute(
                     "INSERT INTO dispositions VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -3470,38 +4437,48 @@ class OpsKernelStore:
                     raise RuntimeError("injected")
             if unknown_incident_key is not None:
                 expected_key = IncidentKeyV1(
-                    "analysis-request-unknown", request_id,
+                    "analysis-request-unknown",
+                    request_id,
                 )
                 if unknown_incident_key != expected_key:
                     raise OpsKernelTransitionError("UNKNOWN incident mismatch")
                 if unknown_outbox_or_none is None:
                     raise OpsKernelTransitionError("UNKNOWN shadow outbox required")
                 self._validate_shadow_incident_outbox(
-                    unknown_outbox_or_none, unknown_incident_key,
+                    unknown_outbox_or_none,
+                    unknown_incident_key,
                 )
                 connection.execute(
                     "INSERT INTO incidents VALUES(?,?,?,?,1,'OPEN',?,?)",
                     (
-                        unknown_incident_key.kind, unknown_incident_key.subject,
-                        iso(result.analyzed_at), iso(result.analyzed_at),
-                        request_id, iso(result.analyzed_at),
+                        unknown_incident_key.kind,
+                        unknown_incident_key.subject,
+                        iso(result.analyzed_at),
+                        iso(result.analyzed_at),
+                        request_id,
+                        iso(result.analyzed_at),
                     ),
                 )
                 self._insert_outbox(connection, unknown_outbox_or_none)
                 if inject_crash_at == "after_incident":
                     raise RuntimeError("injected")
             connection.execute(
-                "UPDATE analysis_requests SET state=?,result_id=? "
-                "WHERE request_id=?",
+                "UPDATE analysis_requests SET state=?,result_id=? WHERE request_id=?",
                 (result.status, result.result_id, request_id),
             )
             if inject_crash_at == "after_request":
                 raise RuntimeError("injected")
             new_state = (
-                "DEFERRED" if result.status == "DEFERRED"
-                else "TERMINAL" if result.status in ("FAILED", "UNKNOWN")
-                else "TERMINAL" if disposition is not None and disposition.action in {
-                    DispositionAction.SKIP, DispositionAction.MERGE,
+                "DEFERRED"
+                if result.status == "DEFERRED"
+                else "TERMINAL"
+                if result.status in ("FAILED", "UNKNOWN")
+                else "TERMINAL"
+                if disposition is not None
+                and disposition.action
+                in {
+                    DispositionAction.SKIP,
+                    DispositionAction.MERGE,
                 }
                 else "DISPOSITIONED"
             )
@@ -3517,12 +4494,17 @@ class OpsKernelStore:
                     connection.execute(
                         "INSERT INTO analysis_coverage VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                         (
-                            cov.analysis_kind.value, cov.market, cov.symbol,
-                            cov.request_id, cov.result_id, cov.subject_id,
+                            cov.analysis_kind.value,
+                            cov.market,
+                            cov.symbol,
+                            cov.request_id,
+                            cov.result_id,
+                            cov.subject_id,
                             cov.evidence_id,
                             cov.material_tick_id,
                             iso(cov.material_observed_at),
-                            iso(cov.analyzed_at), cov.policy_digest,
+                            iso(cov.analyzed_at),
+                            cov.policy_digest,
                         ),
                     )
             if inject_crash_at == "after_coverage":
@@ -3546,28 +4528,39 @@ class OpsKernelStore:
                 "decision_id": None,
             }
             result = _ReconciledAnalysisResultV1(
-                _sha256(canonical_encode(payload))[:32], row["request_id"],
-                row["analysis_kind"], "UNKNOWN", None, None, now,
+                _sha256(canonical_encode(payload))[:32],
+                row["request_id"],
+                row["analysis_kind"],
+                "UNKNOWN",
+                None,
+                None,
+                now,
             )
             key = IncidentKeyV1("analysis-request-unknown", row["request_id"])
             outbox = AlertOutboxV1.for_incident(
-                alert_id=_sha256(
-                    f"analysis-unknown:{row['request_id']}".encode()
-                )[:32],
-                key=key, tick_id=row["tick_id"],
-                subject_id=row["subject_id"], severity="HIGH",
-                body_evidence=(), created_at=now,
+                alert_id=_sha256(f"analysis-unknown:{row['request_id']}".encode())[:32],
+                key=key,
+                tick_id=row["tick_id"],
+                subject_id=row["subject_id"],
+                severity="HIGH",
+                body_evidence=(),
+                created_at=now,
             )
             replay = self.settle_analysis_result_with_coverage(
-                role, request_id=row["request_id"], result=result,
-                coverage_rows=(), unknown_incident_key=key,
+                role,
+                request_id=row["request_id"],
+                result=result,
+                coverage_rows=(),
+                unknown_incident_key=key,
                 unknown_outbox_or_none=outbox,
             )
-            reconciled.append({
-                "request_id": row["request_id"],
-                "result_id": result.result_id,
-                "replay": replay,
-            })
+            reconciled.append(
+                {
+                    "request_id": row["request_id"],
+                    "result_id": result.result_id,
+                    "replay": replay,
+                }
+            )
         return tuple(reconciled)
 
     def read_latest_analysis_coverage(self, analysis_kind, market, symbols):
@@ -3579,9 +4572,7 @@ class OpsKernelStore:
             return ()
         placeholders = ",".join("?" for _ in symbols)
         kind_value = (
-            analysis_kind.value
-            if hasattr(analysis_kind, "value")
-            else analysis_kind
+            analysis_kind.value if hasattr(analysis_kind, "value") else analysis_kind
         )
         with self._read() as connection:
             rows = connection.execute(
@@ -3601,35 +4592,59 @@ class OpsKernelStore:
             result.append(dict(row))
         return tuple(result)
 
-    def claim_pending_telegram(self, role, now, *, origins=None,
-                               created_not_before=None):
+    def claim_pending_telegram(
+        self, role, now, *, origins=None, created_not_before=None
+    ):
         self._role(role, "claim_pending_telegram")
         with self._transaction() as connection:
-            origin_values = None if origins is None else tuple(
-                origin.value if isinstance(origin, AlertOrigin) else origin
-                for origin in origins)
+            origin_values = (
+                None
+                if origins is None
+                else tuple(
+                    origin.value if isinstance(origin, AlertOrigin) else origin
+                    for origin in origins
+                )
+            )
             origin_clause = ""
             parameters = []
             if origin_values is not None:
                 if not origin_values:
                     return None
-                origin_clause = "AND origin IN (" + ",".join(
-                    "?" for _ in origin_values) + ") "
+                origin_clause = (
+                    "AND origin IN (" + ",".join("?" for _ in origin_values) + ") "
+                )
                 parameters.extend(origin_values)
             base_query = (
                 "SELECT * FROM alert_outbox WHERE channel='TELEGRAM' "
                 "AND status='PENDING' AND resolution='UNRESOLVED' "
-                + origin_clause + "ORDER BY CASE WHEN origin='NEWS_EVENT' AND severity='NEWS_IMMEDIATE' THEN 0 ELSE 1 END,created_at,alert_id")
+                + origin_clause
+                + "ORDER BY CASE WHEN origin='NEWS_EVENT' AND severity='NEWS_IMMEDIATE' THEN 0 ELSE 1 END,created_at,alert_id"
+            )
+
             def eligible(candidate):
-                if created_not_before is not None and not created_on_or_after(candidate['created_at'], created_not_before):
+                if created_not_before is not None and not created_on_or_after(
+                    candidate["created_at"], created_not_before
+                ):
                     return False
-                digest = re.fullmatch(r'NEWS_DIGEST_(\d{1,2})', candidate['severity']) if candidate['origin'] == 'NEWS_EVENT' else None
+                digest = (
+                    re.fullmatch(r"NEWS_DIGEST_(\d{1,2})", candidate["severity"])
+                    if candidate["origin"] == "NEWS_EVENT"
+                    else None
+                )
                 if digest:
                     local_hour = now.astimezone(timezone(timedelta(hours=9))).hour
                     return int(digest[1]) <= local_hour < 22
                 return True
+
             # Deferred digests stay PENDING; they never block a later urgent/ordinary row.
-            row = next((candidate for candidate in connection.execute(base_query, parameters) if eligible(candidate)), None)
+            row = next(
+                (
+                    candidate
+                    for candidate in connection.execute(base_query, parameters)
+                    if eligible(candidate)
+                ),
+                None,
+            )
             if row is None:
                 return None
             connection.execute(
@@ -3641,8 +4656,17 @@ class OpsKernelStore:
             ).fetchone()
             return self._outbox(row)
 
-    def _status_transition(self, role, method, alert_id, expected, target, now,
-                           provider_message_id=None, reason=None):
+    def _status_transition(
+        self,
+        role,
+        method,
+        alert_id,
+        expected,
+        target,
+        now,
+        provider_message_id=None,
+        reason=None,
+    ):
         self._role(role, method)
         with self._transaction() as connection:
             updates = "status=?"
@@ -3656,7 +4680,8 @@ class OpsKernelStore:
             values += [alert_id, expected]
             changed = connection.execute(
                 f"UPDATE alert_outbox SET {updates} WHERE alert_id=? AND status=? "
-                "AND channel='TELEGRAM' AND resolution='UNRESOLVED'", values,
+                "AND channel='TELEGRAM' AND resolution='UNRESOLVED'",
+                values,
             ).rowcount
             if changed != 1:
                 raise OpsKernelTransitionError("invalid outbox transition")
@@ -3664,13 +4689,27 @@ class OpsKernelStore:
     def mark_sent(self, role, alert_id, delivered_at, provider_message_id):
         if not provider_message_id:
             raise ValueError("provider reference required")
-        self._status_transition(role, "mark_sent", alert_id, "ATTEMPTING", "SENT",
-                                delivered_at, provider_message_id)
+        self._status_transition(
+            role,
+            "mark_sent",
+            alert_id,
+            "ATTEMPTING",
+            "SENT",
+            delivered_at,
+            provider_message_id,
+        )
 
     def mark_failed(self, role, alert_id, failed_at, reason):
         validate_resolution_reason(reason)
-        self._status_transition(role, "mark_failed", alert_id, "ATTEMPTING", "FAILED",
-                                failed_at, reason=reason)
+        self._status_transition(
+            role,
+            "mark_failed",
+            alert_id,
+            "ATTEMPTING",
+            "FAILED",
+            failed_at,
+            reason=reason,
+        )
 
     def mark_unknown(self, role, alert_id, settled_at, reason):
         """M7: Set an ATTEMPTING alert to UNKNOWN (transport succeeded, settle failed).
@@ -3700,7 +4739,8 @@ class OpsKernelStore:
             changed = connection.execute(
                 "UPDATE alert_outbox SET resolution='FAILED_ACKNOWLEDGED',resolved_at=?,"
                 "resolution_reason=? WHERE alert_id=? AND status='FAILED' "
-                "AND resolution='UNRESOLVED'", (iso(now), reason, alert_id),
+                "AND resolution='UNRESOLVED'",
+                (iso(now), reason, alert_id),
             ).rowcount
             if changed != 1:
                 raise OpsKernelTransitionError("failed alert cannot acknowledge")
@@ -3722,31 +4762,45 @@ class OpsKernelStore:
             changed = connection.execute(
                 "UPDATE alert_outbox SET resolution='CONFIRMED_SENT',resolved_at=?,"
                 "resolution_reason=? WHERE alert_id=? AND status='UNKNOWN' "
-                "AND resolution='UNRESOLVED'", (iso(now), reason, alert_id),
+                "AND resolution='UNRESOLVED'",
+                (iso(now), reason, alert_id),
             ).rowcount
             if changed != 1:
                 raise OpsKernelTransitionError("unknown alert cannot resolve")
 
-    def requeue_unknown(self, role, alert_id, new_alert_id, now, *, inject_crash_at=None):
+    def requeue_unknown(
+        self, role, alert_id, new_alert_id, now, *, inject_crash_at=None
+    ):
         self._role(role, "requeue_unknown")
         with self._transaction() as connection:
             row = connection.execute(
                 "SELECT * FROM alert_outbox WHERE alert_id=? AND status='UNKNOWN' "
-                "AND resolution='UNRESOLVED'", (alert_id,),
+                "AND resolution='UNRESOLVED'",
+                (alert_id,),
             ).fetchone()
             if row is None:
                 raise OpsKernelTransitionError("unknown alert cannot requeue")
             connection.execute(
                 "UPDATE alert_outbox SET resolution='REQUEUED',resolved_at=?,"
-                "resolution_reason='operator_requeue' WHERE alert_id=?", (iso(now), alert_id),
+                "resolution_reason='operator_requeue' WHERE alert_id=?",
+                (iso(now), alert_id),
             )
             if inject_crash_at == "after_resolve":
                 raise RuntimeError("injected")
             new = AlertOutboxV1(
-                new_alert_id, AlertOrigin(row["origin"]), row["decision_id"],
-                row["incident_kind"], row["incident_subject"], alert_id, row["tick_id"],
-                row["subject_id"], row["dedupe_key"], AlertChannel.TELEGRAM,
-                row["severity"], tuple(_decode(row["body_evidence_json"])), now,
+                new_alert_id,
+                AlertOrigin(row["origin"]),
+                row["decision_id"],
+                row["incident_kind"],
+                row["incident_subject"],
+                alert_id,
+                row["tick_id"],
+                row["subject_id"],
+                row["dedupe_key"],
+                AlertChannel.TELEGRAM,
+                row["severity"],
+                tuple(_decode(row["body_evidence_json"])),
+                now,
                 status=AlertStatus.PENDING,
             )
             self._insert_outbox(connection, new)
@@ -3758,7 +4812,11 @@ class OpsKernelStore:
                 "SELECT * FROM incidents WHERE kind=? AND subject=?",
                 (key.kind, key.subject),
             ).fetchone()
-            required = row is None or row["impact_ref"] != impact_ref or row["state"] == "RESOLVED"
+            required = (
+                row is None
+                or row["impact_ref"] != impact_ref
+                or row["state"] == "RESOLVED"
+            )
             if row is None:
                 connection.execute(
                     "INSERT INTO incidents VALUES(?,?,?,?,1,'OPEN',?,NULL)",
@@ -3767,10 +4825,12 @@ class OpsKernelStore:
             else:
                 connection.execute(
                     "UPDATE incidents SET last_seen_at=?,count=count+1,state='OPEN',impact_ref=? "
-                    "WHERE kind=? AND subject=?", (iso(now), impact_ref, key.kind, key.subject),
+                    "WHERE kind=? AND subject=?",
+                    (iso(now), impact_ref, key.kind, key.subject),
                 )
             fresh = connection.execute(
-                "SELECT * FROM incidents WHERE kind=? AND subject=?", (key.kind, key.subject)
+                "SELECT * FROM incidents WHERE kind=? AND subject=?",
+                (key.kind, key.subject),
             ).fetchone()
             return IncidentObservationV1(self._incident(fresh), required)
 
@@ -3778,7 +4838,8 @@ class OpsKernelStore:
         self._role(role, "resolve_incident")
         with self._transaction() as connection:
             row = connection.execute(
-                "SELECT * FROM incidents WHERE kind=? AND subject=?", (key.kind, key.subject)
+                "SELECT * FROM incidents WHERE kind=? AND subject=?",
+                (key.kind, key.subject),
             ).fetchone()
             if row is None:
                 raise OpsKernelTransitionError("incident absent")
@@ -3786,26 +4847,39 @@ class OpsKernelStore:
             if required:
                 connection.execute(
                     "UPDATE incidents SET state='RESOLVED',last_seen_at=? "
-                    "WHERE kind=? AND subject=?", (iso(now), key.kind, key.subject),
+                    "WHERE kind=? AND subject=?",
+                    (iso(now), key.kind, key.subject),
                 )
             fresh = connection.execute(
-                "SELECT * FROM incidents WHERE kind=? AND subject=?", (key.kind, key.subject)
+                "SELECT * FROM incidents WHERE kind=? AND subject=?",
+                (key.kind, key.subject),
             ).fetchone()
             return IncidentObservationV1(self._incident(fresh), required)
 
     @staticmethod
     def _validate_shadow_incident_outbox(outbox, key):
-        if (outbox.origin is not AlertOrigin.INCIDENT
-                or outbox.channel is not AlertChannel.SHADOW
-                or outbox.incident_kind != key.kind
-                or outbox.incident_subject != key.subject
-                or outbox.decision_id is not None or outbox.requeue_of is not None
-                or outbox.resolution is not AlertResolution.UNRESOLVED
-                or outbox.resolved_at is not None or outbox.resolution_reason is not None):
+        if (
+            outbox.origin is not AlertOrigin.INCIDENT
+            or outbox.channel is not AlertChannel.SHADOW
+            or outbox.incident_kind != key.kind
+            or outbox.incident_subject != key.subject
+            or outbox.decision_id is not None
+            or outbox.requeue_of is not None
+            or outbox.resolution is not AlertResolution.UNRESOLVED
+            or outbox.resolved_at is not None
+            or outbox.resolution_reason is not None
+        ):
             raise OpsKernelTransitionError("incident alert invariant")
 
     def observe_incident_with_shadow_outbox(
-        self, role, key, impact_ref, outbox_or_none, now, *, inject_crash_at=None,
+        self,
+        role,
+        key,
+        impact_ref,
+        outbox_or_none,
+        now,
+        *,
+        inject_crash_at=None,
     ):
         self._role(role, "observe_incident_with_shadow_outbox")
         with self._transaction() as connection:
@@ -3813,7 +4887,11 @@ class OpsKernelStore:
                 "SELECT * FROM incidents WHERE kind=? AND subject=?",
                 (key.kind, key.subject),
             ).fetchone()
-            required = row is None or row["impact_ref"] != impact_ref or row["state"] == "RESOLVED"
+            required = (
+                row is None
+                or row["impact_ref"] != impact_ref
+                or row["state"] == "RESOLVED"
+            )
             if required and outbox_or_none is None:
                 raise OpsKernelTransitionError("incident notification required")
             if outbox_or_none is not None:
@@ -3855,7 +4933,13 @@ class OpsKernelStore:
             return IncidentObservationV1(self._incident(fresh), required), replay
 
     def resolve_incident_with_shadow_outbox(
-        self, role, key, outbox_or_none, now, *, inject_crash_at=None,
+        self,
+        role,
+        key,
+        outbox_or_none,
+        now,
+        *,
+        inject_crash_at=None,
     ):
         self._role(role, "resolve_incident_with_shadow_outbox")
         with self._transaction() as connection:
@@ -3904,15 +4988,20 @@ class OpsKernelStore:
     @staticmethod
     def _incident(row):
         return IncidentV1(
-            IncidentKeyV1(row["kind"], row["subject"]), parse_iso(row["first_seen_at"]),
-            parse_iso(row["last_seen_at"]), row["count"], IncidentState(row["state"]),
-            row["impact_ref"], parse_iso(row["last_notified_at"]),
+            IncidentKeyV1(row["kind"], row["subject"]),
+            parse_iso(row["first_seen_at"]),
+            parse_iso(row["last_seen_at"]),
+            row["count"],
+            IncidentState(row["state"]),
+            row["impact_ref"],
+            parse_iso(row["last_notified_at"]),
         )
 
     def read_incident(self, key):
         with self._read() as connection:
             row = connection.execute(
-                "SELECT * FROM incidents WHERE kind=? AND subject=?", (key.kind, key.subject)
+                "SELECT * FROM incidents WHERE kind=? AND subject=?",
+                (key.kind, key.subject),
             ).fetchone()
         return None if row is None else self._incident(row)
 
@@ -3933,11 +5022,15 @@ class OpsKernelStore:
 
     def record_incident_outbox(self, role, outbox):
         self._role(role, "record_incident_outbox")
-        if (outbox.origin is not AlertOrigin.INCIDENT
-                or outbox.channel is not AlertChannel.SHADOW
-                or outbox.decision_id is not None or outbox.requeue_of is not None
-                or outbox.resolution is not AlertResolution.UNRESOLVED
-                or outbox.resolved_at is not None or outbox.resolution_reason is not None):
+        if (
+            outbox.origin is not AlertOrigin.INCIDENT
+            or outbox.channel is not AlertChannel.SHADOW
+            or outbox.decision_id is not None
+            or outbox.requeue_of is not None
+            or outbox.resolution is not AlertResolution.UNRESOLVED
+            or outbox.resolved_at is not None
+            or outbox.resolution_reason is not None
+        ):
             raise OpsKernelTransitionError("incident alert invariant")
         with self._transaction() as connection:
             exists = connection.execute(
@@ -3961,7 +5054,11 @@ class OpsKernelStore:
             return ReplayResult.CREATED
 
     def record_pension_reminder_outbox(
-        self, role, outbox, *, activation_enabled=False,
+        self,
+        role,
+        outbox,
+        *,
+        activation_enabled=False,
     ):
         """N7: Record a pension-reminder alert_outbox row with TELEGRAM channel.
 
@@ -3969,14 +5066,16 @@ class OpsKernelStore:
         AlertChannel.TELEGRAM with status=PENDING, gated by activation_enabled.
         """
         self._role(role, "record_pension_reminder_outbox")
-        if (outbox.origin is not AlertOrigin.INCIDENT
-                or outbox.channel is not AlertChannel.TELEGRAM
-                or outbox.status is not AlertStatus.PENDING
-                or outbox.decision_id is not None
-                or outbox.requeue_of is not None
-                or outbox.resolution is not AlertResolution.UNRESOLVED
-                or outbox.resolved_at is not None
-                or outbox.resolution_reason is not None):
+        if (
+            outbox.origin is not AlertOrigin.INCIDENT
+            or outbox.channel is not AlertChannel.TELEGRAM
+            or outbox.status is not AlertStatus.PENDING
+            or outbox.decision_id is not None
+            or outbox.requeue_of is not None
+            or outbox.resolution is not AlertResolution.UNRESOLVED
+            or outbox.resolved_at is not None
+            or outbox.resolution_reason is not None
+        ):
             raise OpsKernelTransitionError("pension reminder invariant")
         if not activation_enabled:
             raise OpsKernelTransitionError("telegram activation disabled")
@@ -4003,9 +5102,13 @@ class OpsKernelStore:
 
     def _record_news_outbox(self, role, outbox, origin, method, *, activation_enabled):
         self._role(role, method)
-        if (outbox.origin is not origin or outbox.requeue_of is not None
-                or outbox.resolution is not AlertResolution.UNRESOLVED
-                or outbox.resolved_at is not None or outbox.resolution_reason is not None):
+        if (
+            outbox.origin is not origin
+            or outbox.requeue_of is not None
+            or outbox.resolution is not AlertResolution.UNRESOLVED
+            or outbox.resolved_at is not None
+            or outbox.resolution_reason is not None
+        ):
             raise OpsKernelTransitionError("news outbox invariant")
         if outbox.channel is AlertChannel.TELEGRAM:
             if outbox.status is not AlertStatus.PENDING or not activation_enabled:
@@ -4013,26 +5116,41 @@ class OpsKernelStore:
         elif outbox.channel is not AlertChannel.SHADOW or outbox.status is not None:
             raise OpsKernelTransitionError("news shadow invariant")
         with self._transaction() as connection:
-            prior=connection.execute("SELECT * FROM alert_outbox WHERE alert_id=?",(outbox.alert_id,)).fetchone()
+            prior = connection.execute(
+                "SELECT * FROM alert_outbox WHERE alert_id=?", (outbox.alert_id,)
+            ).fetchone()
             if prior is not None:
                 if tuple(prior) != self._outbox_values(outbox):
                     raise OpsKernelConflictError("news outbox identity conflict")
                 return ReplayResult.DUPLICATE
-            self._insert_outbox(connection,outbox)
+            self._insert_outbox(connection, outbox)
             return ReplayResult.CREATED
 
     def record_news_alert_outbox(self, role, outbox, *, activation_enabled=False):
-        return self._record_news_outbox(role,outbox,AlertOrigin.NEWS_EVENT,
-            "record_news_alert_outbox",activation_enabled=activation_enabled)
+        return self._record_news_outbox(
+            role,
+            outbox,
+            AlertOrigin.NEWS_EVENT,
+            "record_news_alert_outbox",
+            activation_enabled=activation_enabled,
+        )
 
     def record_news_ops_failure_outbox(self, role, outbox, *, activation_enabled=False):
-        return self._record_news_outbox(role,outbox,AlertOrigin.NEWS_OPS,
-            "record_news_ops_failure_outbox",activation_enabled=activation_enabled)
+        return self._record_news_outbox(
+            role,
+            outbox,
+            AlertOrigin.NEWS_OPS,
+            "record_news_ops_failure_outbox",
+            activation_enabled=activation_enabled,
+        )
 
     def record_quant_market_close_outbox(self, role, outbox):
         return self._record_news_outbox(
-            role, outbox, AlertOrigin.QUANT_MARKET_CLOSE,
-            "record_quant_market_close_outbox", activation_enabled=False,
+            role,
+            outbox,
+            AlertOrigin.QUANT_MARKET_CLOSE,
+            "record_quant_market_close_outbox",
+            activation_enabled=False,
         )
 
     def upsert_deferred(self, role, attempt, *, inject_crash_at=None):
@@ -4048,9 +5166,14 @@ class OpsKernelStore:
         evidence_json = _json(attempt.evidence_refs)
         ticks_json = _ticks_json(attempt.material_ticks)
         current_projection = (
-            attempt.market.value, evidence_json, ticks_json, attempt.next_review_at,
-            attempt.reason_code, attempt.assignment.value,
-            attempt.candidate_tick, attempt.candidate_id,
+            attempt.market.value,
+            evidence_json,
+            ticks_json,
+            attempt.next_review_at,
+            attempt.reason_code,
+            attempt.assignment.value,
+            attempt.candidate_tick,
+            attempt.candidate_id,
         )
         old = connection.execute(
             "SELECT * FROM deferred_candidates WHERE subject_id=?",
@@ -4062,10 +5185,19 @@ class OpsKernelStore:
             "SELECT * FROM deferred_attempts WHERE subject_id=? AND attempt_tick=?",
             (attempt.subject_id, attempt.attempt_tick),
         ).fetchone()
-        history_projection = None if history is None else (
-            history["market"], history["evidence_refs_json"], history["material_ticks_json"],
-            parse_iso(history["next_review_at"]), history["reason_code"],
-            history["assignment"], history["candidate_tick"], history["candidate_id"],
+        history_projection = (
+            None
+            if history is None
+            else (
+                history["market"],
+                history["evidence_refs_json"],
+                history["material_ticks_json"],
+                parse_iso(history["next_review_at"]),
+                history["reason_code"],
+                history["assignment"],
+                history["candidate_tick"],
+                history["candidate_id"],
+            )
         )
         if old is None:
             if attempt.attempt_tick != attempt.first_seen_tick:
@@ -4077,13 +5209,22 @@ class OpsKernelStore:
                 "(subject_id,market,evidence_refs_json,material_ticks_json,first_seen_tick,"
                 "last_attempt_tick,next_review_at,attempts,terminal_state,updated_at)"
                 " VALUES(?,?,?,?,?,?,?,1,NULL,?)",
-                (attempt.subject_id, attempt.market.value, evidence_json, ticks_json,
-                 attempt.first_seen_tick, attempt.attempt_tick,
-                 iso(attempt.next_review_at), iso(attempt.attempted_at)),
+                (
+                    attempt.subject_id,
+                    attempt.market.value,
+                    evidence_json,
+                    ticks_json,
+                    attempt.first_seen_tick,
+                    attempt.attempt_tick,
+                    iso(attempt.next_review_at),
+                    iso(attempt.attempted_at),
+                ),
             )
             if inject_crash_at == "after_current":
                 raise RuntimeError("injected")
-            self._insert_deferred_attempt(connection, attempt, evidence_json, ticks_json)
+            self._insert_deferred_attempt(
+                connection, attempt, evidence_json, ticks_json
+            )
             if inject_crash_at == "after_history":
                 raise RuntimeError("injected")
             return ReplayResult.CREATED
@@ -4097,15 +5238,21 @@ class OpsKernelStore:
             raise OpsKernelConflictError("deferred attempt regression")
         if attempt.attempt_tick == old["last_attempt_tick"]:
             stored_current = (
-                old["market"], old["evidence_refs_json"], old["material_ticks_json"],
-                parse_iso(old["next_review_at"]), history["reason_code"] if history else None,
+                old["market"],
+                old["evidence_refs_json"],
+                old["material_ticks_json"],
+                parse_iso(old["next_review_at"]),
+                history["reason_code"] if history else None,
                 history["assignment"] if history else None,
                 history["candidate_tick"] if history else None,
                 history["candidate_id"] if history else None,
             )
             if history is None:
                 raise OpsKernelCorruptError("deferred history torn")
-            if stored_current != current_projection or history_projection != current_projection:
+            if (
+                stored_current != current_projection
+                or history_projection != current_projection
+            ):
                 raise OpsKernelConflictError("deferred attempt identity conflict")
             return ReplayResult.DUPLICATE
         if old["attempts"] >= DEFERRED_ATTEMPTS_MAX:
@@ -4116,9 +5263,14 @@ class OpsKernelStore:
             "UPDATE deferred_candidates SET evidence_refs_json=?,"
             "material_ticks_json=?,last_attempt_tick=?,next_review_at=?,"
             "attempts=attempts+1,updated_at=? WHERE subject_id=?",
-            (evidence_json, ticks_json, attempt.attempt_tick,
-             iso(attempt.next_review_at), iso(attempt.attempted_at),
-             attempt.subject_id),
+            (
+                evidence_json,
+                ticks_json,
+                attempt.attempt_tick,
+                iso(attempt.next_review_at),
+                iso(attempt.attempted_at),
+                attempt.subject_id,
+            ),
         )
         if inject_crash_at == "after_current":
             raise RuntimeError("injected")
@@ -4133,9 +5285,12 @@ class OpsKernelStore:
             "SELECT * FROM deferred_attempts WHERE subject_id=? ORDER BY attempt_tick",
             (current["subject_id"],),
         ).fetchall()
-        if (len(rows) != current["attempts"] or not rows
-                or rows[0]["attempt_tick"] != current["first_seen_tick"]
-                or rows[-1]["attempt_tick"] != current["last_attempt_tick"]):
+        if (
+            len(rows) != current["attempts"]
+            or not rows
+            or rows[0]["attempt_tick"] != current["first_seen_tick"]
+            or rows[-1]["attempt_tick"] != current["last_attempt_tick"]
+        ):
             raise OpsKernelCorruptError("deferred history torn")
         latest = rows[-1]
         try:
@@ -4146,21 +5301,35 @@ class OpsKernelStore:
         except (ValueError, TypeError) as error:
             raise OpsKernelCorruptError("deferred history invalid") from error
         if (
-            current["market"], current["evidence_refs_json"], current["material_ticks_json"],
+            current["market"],
+            current["evidence_refs_json"],
+            current["material_ticks_json"],
             current["next_review_at"],
         ) != (latest["market"], evidence, ticks, next_review):
             raise OpsKernelCorruptError("deferred projection drift")
-        if current["terminal_state"] is None and current["updated_at"] != latest["attempted_at"]:
+        if (
+            current["terminal_state"] is None
+            and current["updated_at"] != latest["attempted_at"]
+        ):
             raise OpsKernelCorruptError("deferred timestamp drift")
 
     @staticmethod
     def _insert_deferred_attempt(connection, attempt, evidence_json, ticks_json):
         connection.execute(
             "INSERT INTO deferred_attempts VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-            (attempt.subject_id, attempt.market.value, attempt.attempt_tick, attempt.candidate_tick,
-             attempt.candidate_id, evidence_json, ticks_json,
-             iso(attempt.next_review_at), attempt.reason_code,
-             attempt.assignment.value, iso(attempt.attempted_at)),
+            (
+                attempt.subject_id,
+                attempt.market.value,
+                attempt.attempt_tick,
+                attempt.candidate_tick,
+                attempt.candidate_id,
+                evidence_json,
+                ticks_json,
+                iso(attempt.next_review_at),
+                attempt.reason_code,
+                attempt.assignment.value,
+                iso(attempt.attempted_at),
+            ),
         )
 
     def terminalize_deferred(self, role, subject_id, terminal_state, now):
@@ -4186,10 +5355,15 @@ class OpsKernelStore:
     @staticmethod
     def _deferred(row):
         return DeferredCandidateV1(
-            row["subject_id"], Market(row["market"]), tuple(_decode(row["evidence_refs_json"])),
-            _ticks(row["material_ticks_json"]), row["first_seen_tick"],
-            row["last_attempt_tick"], parse_iso(row["next_review_at"]),
-            row["attempts"], row["terminal_state"],
+            row["subject_id"],
+            Market(row["market"]),
+            tuple(_decode(row["evidence_refs_json"])),
+            _ticks(row["material_ticks_json"]),
+            row["first_seen_tick"],
+            row["last_attempt_tick"],
+            parse_iso(row["next_review_at"]),
+            row["attempts"],
+            row["terminal_state"],
             parse_iso(row["updated_at"]),
         )
 
@@ -4200,7 +5374,7 @@ class OpsKernelStore:
             rows = connection.execute(
                 "SELECT * FROM deferred_candidates WHERE terminal_state IS NULL "
                 "AND market=? AND next_review_at<=? ORDER BY next_review_at,subject_id",
-                (market.value, iso(now))
+                (market.value, iso(now)),
             ).fetchall()
             for row in rows:
                 self._validate_deferred_state(connection, row)
@@ -4222,21 +5396,30 @@ class OpsKernelStore:
             ).fetchone()
             if rows and current is None:
                 raise OpsKernelCorruptError("deferred history torn")
-            result = tuple(DeferredAttemptV1(
-                row["subject_id"], Market(row["market"]),
-                current["first_seen_tick"], row["attempt_tick"],
-                row["candidate_tick"], row["candidate_id"],
-                tuple(_decode(row["evidence_refs_json"])),
-                _ticks(row["material_ticks_json"]), parse_iso(row["next_review_at"]),
-                row["reason_code"], CandidateAssignment(row["assignment"]),
-                parse_iso(row["attempted_at"]),
-            ) for row in rows)
+            result = tuple(
+                DeferredAttemptV1(
+                    row["subject_id"],
+                    Market(row["market"]),
+                    current["first_seen_tick"],
+                    row["attempt_tick"],
+                    row["candidate_tick"],
+                    row["candidate_id"],
+                    tuple(_decode(row["evidence_refs_json"])),
+                    _ticks(row["material_ticks_json"]),
+                    parse_iso(row["next_review_at"]),
+                    row["reason_code"],
+                    CandidateAssignment(row["assignment"]),
+                    parse_iso(row["attempted_at"]),
+                )
+                for row in rows
+            )
             if result and result[0].attempt_tick != current["first_seen_tick"]:
                 raise OpsKernelCorruptError("deferred history torn")
             return result
 
-    def upsert_audit_backlog(self, role, kind, subject_id, first_session,
-                             considered_session, state):
+    def upsert_audit_backlog(
+        self, role, kind, subject_id, first_session, considered_session, state
+    ):
         self._role(role, "upsert_audit_backlog")
         if state not in {"PENDING_AUDIT", "AUDITED", "ESCALATED"}:
             raise ValueError("invalid audit state")
@@ -4279,7 +5462,8 @@ class OpsKernelStore:
         if row is None:
             return None
         return {
-            "kind": row["kind"], "cursor_subject_id": row["cursor_subject_id"],
+            "kind": row["kind"],
+            "cursor_subject_id": row["cursor_subject_id"],
             "updated_at": parse_iso(row["updated_at"]),
         }
 
@@ -4287,7 +5471,9 @@ class OpsKernelStore:
         self._role(role, "write_audit_survey")
         rows = tuple(rows)
         kinds = {
-            "HOLDINGS_CHANGE", "QUOTE_STATE", "COMPLETED_EXECUTION",
+            "HOLDINGS_CHANGE",
+            "QUOTE_STATE",
+            "COMPLETED_EXECUTION",
             "OPERATIONAL_INCIDENT",
         }
         if {_field(row, "kind") for row in rows} != kinds or len(rows) != 4:
@@ -4295,7 +5481,8 @@ class OpsKernelStore:
         values = []
         for row in rows:
             counts = (
-                _field(row, "eligible_count"), _field(row, "debt_count"),
+                _field(row, "eligible_count"),
+                _field(row, "debt_count"),
                 _field(row, "oldest_wait_regular_sessions"),
             )
             if any(type(value) is not int or value < 0 for value in counts):
@@ -4303,10 +5490,17 @@ class OpsKernelStore:
             opened = _field(row, "capacity_incident_opened")
             if type(opened) is not bool:
                 raise ValueError("invalid audit survey")
-            values.append((
-                session_date, _field(row, "kind"), counts[0], 0, counts[1],
-                counts[2], int(opened),
-            ))
+            values.append(
+                (
+                    session_date,
+                    _field(row, "kind"),
+                    counts[0],
+                    0,
+                    counts[1],
+                    counts[2],
+                    int(opened),
+                )
+            )
         with self._transaction() as connection:
             for value in values:
                 connection.execute(
@@ -4323,13 +5517,23 @@ class OpsKernelStore:
         with self._read() as connection:
             rows = connection.execute(
                 "SELECT * FROM audit_coverage WHERE regular_session_date=? "
-                "ORDER BY kind", (session_date,),
+                "ORDER BY kind",
+                (session_date,),
             ).fetchall()
         return tuple(dict(row) for row in rows)
 
     def complete_audit(
-        self, role, *, tick_id, candidate_id, batch_ordinal, kind, subject_id,
-        session_date, considered_session, now,
+        self,
+        role,
+        *,
+        tick_id,
+        candidate_id,
+        batch_ordinal,
+        kind,
+        subject_id,
+        session_date,
+        considered_session,
+        now,
     ):
         self._role(role, "complete_audit")
         require_token(candidate_id, "candidate_id")
@@ -4340,7 +5544,10 @@ class OpsKernelStore:
         if type(considered_session) is not str:
             raise ValueError("invalid considered session")
         try:
-            if datetime.fromisoformat(considered_session).date().isoformat() != considered_session:
+            if (
+                datetime.fromisoformat(considered_session).date().isoformat()
+                != considered_session
+            ):
                 raise ValueError("invalid considered session")
         except ValueError as error:
             raise ValueError("invalid considered session") from error
@@ -4369,8 +5576,10 @@ class OpsKernelStore:
                 (tick_id, batch_ordinal),
             ).fetchone()
             if (
-                batch is None or batch["provider"] != "SOL"
-                or batch["state"] != "SETTLED" or batch["exit"] != "OK"
+                batch is None
+                or batch["provider"] != "SOL"
+                or batch["state"] != "SETTLED"
+                or batch["exit"] != "OK"
             ):
                 raise OpsKernelTransitionError("audit batch unavailable")
             try:
@@ -4378,8 +5587,10 @@ class OpsKernelStore:
                 result = _decode(batch["result_json"])
                 analyses = result["analyses"]
                 matching = [
-                    row for row in analyses
-                    if isinstance(row, Mapping) and row.get("candidate_id") == candidate_id
+                    row
+                    for row in analyses
+                    if isinstance(row, Mapping)
+                    and row.get("candidate_id") == candidate_id
                 ]
             except (AttributeError, KeyError, TypeError, ValueError):
                 raise OpsKernelTransitionError("audit result invalid") from None
@@ -4395,7 +5606,8 @@ class OpsKernelStore:
             except (KeyError, TypeError, ValueError):
                 raise OpsKernelTransitionError("audit evidence invalid") from None
             if (
-                type(citations) is not list or len(citations) != len(set(citations))
+                type(citations) is not list
+                or len(citations) != len(set(citations))
                 or not set(citations) <= evidence_ids
             ):
                 raise OpsKernelTransitionError("audit citations invalid")
@@ -4437,11 +5649,23 @@ class OpsKernelStore:
                 (session_date, material_kind.value),
             ).fetchone()[0]
             return AuditCompletionV1(
-                material_kind, subject_id, session_date, stored_count,
+                material_kind,
+                subject_id,
+                session_date,
+                stored_count,
             )
 
-    def write_audit_coverage(self, role, session_date, kind, eligible, audited, debt,
-                             oldest_wait, capacity_incident_opened):
+    def write_audit_coverage(
+        self,
+        role,
+        session_date,
+        kind,
+        eligible,
+        audited,
+        debt,
+        oldest_wait,
+        capacity_incident_opened,
+    ):
         self._role(role, "write_audit_coverage")
         values = (eligible, audited, debt, oldest_wait)
         if any(type(value) is not int or value < 0 for value in values):
@@ -4459,11 +5683,23 @@ class OpsKernelStore:
 
     @staticmethod
     def _endpoint_values(endpoint):
-        return (endpoint.source, endpoint.method, endpoint.host,
-                endpoint.normalized_path_template)
+        return (
+            endpoint.source,
+            endpoint.method,
+            endpoint.host,
+            endpoint.normalized_path_template,
+        )
 
-    def reserve_request(self, role, stable_phase_id, endpoint,
-                        development_limit, now, *, inject_crash_at=None):
+    def reserve_request(
+        self,
+        role,
+        stable_phase_id,
+        endpoint,
+        development_limit,
+        now,
+        *,
+        inject_crash_at=None,
+    ):
         """LEGACY-ONLY G2 acceptance API: endpoint reservation telemetry.
 
         Sealed for bounded acceptance evidence; never an admission authority
@@ -4472,18 +5708,22 @@ class OpsKernelStore:
         self._role(role, "reserve_request")
         if (stable_phase_id is None) != (development_limit is None):
             raise ValueError("development identity and limit must be paired")
-        if stable_phase_id is not None and stable_phase_id not in self._stable_phase_ids:
+        if (
+            stable_phase_id is not None
+            and stable_phase_id not in self._stable_phase_ids
+        ):
             raise ValueError("unknown stable phase")
         if stable_phase_id is not None and (
             type(development_limit) is not int or development_limit < 1
         ):
             raise ValueError("invalid development limit")
-        runtime_day = now.astimezone(timezone.utc).date().isoformat()
+        runtime_day = now.astimezone(UTC).date().isoformat()
         ep = self._endpoint_values(endpoint)
         with self._transaction() as connection:
             cooldown = connection.execute(
                 "SELECT next_eligible_at FROM endpoint_cooldowns "
-                "WHERE source=? AND method=? AND host=? AND normalized_path_template=?", ep
+                "WHERE source=? AND method=? AND host=? AND normalized_path_template=?",
+                ep,
             ).fetchone()
             if cooldown and parse_iso(cooldown[0]) > now:
                 raise OpsKernelCooldownActive("endpoint cooldown active")
@@ -4491,7 +5731,8 @@ class OpsKernelStore:
                 development = connection.execute(
                     "SELECT started_count FROM development_request_reservations "
                     "WHERE stable_phase_id=? AND source=? AND method=? AND host=? "
-                    "AND normalized_path_template=?", (stable_phase_id, *ep)
+                    "AND normalized_path_template=?",
+                    (stable_phase_id, *ep),
                 ).fetchone()
                 if (development[0] if development else 0) >= development_limit:
                     raise OpsKernelBudgetExceeded("development request budget exceeded")
@@ -4500,12 +5741,14 @@ class OpsKernelStore:
                 "INSERT INTO request_day_counters VALUES(?,1,?,?) "
                 "ON CONFLICT(utc_day) DO UPDATE SET "
                 "provider_started_count=provider_started_count+1,"
-                "updated_at=excluded.updated_at", (runtime_day, timestamp, timestamp),
+                "updated_at=excluded.updated_at",
+                (runtime_day, timestamp, timestamp),
             )
             connection.execute(
                 "INSERT INTO runtime_request_reservations VALUES(?,?,?,?,?,1) "
                 "ON CONFLICT(runtime_day,source,method,host,normalized_path_template) "
-                "DO UPDATE SET started_count=started_count+1", (runtime_day, *ep),
+                "DO UPDATE SET started_count=started_count+1",
+                (runtime_day, *ep),
             )
             if inject_crash_at == "after_runtime":
                 raise RuntimeError("injected")
@@ -4513,7 +5756,8 @@ class OpsKernelStore:
                 connection.execute(
                     "INSERT INTO development_request_reservations VALUES(?,?,?,?,?,1) "
                     "ON CONFLICT(stable_phase_id,source,method,host,normalized_path_template) "
-                    "DO UPDATE SET started_count=started_count+1", (stable_phase_id, *ep),
+                    "DO UPDATE SET started_count=started_count+1",
+                    (stable_phase_id, *ep),
                 )
 
     def record_cooldown(self, role, endpoint, next_eligible_at, reason, now):
@@ -4522,18 +5766,22 @@ class OpsKernelStore:
         with self._transaction() as connection:
             old = connection.execute(
                 "SELECT next_eligible_at FROM endpoint_cooldowns WHERE "
-                "source=? AND method=? AND host=? AND normalized_path_template=?", ep
+                "source=? AND method=? AND host=? AND normalized_path_template=?",
+                ep,
             ).fetchone()
-            maximum = max(parse_iso(old[0]), next_eligible_at) if old else next_eligible_at
+            maximum = (
+                max(parse_iso(old[0]), next_eligible_at) if old else next_eligible_at
+            )
             connection.execute(
                 "INSERT INTO endpoint_cooldowns VALUES(?,?,?,?,?,?,?) "
                 "ON CONFLICT(source,method,host,normalized_path_template) DO UPDATE SET "
                 "next_eligible_at=excluded.next_eligible_at,reason=excluded.reason,"
-                "updated_at=excluded.updated_at", (*ep, iso(maximum), reason, iso(now)),
+                "updated_at=excluded.updated_at",
+                (*ep, iso(maximum), reason, iso(now)),
             )
 
     def read_reservation_counts(self, stable_phase_id, endpoint, now):
-        runtime_day = now.astimezone(timezone.utc).date().isoformat()
+        runtime_day = now.astimezone(UTC).date().isoformat()
         ep = self._endpoint_values(endpoint)
         with self._read() as connection:
             runtime = connection.execute(
@@ -4545,7 +5793,8 @@ class OpsKernelStore:
                 row = connection.execute(
                     "SELECT started_count FROM development_request_reservations WHERE "
                     "stable_phase_id=? AND source=? AND method=? AND host=? "
-                    "AND normalized_path_template=?", (stable_phase_id, *ep),
+                    "AND normalized_path_template=?",
+                    (stable_phase_id, *ep),
                 ).fetchone()
                 development = row[0] if row else 0
         return ReservationCountsV1(runtime[0] if runtime else 0, development)
@@ -4553,10 +5802,18 @@ class OpsKernelStore:
     def append_feedback(self, role, row):
         self._role(role, "append_feedback")
         values = (
-            row.feedback_id, row.provider, row.provider_update_id,
-            row.provider_message_ref, row.sender_ref, row.thread_ref,
-            iso(row.received_at), row.raw_text, row.context_ref, row.capture_source,
-            row.raw_hash, row.event_kind.value,
+            row.feedback_id,
+            row.provider,
+            row.provider_update_id,
+            row.provider_message_ref,
+            row.sender_ref,
+            row.thread_ref,
+            iso(row.received_at),
+            row.raw_text,
+            row.context_ref,
+            row.capture_source,
+            row.raw_hash,
+            row.event_kind.value,
         )
         with self._transaction() as connection:
             existing = connection.execute(
@@ -4588,10 +5845,18 @@ class OpsKernelStore:
     @staticmethod
     def _feedback(row):
         return FeedbackInboundV1(
-            row["feedback_id"], row["provider"], row["provider_update_id"],
-            row["provider_message_ref"], row["sender_ref"], row["thread_ref"],
-            parse_iso(row["received_at"]), row["raw_text"], row["context_ref"],
-            row["capture_source"], row["raw_hash"], FeedbackEventKind(row["event_kind"]),
+            row["feedback_id"],
+            row["provider"],
+            row["provider_update_id"],
+            row["provider_message_ref"],
+            row["sender_ref"],
+            row["thread_ref"],
+            parse_iso(row["received_at"]),
+            row["raw_text"],
+            row["context_ref"],
+            row["capture_source"],
+            row["raw_hash"],
+            FeedbackEventKind(row["event_kind"]),
         )
 
     def read_feedback_private(self, feedback_id):
@@ -4616,12 +5881,16 @@ class OpsKernelStore:
     @staticmethod
     def _cadence_slot(policy, scheduled_for_utc, child_limits):
         if not isinstance(policy, CadencePolicyV1):
-            raise CadenceBindingError("versioned tick binding requires a cadence policy")
+            raise CadenceBindingError(
+                "versioned tick binding requires a cadence policy"
+            )
         if not isinstance(child_limits, TradesChildLimitsV1):
             raise CadenceBindingError("invalid trades child limits")
-        if (not isinstance(scheduled_for_utc, datetime)
-                or scheduled_for_utc.tzinfo is None
-                or scheduled_for_utc.utcoffset() is None):
+        if (
+            not isinstance(scheduled_for_utc, datetime)
+            or scheduled_for_utc.tzinfo is None
+            or scheduled_for_utc.utcoffset() is None
+        ):
             raise CadenceBindingError("scheduled_for_utc must be an aware datetime")
         if scheduled_for_utc.microsecond != 0 or (
             int(scheduled_for_utc.timestamp()) % policy.cadence_seconds != 0
@@ -4655,7 +5924,9 @@ class OpsKernelStore:
             )
             return canonical_decode(snapshot_json.encode(), max_bytes=64 * 1024)
         if row["policy_digest"] != digest or row["snapshot_json"] != snapshot_json:
-            raise CadencePolicyMismatchError("policy does not match pinned tick snapshot")
+            raise CadencePolicyMismatchError(
+                "policy does not match pinned tick snapshot"
+            )
         return canonical_decode(row["snapshot_json"].encode(), max_bytes=64 * 1024)
 
     @staticmethod
@@ -4672,8 +5943,9 @@ class OpsKernelStore:
             "settled_at": parse_iso(row["settled_at"]),
         }
 
-    def pin_cadence_tick(self, role, policy, *, scheduled_for_utc, now,
-                         child_limits=None) -> None:
+    def pin_cadence_tick(
+        self, role, policy, *, scheduled_for_utc, now, child_limits=None
+    ) -> None:
         """Pin (or verify) a tick's policy snapshot without admitting any call."""
         self._role(role, "pin_cadence_tick")
         if child_limits is None:
@@ -4683,8 +5955,9 @@ class OpsKernelStore:
         with self._transaction() as connection:
             self._pin_or_match_cadence(connection, policy, slot_iso, child_limits, now)
 
-    def plan_cadence_requests(self, role, policy, *, scheduled_for_utc, requests,
-                              now, child_limits=None) -> ReplayResult:
+    def plan_cadence_requests(
+        self, role, policy, *, scheduled_for_utc, requests, now, child_limits=None
+    ) -> ReplayResult:
         """Persist durable PLANNED wire rows for a closed set of operations."""
         self._role(role, "plan_cadence_requests")
         if child_limits is None:
@@ -4709,19 +5982,39 @@ class OpsKernelStore:
                     (policy.policy_version, slot_iso, native_identity),
                 ).fetchone()
                 if prior is not None:
-                    if (prior["operation_group"], prior["operation"]) != (group, operation):
-                        raise CadenceDuplicateError("conflicting planned cadence identity")
+                    if (prior["operation_group"], prior["operation"]) != (
+                        group,
+                        operation,
+                    ):
+                        raise CadenceDuplicateError(
+                            "conflicting planned cadence identity"
+                        )
                     continue
                 connection.execute(
                     "INSERT INTO cadence_wire_starts VALUES(?,?,?,?,?,'PLANNED',?,NULL,NULL)",
-                    (policy.policy_version, slot_iso, group, operation,
-                     native_identity, planned_at),
+                    (
+                        policy.policy_version,
+                        slot_iso,
+                        group,
+                        operation,
+                        native_identity,
+                        planned_at,
+                    ),
                 )
                 outcome = ReplayResult.CREATED
             return outcome
 
-    def _admit_cadence_start(self, connection, policy, slot_iso, group, operation,
-                             native_identity, child_limits, now):
+    def _admit_cadence_start(
+        self,
+        connection,
+        policy,
+        slot_iso,
+        group,
+        operation,
+        native_identity,
+        child_limits,
+        now,
+    ):
         """Shared STARTED transition; caller already opened BEGIN IMMEDIATE.
 
         Requires the exact durable PLANNED row (or, for calendar attempts, a
@@ -4730,7 +6023,11 @@ class OpsKernelStore:
         is copied into this module.
         """
         pinned = self._pin_or_match_cadence(
-            connection, policy, slot_iso, child_limits, now,
+            connection,
+            policy,
+            slot_iso,
+            child_limits,
+            now,
         )
         row = connection.execute(
             "SELECT * FROM cadence_wire_starts WHERE policy_version=? "
@@ -4761,8 +6058,11 @@ class OpsKernelStore:
             "   WHERE policy_version=:v AND scheduled_for_utc=:s"
             "   AND operation=:o AND state<>'PLANNED') < :child_limit END",
             {
-                "v": policy.policy_version, "s": slot_iso, "g": group,
-                "o": operation, "total_limit": limits["total_wire_starts"],
+                "v": policy.policy_version,
+                "s": slot_iso,
+                "g": group,
+                "o": operation,
+                "total_limit": limits["total_wire_starts"],
                 # The pinned snapshot format is frozen for digest stability;
                 # a group absent from it (CONDITIONAL_ORDER_HISTORY) has a
                 # structural zero budget in the 300s lane.
@@ -4788,8 +6088,17 @@ class OpsKernelStore:
         ).fetchone()
         return self._cadence_wire_row(fresh)
 
-    def start_cadence_request(self, role, policy, *, scheduled_for_utc, operation,
-                              native_identity, now, child_limits=None) -> dict:
+    def start_cadence_request(
+        self,
+        role,
+        policy,
+        *,
+        scheduled_for_utc,
+        operation,
+        native_identity,
+        now,
+        child_limits=None,
+    ) -> dict:
         self._role(role, "start_cadence_request")
         if child_limits is None:
             child_limits = TradesChildLimitsV1()
@@ -4798,18 +6107,27 @@ class OpsKernelStore:
         iso(now)
         with self._transaction() as connection:
             return self._admit_cadence_start(
-                connection, policy, slot_iso, group, operation, native_identity,
-                child_limits, now,
+                connection,
+                policy,
+                slot_iso,
+                group,
+                operation,
+                native_identity,
+                child_limits,
+                now,
             )
 
-    def settle_cadence_request(self, role, *, policy_version, scheduled_for_utc,
-                               native_identity, outcome, now):
+    def settle_cadence_request(
+        self, role, *, policy_version, scheduled_for_utc, native_identity, outcome, now
+    ):
         self._role(role, "settle_cadence_request")
         if outcome not in self._CADENCE_SETTLE_OUTCOMES:
             raise CadenceTransitionError("invalid cadence settlement outcome")
-        if (not isinstance(scheduled_for_utc, datetime)
-                or scheduled_for_utc.tzinfo is None
-                or scheduled_for_utc.utcoffset() is None):
+        if (
+            not isinstance(scheduled_for_utc, datetime)
+            or scheduled_for_utc.tzinfo is None
+            or scheduled_for_utc.utcoffset() is None
+        ):
             raise CadenceBindingError("scheduled_for_utc must be an aware datetime")
         slot_iso = iso(scheduled_for_utc)
         settled_at = iso(now)
@@ -4847,26 +6165,39 @@ class OpsKernelStore:
         self._role(role, "reconcile_cadence")
         settled_at = iso(now)
         with self._transaction() as connection:
-            wire_keys = tuple(connection.execute(
-                "SELECT policy_version,scheduled_for_utc,native_identity "
-                "FROM cadence_wire_starts WHERE state='STARTED' "
-                "ORDER BY policy_version,scheduled_for_utc,native_identity"
-            ).fetchall())
+            wire_keys = tuple(
+                connection.execute(
+                    "SELECT policy_version,scheduled_for_utc,native_identity "
+                    "FROM cadence_wire_starts WHERE state='STARTED' "
+                    "ORDER BY policy_version,scheduled_for_utc,native_identity"
+                ).fetchall()
+            )
             connection.execute(
                 "UPDATE cadence_wire_starts SET state='UNKNOWN',settled_at=? "
-                "WHERE state='STARTED'", (settled_at,),
+                "WHERE state='STARTED'",
+                (settled_at,),
             )
-            wire_rows = tuple(self._cadence_wire_row(connection.execute(
-                "SELECT * FROM cadence_wire_starts WHERE policy_version=? "
-                "AND scheduled_for_utc=? AND native_identity=?", tuple(key),
-            ).fetchone()) for key in wire_keys)
+            wire_rows = tuple(
+                self._cadence_wire_row(
+                    connection.execute(
+                        "SELECT * FROM cadence_wire_starts WHERE policy_version=? "
+                        "AND scheduled_for_utc=? AND native_identity=?",
+                        tuple(key),
+                    ).fetchone()
+                )
+                for key in wire_keys
+            )
             calendar_rows = self._reconcile_calendar_attempts(connection, now)
             return {"wire_starts": wire_rows, "calendar_attempts": calendar_rows}
 
-    def read_cadence_tick_report(self, policy_version, scheduled_for_utc) -> dict | None:
-        if (not isinstance(scheduled_for_utc, datetime)
-                or scheduled_for_utc.tzinfo is None
-                or scheduled_for_utc.utcoffset() is None):
+    def read_cadence_tick_report(
+        self, policy_version, scheduled_for_utc
+    ) -> dict | None:
+        if (
+            not isinstance(scheduled_for_utc, datetime)
+            or scheduled_for_utc.tzinfo is None
+            or scheduled_for_utc.utcoffset() is None
+        ):
             raise CadenceBindingError("scheduled_for_utc must be an aware datetime")
         slot_iso = iso(scheduled_for_utc)
         with self._read() as connection:
@@ -4877,27 +6208,37 @@ class OpsKernelStore:
             if tick is None:
                 return None
             groups = dict.fromkeys(GROUP_LIMIT_FIELDS, 0)
-            groups.update(connection.execute(
-                "SELECT operation_group,COUNT(*) FROM cadence_wire_starts "
-                "WHERE policy_version=? AND scheduled_for_utc=? AND state<>'PLANNED' "
-                "GROUP BY operation_group", (policy_version, slot_iso),
-            ).fetchall())
-            operations = dict(connection.execute(
-                "SELECT operation,COUNT(*) FROM cadence_wire_starts "
-                "WHERE policy_version=? AND scheduled_for_utc=? AND state<>'PLANNED' "
-                "GROUP BY operation", (policy_version, slot_iso),
-            ).fetchall())
-            states = dict(connection.execute(
-                "SELECT state,COUNT(*) FROM cadence_wire_starts "
-                "WHERE policy_version=? AND scheduled_for_utc=? "
-                "GROUP BY state", (policy_version, slot_iso),
-            ).fetchall())
+            groups.update(
+                connection.execute(
+                    "SELECT operation_group,COUNT(*) FROM cadence_wire_starts "
+                    "WHERE policy_version=? AND scheduled_for_utc=? AND state<>'PLANNED' "
+                    "GROUP BY operation_group",
+                    (policy_version, slot_iso),
+                ).fetchall()
+            )
+            operations = dict(
+                connection.execute(
+                    "SELECT operation,COUNT(*) FROM cadence_wire_starts "
+                    "WHERE policy_version=? AND scheduled_for_utc=? AND state<>'PLANNED' "
+                    "GROUP BY operation",
+                    (policy_version, slot_iso),
+                ).fetchall()
+            )
+            states = dict(
+                connection.execute(
+                    "SELECT state,COUNT(*) FROM cadence_wire_starts "
+                    "WHERE policy_version=? AND scheduled_for_utc=? "
+                    "GROUP BY state",
+                    (policy_version, slot_iso),
+                ).fetchall()
+            )
         return {
             "policy_version": policy_version,
             "scheduled_for_utc": parse_iso(slot_iso),
             "policy_digest": tick["policy_digest"],
             "snapshot": canonical_decode(
-                tick["snapshot_json"].encode(), max_bytes=64 * 1024,
+                tick["snapshot_json"].encode(),
+                max_bytes=64 * 1024,
             ),
             "total_started": sum(groups.values()),
             "group_started": groups,
@@ -4917,19 +6258,24 @@ class OpsKernelStore:
     def _calendar_identity(market, market_local_date):
         if not isinstance(market, Market):
             raise CadenceBindingError("unknown market")
-        if (not isinstance(market_local_date, date)
-                or isinstance(market_local_date, datetime)):
+        if not isinstance(market_local_date, date) or isinstance(
+            market_local_date, datetime
+        ):
             raise CadenceBindingError("market local date must be a date")
         return market.value, market_local_date.isoformat()
 
     @staticmethod
     def _aware_slot(value, name):
-        if (not isinstance(value, datetime) or value.tzinfo is None
-                or value.utcoffset() is None):
+        if (
+            not isinstance(value, datetime)
+            or value.tzinfo is None
+            or value.utcoffset() is None
+        ):
             raise CadenceBindingError(f"{name} must be an aware datetime")
 
-    def plan_calendar_slot(self, role, market, market_local_date,
-                           eligible_slot_utc, *, now) -> ReplayResult:
+    def plan_calendar_slot(
+        self, role, market, market_local_date, eligible_slot_utc, *, now
+    ) -> ReplayResult:
         self._role(role, "plan_calendar_slot")
         market_value, local_date = self._calendar_identity(market, market_local_date)
         self._aware_slot(eligible_slot_utc, "eligible_slot_utc")
@@ -4948,9 +6294,18 @@ class OpsKernelStore:
             )
             return ReplayResult.CREATED
 
-    def start_calendar_attempt(self, role, policy, *, scheduled_for_utc, market,
-                               market_local_date, eligible_slot_utc, now,
-                               child_limits=None) -> CalendarStartReceiptV1:
+    def start_calendar_attempt(
+        self,
+        role,
+        policy,
+        *,
+        scheduled_for_utc,
+        market,
+        market_local_date,
+        eligible_slot_utc,
+        now,
+        child_limits=None,
+    ) -> CalendarStartReceiptV1:
         self._role(role, "start_calendar_attempt")
         if child_limits is None:
             child_limits = TradesChildLimitsV1()
@@ -4961,7 +6316,11 @@ class OpsKernelStore:
         operation = f"CALENDAR_DAY_{market_value}"
         with self._transaction() as connection:
             self._pin_or_match_cadence(
-                connection, policy, tick_slot_iso, child_limits, now,
+                connection,
+                policy,
+                tick_slot_iso,
+                child_limits,
+                now,
             )
             slot = connection.execute(
                 "SELECT * FROM cadence_calendar_slots WHERE market=? "
@@ -4986,7 +6345,8 @@ class OpsKernelStore:
                 raise CadenceTransitionError("previous calendar attempt unreconciled")
             consumed = connection.execute(
                 "SELECT COUNT(*) FROM cadence_calendar_attempts WHERE market=? "
-                "AND market_local_date=?", (market_value, local_date),
+                "AND market_local_date=?",
+                (market_value, local_date),
             ).fetchone()[0]
             if consumed >= CALENDAR_ATTEMPT_MAX:
                 raise CadenceCalendarExhaustedError(
@@ -5005,8 +6365,15 @@ class OpsKernelStore:
             connection.execute(
                 "INSERT INTO cadence_calendar_attempts "
                 "VALUES(?,?,?,'STARTED',?,?,?,?,NULL,NULL,NULL,NULL)",
-                (market_value, local_date, ordinal, eligible_iso,
-                 policy.policy_version, tick_slot_iso, iso(now)),
+                (
+                    market_value,
+                    local_date,
+                    ordinal,
+                    eligible_iso,
+                    policy.policy_version,
+                    tick_slot_iso,
+                    iso(now),
+                ),
             )
             connection.execute(
                 "UPDATE cadence_calendar_slots SET state='STARTED',attempt_ordinal=? "
@@ -5018,26 +6385,46 @@ class OpsKernelStore:
             # planned row for calendar is the retry slot above (SDS §4).
             connection.execute(
                 "INSERT INTO cadence_wire_starts VALUES(?,?,?,?,?,'PLANNED',?,NULL,NULL)",
-                (policy.policy_version, tick_slot_iso, "CALENDAR", operation,
-                 native_identity, iso(now)),
+                (
+                    policy.policy_version,
+                    tick_slot_iso,
+                    "CALENDAR",
+                    operation,
+                    native_identity,
+                    iso(now),
+                ),
             )
             self._admit_cadence_start(
-                connection, policy, tick_slot_iso, "CALENDAR", operation,
-                native_identity, child_limits, now,
+                connection,
+                policy,
+                tick_slot_iso,
+                "CALENDAR",
+                operation,
+                native_identity,
+                child_limits,
+                now,
             )
             return CalendarStartReceiptV1(
-                policy.policy_version, parse_iso(tick_slot_iso), market,
-                market_local_date, ordinal, native_identity, "STARTED",
+                policy.policy_version,
+                parse_iso(tick_slot_iso),
+                market,
+                market_local_date,
+                ordinal,
+                native_identity,
+                "STARTED",
             )
 
-    def settle_calendar_attempt(self, role, market, market_local_date,
-                                attempt_ordinal, outcome, *, now):
+    def settle_calendar_attempt(
+        self, role, market, market_local_date, attempt_ordinal, outcome, *, now
+    ):
         self._role(role, "settle_calendar_attempt")
         if outcome not in self._CADENCE_SETTLE_OUTCOMES:
             raise CadenceTransitionError("invalid calendar attempt outcome")
         market_value, local_date = self._calendar_identity(market, market_local_date)
-        if (type(attempt_ordinal) is not int
-                or not 0 <= attempt_ordinal < CALENDAR_ATTEMPT_MAX):
+        if (
+            type(attempt_ordinal) is not int
+            or not 0 <= attempt_ordinal < CALENDAR_ATTEMPT_MAX
+        ):
             raise CadenceTransitionError("invalid calendar attempt ordinal")
         settled_at = iso(now)
         with self._transaction() as connection:
@@ -5053,29 +6440,43 @@ class OpsKernelStore:
                     return ReplayResult.DUPLICATE
                 raise CadenceTransitionError("conflicting calendar attempt settlement")
             next_eligible = None
-            if (outcome in ("FAILED", "UNKNOWN")
-                    and attempt_ordinal < len(CALENDAR_RETRY_DELAY_MINUTES)):
+            if outcome in ("FAILED", "UNKNOWN") and attempt_ordinal < len(
+                CALENDAR_RETRY_DELAY_MINUTES
+            ):
                 next_eligible = iso(
-                    now + timedelta(minutes=CALENDAR_RETRY_DELAY_MINUTES[attempt_ordinal])
+                    now
+                    + timedelta(minutes=CALENDAR_RETRY_DELAY_MINUTES[attempt_ordinal])
                 )
             connection.execute(
                 "UPDATE cadence_calendar_attempts SET state=?,settled_at=?,"
                 "next_eligible_at=? WHERE market=? AND market_local_date=? "
                 "AND attempt_ordinal=?",
-                (outcome, settled_at, next_eligible, market_value, local_date,
-                 attempt_ordinal),
+                (
+                    outcome,
+                    settled_at,
+                    next_eligible,
+                    market_value,
+                    local_date,
+                    attempt_ordinal,
+                ),
             )
             connection.execute(
                 "UPDATE cadence_wire_starts SET state=?,settled_at=? "
                 "WHERE policy_version=? AND scheduled_for_utc=? "
                 "AND native_identity=? AND state='STARTED'",
-                (outcome, settled_at, row["policy_version"],
-                 row["scheduled_for_utc"],
-                 f"calendar:{market_value}:{local_date}:{attempt_ordinal}"),
+                (
+                    outcome,
+                    settled_at,
+                    row["policy_version"],
+                    row["scheduled_for_utc"],
+                    f"calendar:{market_value}:{local_date}:{attempt_ordinal}",
+                ),
             )
             return {
-                "market": market, "market_local_date": market_local_date,
-                "attempt_ordinal": attempt_ordinal, "state": outcome,
+                "market": market,
+                "market_local_date": market_local_date,
+                "attempt_ordinal": attempt_ordinal,
+                "state": outcome,
                 "settled_at": parse_iso(settled_at),
                 "next_eligible_at": parse_iso(next_eligible),
             }
@@ -5090,7 +6491,8 @@ class OpsKernelStore:
         if type(receipt) is not CalendarStartReceiptV1:
             raise CadenceBindingError("calendar receipt must be kernel-issued")
         market_value, local_date = self._calendar_identity(
-            receipt.market, receipt.market_local_date,
+            receipt.market,
+            receipt.market_local_date,
         )
         slot_iso = iso(receipt.scheduled_for_utc)
         attempt = connection.execute(
@@ -5100,8 +6502,10 @@ class OpsKernelStore:
         ).fetchone()
         if attempt is None:
             raise CadenceTransitionError("calendar receipt has no attempt row")
-        if (attempt["policy_version"] != receipt.policy_version
-                or attempt["scheduled_for_utc"] != slot_iso):
+        if (
+            attempt["policy_version"] != receipt.policy_version
+            or attempt["scheduled_for_utc"] != slot_iso
+        ):
             raise CadenceTransitionError("calendar receipt does not match its rows")
         if attempt["state"] != "STARTED":
             raise CadenceTransitionError("calendar receipt attempt is terminal")
@@ -5126,7 +6530,8 @@ class OpsKernelStore:
         claimed_at = iso(now)
         with self._transaction() as connection:
             attempt, market_value, local_date = self._calendar_receipt_rows(
-                connection, receipt,
+                connection,
+                receipt,
             )
             if attempt["provider_claimed_at"] is not None:
                 raise CadenceDuplicateError("calendar provider claim already consumed")
@@ -5148,14 +6553,17 @@ class OpsKernelStore:
         iso(now)
         with self._read() as connection:
             attempt, _market_value, _local_date = self._calendar_receipt_rows(
-                connection, receipt,
+                connection,
+                receipt,
             )
             if attempt["provider_claimed_at"] is None:
                 raise CadenceTransitionError(
                     "history append requires a claimed calendar receipt"
                 )
 
-    def read_settled_calendar_provenance(self, market, market_local_date) -> dict | None:
+    def read_settled_calendar_provenance(
+        self, market, market_local_date
+    ) -> dict | None:
         """Read-only durable provenance of a SUCCEEDED calendar identity (M2).
 
         Returns the identity of the one SUCCEEDED attempt for
@@ -5195,7 +6603,8 @@ class OpsKernelStore:
         committed_at = iso(now)
         with self._transaction() as connection:
             attempt, market_value, local_date = self._calendar_receipt_rows(
-                connection, receipt,
+                connection,
+                receipt,
             )
             if attempt["provider_claimed_at"] is None:
                 raise CadenceTransitionError(
@@ -5214,11 +6623,13 @@ class OpsKernelStore:
         """Settle stale STARTED calendar attempts to UNKNOWN at the SAME
         ordinal; normal backoff then permits ordinal N+1, never a restart."""
         settled_at = iso(now)
-        keys = tuple(connection.execute(
-            "SELECT market,market_local_date,attempt_ordinal "
-            "FROM cadence_calendar_attempts WHERE state='STARTED' "
-            "ORDER BY market,market_local_date,attempt_ordinal"
-        ).fetchall())
+        keys = tuple(
+            connection.execute(
+                "SELECT market,market_local_date,attempt_ordinal "
+                "FROM cadence_calendar_attempts WHERE state='STARTED' "
+                "ORDER BY market,market_local_date,attempt_ordinal"
+            ).fetchall()
+        )
         rows = []
         for key in keys:
             market_value, local_date, ordinal = tuple(key)
@@ -5233,13 +6644,16 @@ class OpsKernelStore:
                 "AND attempt_ordinal=?",
                 (settled_at, next_eligible, market_value, local_date, ordinal),
             )
-            rows.append({
-                "market": Market(market_value),
-                "market_local_date": date.fromisoformat(local_date),
-                "attempt_ordinal": ordinal, "state": "UNKNOWN",
-                "settled_at": parse_iso(settled_at),
-                "next_eligible_at": parse_iso(next_eligible),
-            })
+            rows.append(
+                {
+                    "market": Market(market_value),
+                    "market_local_date": date.fromisoformat(local_date),
+                    "attempt_ordinal": ordinal,
+                    "state": "UNKNOWN",
+                    "settled_at": parse_iso(settled_at),
+                    "next_eligible_at": parse_iso(next_eligible),
+                }
+            )
         return tuple(rows)
 
     def referenced_pack_ticks(self):
@@ -5272,9 +6686,7 @@ class OpsKernelStore:
             trigger_expression=row["trigger_expression"],
             supporting_evidence=tuple(_decode(row["supporting_evidence_json"])),
             counter_evidence=tuple(_decode(row["counter_evidence_json"])),
-            invalidation_conditions=tuple(
-                _decode(row["invalidation_conditions_json"])
-            ),
+            invalidation_conditions=tuple(_decode(row["invalidation_conditions_json"])),
             next_check_at=parse_iso(row["next_check_at"]),
             portfolio_touch=row["portfolio_touch"],
             origin=row["origin"],
@@ -5328,15 +6740,23 @@ class OpsKernelStore:
                     "invalidation_conditions_json,next_check_at,portfolio_touch,"
                     "origin,provenance_first,superseded_by,created_at,updated_at)"
                     " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,?,?)",
-                    (hypothesis_id, identity, HypothesisState.CANDIDATE.value,
-                     candidate.statement, candidate.trigger_kind.value,
-                     candidate.trigger_expression.strip(),
-                     _json(candidate.supporting_evidence),
-                     _json(candidate.counter_evidence),
-                     _json(candidate.invalidation_conditions),
-                     iso(candidate.next_check_at), candidate.portfolio_touch,
-                     "youtube:12man", candidate.source_ref,
-                     _aware_now, _aware_now),
+                    (
+                        hypothesis_id,
+                        identity,
+                        HypothesisState.CANDIDATE.value,
+                        candidate.statement,
+                        candidate.trigger_kind.value,
+                        candidate.trigger_expression.strip(),
+                        _json(candidate.supporting_evidence),
+                        _json(candidate.counter_evidence),
+                        _json(candidate.invalidation_conditions),
+                        iso(candidate.next_check_at),
+                        candidate.portfolio_touch,
+                        "youtube:12man",
+                        candidate.source_ref,
+                        _aware_now,
+                        _aware_now,
+                    ),
                 )
                 for key in candidate.index_keys:
                     connection.execute(
@@ -5346,11 +6766,16 @@ class OpsKernelStore:
                     )
                 connection.execute(
                     "INSERT INTO hypothesis_sightings VALUES(?,?,?,?,?,?,?,?)",
-                    (sighting.sighting_id, hypothesis_id, "REPORT",
-                     sighting.source_ref, sighting.revision,
-                     sighting.payload_digest,
-                     _json(candidate.supporting_evidence),
-                     iso(sighting.observed_at)),
+                    (
+                        sighting.sighting_id,
+                        hypothesis_id,
+                        "REPORT",
+                        sighting.source_ref,
+                        sighting.revision,
+                        sighting.payload_digest,
+                        _json(candidate.supporting_evidence),
+                        iso(sighting.observed_at),
+                    ),
                 )
                 return ReplayResult.CREATED, hypothesis_id
             # M1: identical historical sighting first -> DUPLICATE regardless
@@ -5367,20 +6792,24 @@ class OpsKernelStore:
             # set; the prior evidence remains durable in earlier sightings.
             prior = set(_decode(existing["supporting_evidence_json"]))
             evidence_delta = tuple(
-                token for token in candidate.supporting_evidence
-                if token not in prior
+                token for token in candidate.supporting_evidence if token not in prior
             )
             connection.execute(
                 "UPDATE hypotheses SET statement=?,trigger_expression=?,"
                 "supporting_evidence_json=?,counter_evidence_json=?,"
                 "invalidation_conditions_json=?,next_check_at=?,"
                 "portfolio_touch=?,updated_at=? WHERE hypothesis_id=?",
-                (candidate.statement, candidate.trigger_expression.strip(),
-                 _json(candidate.supporting_evidence),
-                 _json(candidate.counter_evidence),
-                 _json(candidate.invalidation_conditions),
-                 iso(candidate.next_check_at), candidate.portfolio_touch,
-                 _aware_now, hypothesis_id),
+                (
+                    candidate.statement,
+                    candidate.trigger_expression.strip(),
+                    _json(candidate.supporting_evidence),
+                    _json(candidate.counter_evidence),
+                    _json(candidate.invalidation_conditions),
+                    iso(candidate.next_check_at),
+                    candidate.portfolio_touch,
+                    _aware_now,
+                    hypothesis_id,
+                ),
             )
             for key in candidate.index_keys:
                 connection.execute(
@@ -5390,11 +6819,16 @@ class OpsKernelStore:
                 )
             connection.execute(
                 "INSERT INTO hypothesis_sightings VALUES(?,?,?,?,?,?,?,?)",
-                (sighting.sighting_id, hypothesis_id, "REPORT",
-                 sighting.source_ref, sighting.revision,
-                 sighting.payload_digest,
-                 _json(evidence_delta),
-                 iso(sighting.observed_at)),
+                (
+                    sighting.sighting_id,
+                    hypothesis_id,
+                    "REPORT",
+                    sighting.source_ref,
+                    sighting.revision,
+                    sighting.payload_digest,
+                    _json(evidence_delta),
+                    iso(sighting.observed_at),
+                ),
             )
             return ReplayResult.CREATED, hypothesis_id
 
@@ -5409,18 +6843,26 @@ class OpsKernelStore:
             ).fetchone()
             if parent is None:
                 raise OpsKernelTransitionError("unknown hypothesis")
-            if connection.execute(
-                "SELECT sighting_id FROM hypothesis_sightings WHERE sighting_id=?",
-                (sighting.sighting_id,),
-            ).fetchone() is not None:
+            if (
+                connection.execute(
+                    "SELECT sighting_id FROM hypothesis_sightings WHERE sighting_id=?",
+                    (sighting.sighting_id,),
+                ).fetchone()
+                is not None
+            ):
                 return ReplayResult.DUPLICATE
             connection.execute(
                 "INSERT INTO hypothesis_sightings VALUES(?,?,?,?,?,?,?,?)",
-                (sighting.sighting_id, sighting.hypothesis_id,
-                 sighting.source_kind, sighting.source_ref,
-                 sighting.revision, sighting.payload_digest,
-                 _json(sighting.evidence_delta),
-                 iso(sighting.observed_at)),
+                (
+                    sighting.sighting_id,
+                    sighting.hypothesis_id,
+                    sighting.source_kind,
+                    sighting.source_ref,
+                    sighting.revision,
+                    sighting.payload_digest,
+                    _json(sighting.evidence_delta),
+                    iso(sighting.observed_at),
+                ),
             )
             return ReplayResult.CREATED
 
@@ -5438,10 +6880,12 @@ class OpsKernelStore:
         self._role(role, "merge_hypotheses")
         with self._transaction() as connection:
             kept = connection.execute(
-                "SELECT * FROM hypotheses WHERE hypothesis_id=?", (kept_id,),
+                "SELECT * FROM hypotheses WHERE hypothesis_id=?",
+                (kept_id,),
             ).fetchone()
             merged = connection.execute(
-                "SELECT * FROM hypotheses WHERE hypothesis_id=?", (merged_id,),
+                "SELECT * FROM hypotheses WHERE hypothesis_id=?",
+                (merged_id,),
             ).fetchone()
             if kept is None or merged is None:
                 raise OpsKernelTransitionError("unknown hypothesis")
@@ -5454,14 +6898,10 @@ class OpsKernelStore:
             if merged["superseded_by"] is not None:
                 return HypothesisMergeOutcome.CONFLICT
             # terminal merged states never overwrite terminal provenance
-            if merged["state"] in {
-                item.value for item in _HYPOTHESIS_TERMINAL_STATES
-            }:
+            if merged["state"] in {item.value for item in _HYPOTHESIS_TERMINAL_STATES}:
                 return HypothesisMergeOutcome.CONFLICT
             # kept must be live: terminal or already-superseded kept conflicts
-            if kept["state"] in {
-                item.value for item in _HYPOTHESIS_TERMINAL_STATES
-            }:
+            if kept["state"] in {item.value for item in _HYPOTHESIS_TERMINAL_STATES}:
                 return HypothesisMergeOutcome.CONFLICT
             if kept["superseded_by"] is not None:
                 return HypothesisMergeOutcome.CONFLICT
@@ -5496,12 +6936,14 @@ class OpsKernelStore:
             # superseded — an already SUPERSEDED/REJECTED/APPROVED-closed
             # OPEN row is history, and re-superseding it would fabricate a
             # spurious event.
-            superseded_rows = list(connection.execute(
-                "SELECT * FROM merge_review_queue WHERE status='OPEN' "
-                "AND resolved_at IS NULL "
-                "AND (hypothesis_a=? OR hypothesis_b=?)",
-                (merged_id, merged_id),
-            ).fetchall())
+            superseded_rows = list(
+                connection.execute(
+                    "SELECT * FROM merge_review_queue WHERE status='OPEN' "
+                    "AND resolved_at IS NULL "
+                    "AND (hypothesis_a=? OR hypothesis_b=?)",
+                    (merged_id, merged_id),
+                ).fetchall()
+            )
             for row in superseded_rows:
                 resolved = MergeReviewV1(
                     hypothesis_a=row["hypothesis_a"],
@@ -5516,14 +6958,19 @@ class OpsKernelStore:
                 # place, never deleted (Fable minor 2).
                 connection.execute(
                     "INSERT INTO merge_review_queue VALUES(?,?,?,?,?,?,?,?)",
-                    (resolved.review_id, resolved.hypothesis_a,
-                     resolved.hypothesis_b, "SUPERSEDED",
-                     resolved.reason_code, resolved.origin,
-                     iso(resolved.created_at), iso(now)),
+                    (
+                        resolved.review_id,
+                        resolved.hypothesis_a,
+                        resolved.hypothesis_b,
+                        "SUPERSEDED",
+                        resolved.reason_code,
+                        resolved.origin,
+                        iso(resolved.created_at),
+                        iso(now),
+                    ),
                 )
                 connection.execute(
-                    "UPDATE merge_review_queue SET resolved_at=? "
-                    "WHERE review_id=?",
+                    "UPDATE merge_review_queue SET resolved_at=? WHERE review_id=?",
                     (iso(now), row["review_id"]),
                 )
             return HypothesisMergeOutcome.MERGED
@@ -5539,38 +6986,49 @@ class OpsKernelStore:
             if row is None:
                 raise OpsKernelTransitionError("unknown hypothesis")
 
-    def record_hypothesis_relation(self, role, left_id, right_id, decision, *,
-                                   now, origin="ADMISSION"):
+    def record_hypothesis_relation(
+        self, role, left_id, right_id, decision, *, now, origin="ADMISSION"
+    ):
         """Append one RELATED_BUT_DISTINCT edge (idempotent by pair+kind)."""
         self._role(role, "record_hypothesis_relation")
         if not isinstance(decision, SemanticDecisionV1):
             raise ValueError("invalid semantic decision")
-        if decision.classification is not (
-            SemanticClassification.RELATED_BUT_DISTINCT
-        ):
+        if decision.classification is not (SemanticClassification.RELATED_BUT_DISTINCT):
             raise ValueError("relation requires distinct classification")
         first, second = sorted((left_id, right_id))
         relation = HypothesisRelationV1(
-            hypothesis_a=first, hypothesis_b=second,
+            hypothesis_a=first,
+            hypothesis_b=second,
             relation_kind="RELATED_BUT_DISTINCT",
             reason_code=decision.reason_code,
             conflicts=decision.conflicts,
             overlap=float(decision.overlap),
-            origin=origin, created_at=now,
+            origin=origin,
+            created_at=now,
         )
         with self._transaction() as connection:
             self._require_hypotheses(connection, first, second)
-            if connection.execute(
-                "SELECT relation_id FROM hypothesis_relations WHERE relation_id=?",
-                (relation.relation_id,),
-            ).fetchone() is not None:
+            if (
+                connection.execute(
+                    "SELECT relation_id FROM hypothesis_relations WHERE relation_id=?",
+                    (relation.relation_id,),
+                ).fetchone()
+                is not None
+            ):
                 return "duplicate"
             connection.execute(
                 "INSERT INTO hypothesis_relations VALUES(?,?,?,?,?,?,?,?,?)",
-                (relation.relation_id, first, second,
-                 relation.relation_kind, relation.reason_code,
-                 _json(list(relation.conflicts)), relation.overlap,
-                 relation.origin, iso(relation.created_at)),
+                (
+                    relation.relation_id,
+                    first,
+                    second,
+                    relation.relation_kind,
+                    relation.reason_code,
+                    _json(list(relation.conflicts)),
+                    relation.overlap,
+                    relation.origin,
+                    iso(relation.created_at),
+                ),
             )
             return "created"
 
@@ -5578,8 +7036,7 @@ class OpsKernelStore:
         with self._read() as connection:
             if hypothesis_id is None:
                 rows = connection.execute(
-                    "SELECT * FROM hypothesis_relations "
-                    "ORDER BY created_at,relation_id"
+                    "SELECT * FROM hypothesis_relations ORDER BY created_at,relation_id"
                 ).fetchall()
             else:
                 rows = connection.execute(
@@ -5599,11 +7056,13 @@ class OpsKernelStore:
                     origin=row["origin"],
                     created_at=parse_iso(row["created_at"]),
                     relation_id=row["relation_id"],
-                ) for row in rows
+                )
+                for row in rows
             )
 
-    def queue_merge_review(self, role, left_id, right_id, decision, *,
-                           now, origin="ADMISSION"):
+    def queue_merge_review(
+        self, role, left_id, right_id, decision, *, now, origin="ADMISSION"
+    ):
         """Queue one OPEN MERGE_REVIEW item (idempotent per pair+origin)."""
         self._role(role, "queue_merge_review")
         if not isinstance(decision, SemanticDecisionV1):
@@ -5612,8 +7071,12 @@ class OpsKernelStore:
             raise ValueError("merge review requires merge review classification")
         first, second = sorted((left_id, right_id))
         review = MergeReviewV1(
-            hypothesis_a=first, hypothesis_b=second, status="OPEN",
-            reason_code=decision.reason_code, origin=origin, created_at=now,
+            hypothesis_a=first,
+            hypothesis_b=second,
+            status="OPEN",
+            reason_code=decision.reason_code,
+            origin=origin,
+            created_at=now,
         )
         with self._transaction() as connection:
             self._require_hypotheses(connection, first, second)
@@ -5623,27 +7086,41 @@ class OpsKernelStore:
             # duplicate instead of inserting a second unresolved OPEN with
             # a different event id. After a resolution the row is closed,
             # so a later requeue is a genuinely new append-only event.
-            if connection.execute(
-                "SELECT review_id FROM merge_review_queue WHERE "
-                "hypothesis_a=? AND hypothesis_b=? AND origin=? AND "
-                "status='OPEN' AND resolved_at IS NULL",
-                (first, second, origin),
-            ).fetchone() is not None:
+            if (
+                connection.execute(
+                    "SELECT review_id FROM merge_review_queue WHERE "
+                    "hypothesis_a=? AND hypothesis_b=? AND origin=? AND "
+                    "status='OPEN' AND resolved_at IS NULL",
+                    (first, second, origin),
+                ).fetchone()
+                is not None
+            ):
                 return "duplicate"
-            if connection.execute(
-                "SELECT review_id FROM merge_review_queue WHERE review_id=?",
-                (review.review_id,),
-            ).fetchone() is not None:
+            if (
+                connection.execute(
+                    "SELECT review_id FROM merge_review_queue WHERE review_id=?",
+                    (review.review_id,),
+                ).fetchone()
+                is not None
+            ):
                 return "duplicate"
             connection.execute(
                 "INSERT INTO merge_review_queue VALUES(?,?,?,?,?,?,?,NULL)",
-                (review.review_id, first, second, review.status,
-                 review.reason_code, review.origin, iso(review.created_at)),
+                (
+                    review.review_id,
+                    first,
+                    second,
+                    review.status,
+                    review.reason_code,
+                    review.origin,
+                    iso(review.created_at),
+                ),
             )
             return "created"
 
-    def resolve_merge_review(self, role, left_id, right_id, status, *, now,
-                             origin=None):
+    def resolve_merge_review(
+        self, role, left_id, right_id, status, *, now, origin=None
+    ):
         """Manual resolution of an OPEN review (APPROVED/REJECTED/SUPERSEDED)."""
         self._role(role, "resolve_merge_review")
         if status not in {"APPROVED", "REJECTED", "SUPERSEDED"}:
@@ -5667,18 +7144,29 @@ class OpsKernelStore:
             if row is None:
                 raise OpsKernelTransitionError("no open review")
             resolved = MergeReviewV1(
-                hypothesis_a=first, hypothesis_b=second, status=status,
-                reason_code=row["reason_code"], origin=row["origin"],
-                created_at=parse_iso(row["created_at"]), resolved_at=now,
+                hypothesis_a=first,
+                hypothesis_b=second,
+                status=status,
+                reason_code=row["reason_code"],
+                origin=row["origin"],
+                created_at=parse_iso(row["created_at"]),
+                resolved_at=now,
             )
             # append-only: the resolution is a NEW event row; the OPEN row
             # it resolves is closed in place (resolved_at set), never
             # deleted, so the full queue->resolution history is durable.
             connection.execute(
                 "INSERT INTO merge_review_queue VALUES(?,?,?,?,?,?,?,?)",
-                (resolved.review_id, first, second, status,
-                 resolved.reason_code, resolved.origin,
-                 iso(resolved.created_at), iso(now)),
+                (
+                    resolved.review_id,
+                    first,
+                    second,
+                    status,
+                    resolved.reason_code,
+                    resolved.origin,
+                    iso(resolved.created_at),
+                    iso(now),
+                ),
             )
             connection.execute(
                 "UPDATE merge_review_queue SET resolved_at=? WHERE review_id=?",
@@ -5711,7 +7199,8 @@ class OpsKernelStore:
                     created_at=parse_iso(row["created_at"]),
                     resolved_at=parse_iso(row["resolved_at"]),
                     review_id=row["review_id"],
-                ) for row in rows
+                )
+                for row in rows
             )
 
     def read_merge_reviews(self, *, status=None, hypothesis_id=None):
@@ -5752,7 +7241,8 @@ class OpsKernelStore:
                     created_at=parse_iso(row["created_at"]),
                     resolved_at=parse_iso(row["resolved_at"]),
                     review_id=row["review_id"],
-                ) for row in rows
+                )
+                for row in rows
             )
 
     def record_admission_decision(self, role, decision):
@@ -5761,19 +7251,27 @@ class OpsKernelStore:
         if not isinstance(decision, AdmissionDecisionV1):
             raise ValueError("invalid admission decision")
         with self._transaction() as connection:
-            if connection.execute(
-                "SELECT decision_id FROM hypothesis_admission_decisions "
-                "WHERE decision_id=?",
-                (decision.decision_id,),
-            ).fetchone() is not None:
+            if (
+                connection.execute(
+                    "SELECT decision_id FROM hypothesis_admission_decisions "
+                    "WHERE decision_id=?",
+                    (decision.decision_id,),
+                ).fetchone()
+                is not None
+            ):
                 return ReplayResult.DUPLICATE
             connection.execute(
-                "INSERT INTO hypothesis_admission_decisions "
-                "VALUES(?,?,?,?,?,?,?,?)",
-                (decision.decision_id, decision.candidate_digest,
-                 decision.hypothesis_id, decision.matched_hypothesis_id,
-                 decision.classification, decision.reason_code,
-                 _json(list(decision.conflicts)), iso(decision.decided_at)),
+                "INSERT INTO hypothesis_admission_decisions VALUES(?,?,?,?,?,?,?,?)",
+                (
+                    decision.decision_id,
+                    decision.candidate_digest,
+                    decision.hypothesis_id,
+                    decision.matched_hypothesis_id,
+                    decision.classification,
+                    decision.reason_code,
+                    _json(list(decision.conflicts)),
+                    iso(decision.decided_at),
+                ),
             )
             return ReplayResult.CREATED
 
@@ -5801,7 +7299,8 @@ class OpsKernelStore:
                     conflicts=tuple(_decode(row["conflicts_json"])),
                     decided_at=parse_iso(row["decided_at"]),
                     decision_id=row["decision_id"],
-                ) for row in rows
+                )
+                for row in rows
             )
 
     def reserve_weekly_review(self, role, week, *, now):
@@ -5826,46 +7325,70 @@ class OpsKernelStore:
             )
             return {"status": "CREATED", "resumable": False}
 
-    def record_weekly_pair_adjudication(self, role, week_identity, pair,
-                                        decision, *, now):
+    def record_weekly_pair_adjudication(
+        self, role, week_identity, pair, decision, *, now
+    ):
         """Durable same-week pair result; replay returns duplicate."""
         self._role(role, "record_weekly_pair_adjudication")
         if not isinstance(decision, SemanticDecisionV1):
             raise ValueError("invalid semantic decision")
         first, second = sorted(pair)
         row = WeeklyReviewPairV1(
-            week_identity=week_identity, hypothesis_a=first,
-            hypothesis_b=second, classification=decision.classification.value,
-            reason_code=decision.reason_code, adjudicated_at=now,
+            week_identity=week_identity,
+            hypothesis_a=first,
+            hypothesis_b=second,
+            classification=decision.classification.value,
+            reason_code=decision.reason_code,
+            adjudicated_at=now,
         )
         with self._transaction() as connection:
-            if connection.execute(
-                "SELECT 1 FROM weekly_review_pairs WHERE week_identity=? "
-                "AND hypothesis_a=? AND hypothesis_b=?",
-                (row.week_identity, row.hypothesis_a, row.hypothesis_b),
-            ).fetchone() is not None:
+            if (
+                connection.execute(
+                    "SELECT 1 FROM weekly_review_pairs WHERE week_identity=? "
+                    "AND hypothesis_a=? AND hypothesis_b=?",
+                    (row.week_identity, row.hypothesis_a, row.hypothesis_b),
+                ).fetchone()
+                is not None
+            ):
                 return "duplicate"
             connection.execute(
                 "INSERT INTO weekly_review_pairs VALUES(?,?,?,?,?,?)",
-                (row.week_identity, row.hypothesis_a, row.hypothesis_b,
-                 row.classification, row.reason_code,
-                 iso(row.adjudicated_at)),
+                (
+                    row.week_identity,
+                    row.hypothesis_a,
+                    row.hypothesis_b,
+                    row.classification,
+                    row.reason_code,
+                    iso(row.adjudicated_at),
+                ),
             )
             return "created"
 
-    def complete_weekly_review(self, role, week, *, now, open_count=0,
-                               pairs_scanned=0, new_related_edges=0,
-                               new_merge_reviews=0, same_hypothesis_findings=0):
+    def complete_weekly_review(
+        self,
+        role,
+        week,
+        *,
+        now,
+        open_count=0,
+        pairs_scanned=0,
+        new_related_edges=0,
+        new_merge_reviews=0,
+        same_hypothesis_findings=0,
+    ):
         """Mark the reserved week COMPLETE with its durable summary."""
         self._role(role, "complete_weekly_review")
         identity = week.identity if hasattr(week, "identity") else week
         run = WeeklyReviewRunV1(
-            week_identity=identity, status="COMPLETE",
-            open_count=open_count, pairs_scanned=pairs_scanned,
+            week_identity=identity,
+            status="COMPLETE",
+            open_count=open_count,
+            pairs_scanned=pairs_scanned,
             new_related_edges=new_related_edges,
             new_merge_reviews=new_merge_reviews,
             same_hypothesis_findings=same_hypothesis_findings,
-            reserved_at=now, completed_at=now,
+            reserved_at=now,
+            completed_at=now,
         )
         with self._transaction() as connection:
             existing = connection.execute(
@@ -5881,9 +7404,15 @@ class OpsKernelStore:
                 "open_count=?,pairs_scanned=?,new_related_edges=?,"
                 "new_merge_reviews=?,same_hypothesis_findings=?,completed_at=? "
                 "WHERE week_identity=? AND status='RESERVED'",
-                (open_count, pairs_scanned, new_related_edges,
-                 new_merge_reviews, same_hypothesis_findings, iso(now),
-                 identity),
+                (
+                    open_count,
+                    pairs_scanned,
+                    new_related_edges,
+                    new_merge_reviews,
+                    same_hypothesis_findings,
+                    iso(now),
+                    identity,
+                ),
             )
             return ReplayResult.CREATED
 
@@ -5923,7 +7452,9 @@ class OpsKernelStore:
                     same_hypothesis_findings=run["same_hypothesis_findings"],
                     reserved_at=parse_iso(run["reserved_at"]),
                     completed_at=parse_iso(run["completed_at"]),
-                ) if run is not None else None,
+                )
+                if run is not None
+                else None,
                 "pairs": tuple(
                     WeeklyReviewPairV1(
                         week_identity=row["week_identity"],
@@ -5932,19 +7463,22 @@ class OpsKernelStore:
                         classification=row["classification"],
                         reason_code=row["reason_code"],
                         adjudicated_at=parse_iso(row["adjudicated_at"]),
-                    ) for row in pair_rows
+                    )
+                    for row in pair_rows
                 ),
                 "hypothesis_ids": hypothesis_ids,
             }
 
-    def transition_hypothesis(self, role, hypothesis_id, new_state, *, now,
-                              reason_token="operator_transition"):
+    def transition_hypothesis(
+        self, role, hypothesis_id, new_state, *, now, reason_token="operator_transition"
+    ):
         """Apply one lifecycle transition with durable reason evidence (M3)."""
         self._role(role, "transition_hypothesis")
         if not isinstance(new_state, HypothesisState):
             raise ValueError("invalid hypothesis state")
         require_token(reason_token, "reason_token")
         from tokmo.values.ops_kernel import HypothesisLifecycleV1
+
         with self._transaction() as connection:
             current = connection.execute(
                 "SELECT * FROM hypotheses WHERE hypothesis_id=?",
@@ -5980,8 +7514,14 @@ class OpsKernelStore:
                 "INSERT OR IGNORE INTO hypothesis_lifecycle"
                 "(lifecycle_id,hypothesis_id,from_state,to_state,reason_token,"
                 "transitioned_at) VALUES(?,?,?,?,?,?)",
-                (lifecycle.lifecycle_id, hypothesis_id, state.value,
-                 new_state.value, reason_token, iso(now)),
+                (
+                    lifecycle.lifecycle_id,
+                    hypothesis_id,
+                    state.value,
+                    new_state.value,
+                    reason_token,
+                    iso(now),
+                ),
             )
             return ReplayResult.CREATED
 
@@ -6005,6 +7545,7 @@ class OpsKernelStore:
 
     def read_hypotheses_by_index(self, kind, value):
         from tokmo.values.ops_kernel import IndexKeyKind
+
         if not isinstance(kind, IndexKeyKind):
             raise ValueError("invalid index kind")
         with self._read() as connection:
@@ -6023,6 +7564,7 @@ class OpsKernelStore:
                 (hypothesis_id,),
             ).fetchall()
             from tokmo.values.ops_kernel import HypothesisIndexKeyV1, IndexKeyKind
+
             return tuple(
                 HypothesisIndexKeyV1(IndexKeyKind(row["kind"]), row["key_value"])
                 for row in rows
@@ -6045,14 +7587,17 @@ class OpsKernelStore:
                     evidence_delta=tuple(_decode(row["evidence_delta_json"])),
                     observed_at=parse_iso(row["observed_at"]),
                     sighting_id=row["sighting_id"],
-                ) for row in rows
+                )
+                for row in rows
             )
 
     def read_hypothesis_lifecycle(self, hypothesis_id):
         """Append-only transition history with durable reason tokens (M3)."""
         from tokmo.values.ops_kernel import (
-            HypothesisLifecycleV1, HypothesisState,
+            HypothesisLifecycleV1,
+            HypothesisState,
         )
+
         with self._read() as connection:
             rows = connection.execute(
                 "SELECT * FROM hypothesis_lifecycle WHERE hypothesis_id=? "
@@ -6067,36 +7612,47 @@ class OpsKernelStore:
                     reason_token=row["reason_token"],
                     transitioned_at=parse_iso(row["transitioned_at"]),
                     lifecycle_id=row["lifecycle_id"],
-                ) for row in rows
+                )
+                for row in rows
             )
 
     def record_candidate_failure(self, role, failure, *, now=None):
         """Durably quarantine one malformed candidate block (M2)."""
         self._role(role, "record_candidate_failure")
         from tokmo.values.ops_kernel import CandidateFailureV1
+
         if not isinstance(failure, CandidateFailureV1):
             raise ValueError("invalid candidate failure")
         with self._transaction() as connection:
-            if connection.execute(
-                "SELECT failure_id FROM candidate_failures WHERE failure_id=?",
-                (failure.failure_id,),
-            ).fetchone() is not None:
+            if (
+                connection.execute(
+                    "SELECT failure_id FROM candidate_failures WHERE failure_id=?",
+                    (failure.failure_id,),
+                ).fetchone()
+                is not None
+            ):
                 return ReplayResult.DUPLICATE
             connection.execute(
                 "INSERT INTO candidate_failures VALUES(?,?,?,?,?,?,?)",
-                (failure.failure_id, failure.source_ref, failure.revision,
-                 failure.error_kind, failure.block_digest,
-                 failure.detail_token, iso(failure.recorded_at)),
+                (
+                    failure.failure_id,
+                    failure.source_ref,
+                    failure.revision,
+                    failure.error_kind,
+                    failure.block_digest,
+                    failure.detail_token,
+                    iso(failure.recorded_at),
+                ),
             )
             return ReplayResult.CREATED
 
     def read_candidate_failures(self, *, source_ref=None):
         from tokmo.values.ops_kernel import CandidateFailureV1
+
         with self._read() as connection:
             if source_ref is None:
                 rows = connection.execute(
-                    "SELECT * FROM candidate_failures "
-                    "ORDER BY recorded_at,failure_id"
+                    "SELECT * FROM candidate_failures ORDER BY recorded_at,failure_id"
                 ).fetchall()
             else:
                 rows = connection.execute(
@@ -6113,13 +7669,15 @@ class OpsKernelStore:
                     recorded_at=parse_iso(row["recorded_at"]),
                     detail_token=row["detail_token"],
                     failure_id=row["failure_id"],
-                ) for row in rows
+                )
+                for row in rows
             )
 
     def record_shadow_recall(self, role, record):
         """Idempotent would-have-sent shadow write; delivery is absent."""
         self._role(role, "record_shadow_recall")
         from tokmo.values.ops_kernel import ShadowRecallRecordV1
+
         if not isinstance(record, ShadowRecallRecordV1):
             raise ValueError("invalid shadow record")
         with self._transaction() as connection:
@@ -6129,19 +7687,28 @@ class OpsKernelStore:
             ).fetchone()
             if parent is None:
                 raise OpsKernelTransitionError("unknown hypothesis")
-            if connection.execute(
-                "SELECT shadow_id FROM shadow_recall_records WHERE shadow_id=?",
-                (record.shadow_id,),
-            ).fetchone() is not None:
+            if (
+                connection.execute(
+                    "SELECT shadow_id FROM shadow_recall_records WHERE shadow_id=?",
+                    (record.shadow_id,),
+                ).fetchone()
+                is not None
+            ):
                 return ReplayResult.DUPLICATE
             connection.execute(
                 "INSERT INTO shadow_recall_records VALUES(?,?,?,?,?,?,?,?)",
-                (record.shadow_id, record.hypothesis_id,
-                 _json(record.material_delta_ids),
-                 _json([f"{key.kind.value}:{key.value}"
-                        for key in record.matched_keys]),
-                 record.match_kind, 0, record.payload_json,
-                 iso(record.recorded_at)),
+                (
+                    record.shadow_id,
+                    record.hypothesis_id,
+                    _json(record.material_delta_ids),
+                    _json(
+                        [f"{key.kind.value}:{key.value}" for key in record.matched_keys]
+                    ),
+                    record.match_kind,
+                    0,
+                    record.payload_json,
+                    iso(record.recorded_at),
+                ),
             )
             return ReplayResult.CREATED
 
@@ -6149,8 +7716,7 @@ class OpsKernelStore:
         with self._read() as connection:
             if hypothesis_id is None:
                 rows = connection.execute(
-                    "SELECT * FROM shadow_recall_records "
-                    "ORDER BY recorded_at,shadow_id"
+                    "SELECT * FROM shadow_recall_records ORDER BY recorded_at,shadow_id"
                 ).fetchall()
             else:
                 rows = connection.execute(
@@ -6159,8 +7725,11 @@ class OpsKernelStore:
                     (hypothesis_id,),
                 ).fetchall()
             from tokmo.values.ops_kernel import (
-                HypothesisIndexKeyV1, IndexKeyKind, ShadowRecallRecordV1,
+                HypothesisIndexKeyV1,
+                IndexKeyKind,
+                ShadowRecallRecordV1,
             )
+
             result = []
             for row in rows:
                 # Tokens are stored as "<KIND>:<key.value>" (write/read
@@ -6170,20 +7739,25 @@ class OpsKernelStore:
                     for kind in IndexKeyKind:
                         prefix = kind.value + ":"
                         if token.startswith(prefix):
-                            matched.append(HypothesisIndexKeyV1(
-                                kind, token[len(prefix):],
-                            ))
+                            matched.append(
+                                HypothesisIndexKeyV1(
+                                    kind,
+                                    token[len(prefix) :],
+                                )
+                            )
                             break
-                result.append(ShadowRecallRecordV1(
-                    hypothesis_id=row["hypothesis_id"],
-                    material_delta_ids=tuple(
-                        _decode(row["material_delta_ids_json"])
-                    ),
-                    matched_keys=tuple(matched),
-                    match_kind=row["match_kind"],
-                    would_have_sent=False,
-                    payload_json=row["payload_json"],
-                    recorded_at=parse_iso(row["recorded_at"]),
-                    shadow_id=row["shadow_id"],
-                ))
+                result.append(
+                    ShadowRecallRecordV1(
+                        hypothesis_id=row["hypothesis_id"],
+                        material_delta_ids=tuple(
+                            _decode(row["material_delta_ids_json"])
+                        ),
+                        matched_keys=tuple(matched),
+                        match_kind=row["match_kind"],
+                        would_have_sent=False,
+                        payload_json=row["payload_json"],
+                        recorded_at=parse_iso(row["recorded_at"]),
+                        shadow_id=row["shadow_id"],
+                    )
+                )
             return tuple(result)

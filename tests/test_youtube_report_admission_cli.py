@@ -11,8 +11,8 @@ All fixtures are synthetic and live under ``tmp_path``.
 
 import importlib.util
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -43,7 +43,8 @@ KEYS: entity:005380
 
 def load_tool():
     spec = importlib.util.spec_from_file_location(
-        "run_youtube_report_admission_under_test", TOOL,
+        "run_youtube_report_admission_under_test",
+        TOOL,
     )
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -74,10 +75,17 @@ def run_tool(argv, capsys):
 
 def test_happy_path_emits_one_bounded_json_line(private_inputs, capsys):
     meta_path, report_path, db_path = private_inputs
-    code, out, err = run_tool([
-        "--meta", str(meta_path), "--report", str(report_path),
-        "--db", str(db_path),
-    ], capsys)
+    code, out, err = run_tool(
+        [
+            "--meta",
+            str(meta_path),
+            "--report",
+            str(report_path),
+            "--db",
+            str(db_path),
+        ],
+        capsys,
+    )
     assert code == 0, err
     lines = [line for line in out.splitlines() if line.strip()]
     assert len(lines) == 1
@@ -92,8 +100,14 @@ def test_happy_path_emits_one_bounded_json_line(private_inputs, capsys):
 
 def test_replay_run_reports_duplicate(private_inputs, capsys):
     meta_path, report_path, db_path = private_inputs
-    argv = ["--meta", str(meta_path), "--report", str(report_path),
-            "--db", str(db_path)]
+    argv = [
+        "--meta",
+        str(meta_path),
+        "--report",
+        str(report_path),
+        "--db",
+        str(db_path),
+    ]
     assert run_tool(argv, capsys)[0] == 0
     code, out, _err = run_tool(argv, capsys)
     assert code == 0
@@ -105,10 +119,17 @@ def test_replay_run_reports_duplicate(private_inputs, capsys):
 def test_missing_report_refuses_before_db_creation(private_inputs, capsys):
     meta_path, report_path, db_path = private_inputs
     report_path.unlink()
-    code, out, err = run_tool([
-        "--meta", str(meta_path), "--report", str(report_path),
-        "--db", str(db_path),
-    ], capsys)
+    code, out, err = run_tool(
+        [
+            "--meta",
+            str(meta_path),
+            "--report",
+            str(report_path),
+            "--db",
+            str(db_path),
+        ],
+        capsys,
+    )
     assert code == 1
     assert out == ""
     assert "refusal=" in err
@@ -118,10 +139,17 @@ def test_missing_report_refuses_before_db_creation(private_inputs, capsys):
 def test_non_private_report_mode_refuses_before_db_creation(private_inputs, capsys):
     meta_path, report_path, db_path = private_inputs
     report_path.chmod(0o644)
-    code, out, err = run_tool([
-        "--meta", str(meta_path), "--report", str(report_path),
-        "--db", str(db_path),
-    ], capsys)
+    code, out, err = run_tool(
+        [
+            "--meta",
+            str(meta_path),
+            "--report",
+            str(report_path),
+            "--db",
+            str(db_path),
+        ],
+        capsys,
+    )
     assert code == 1
     assert out == ""
     assert not db_path.parent.exists()
@@ -131,10 +159,17 @@ def test_symlinked_meta_refuses_before_db_creation(private_inputs, tmp_path, cap
     meta_path, report_path, db_path = private_inputs
     link = meta_path.parent / "linked.meta.json"
     link.symlink_to(meta_path)
-    code, out, _err = run_tool([
-        "--meta", str(link), "--report", str(report_path),
-        "--db", str(db_path),
-    ], capsys)
+    code, out, _err = run_tool(
+        [
+            "--meta",
+            str(link),
+            "--report",
+            str(report_path),
+            "--db",
+            str(db_path),
+        ],
+        capsys,
+    )
     assert code == 1
     assert out == ""
     assert not db_path.parent.exists()
@@ -145,10 +180,17 @@ def test_malformed_meta_refuses_before_db_creation(private_inputs, capsys):
     broken = dict(META)
     del broken["transcript_sha256"]
     meta_path.write_text(json.dumps(broken), encoding="utf-8")
-    code, out, err = run_tool([
-        "--meta", str(meta_path), "--report", str(report_path),
-        "--db", str(db_path),
-    ], capsys)
+    code, out, err = run_tool(
+        [
+            "--meta",
+            str(meta_path),
+            "--report",
+            str(report_path),
+            "--db",
+            str(db_path),
+        ],
+        capsys,
+    )
     assert code == 1
     assert out == ""
     assert not db_path.parent.exists()
@@ -157,10 +199,17 @@ def test_malformed_meta_refuses_before_db_creation(private_inputs, capsys):
 def test_meta_that_is_not_json_refuses_before_db_creation(private_inputs, capsys):
     meta_path, report_path, db_path = private_inputs
     meta_path.write_text("not json at all", encoding="utf-8")
-    code, out, _err = run_tool([
-        "--meta", str(meta_path), "--report", str(report_path),
-        "--db", str(db_path),
-    ], capsys)
+    code, out, _err = run_tool(
+        [
+            "--meta",
+            str(meta_path),
+            "--report",
+            str(report_path),
+            "--db",
+            str(db_path),
+        ],
+        capsys,
+    )
     assert code == 1
     assert out == ""
     assert not db_path.parent.exists()
@@ -168,10 +217,19 @@ def test_meta_that_is_not_json_refuses_before_db_creation(private_inputs, capsys
 
 def test_source_mismatch_refuses_before_db_creation(private_inputs, capsys):
     meta_path, report_path, db_path = private_inputs
-    code, out, err = run_tool([
-        "--meta", str(meta_path), "--report", str(report_path),
-        "--db", str(db_path), "--expect-source-ref", "someOtherVid",
-    ], capsys)
+    code, out, err = run_tool(
+        [
+            "--meta",
+            str(meta_path),
+            "--report",
+            str(report_path),
+            "--db",
+            str(db_path),
+            "--expect-source-ref",
+            "someOtherVid",
+        ],
+        capsys,
+    )
     assert code == 1
     assert out == ""
     assert "source_mismatch" in err

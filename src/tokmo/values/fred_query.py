@@ -15,12 +15,12 @@ excludes ``fetched_at``, so the same material fetched later is the same
 revision.
 """
 
-from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal
-from enum import Enum
 import hashlib
 import json
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
+from enum import Enum
 
 QUERY_DOMAIN = "tokmo.fred-query.query.r1"
 REVISION_DOMAIN = "tokmo.fred-query.revision.r1"
@@ -113,10 +113,14 @@ class FredDirectionV1(str, Enum):
     FLAT = "FLAT"
 
 
-DUE_STATES = frozenset({
-    FredDueStateV1.DUE_MISSING, FredDueStateV1.DUE_QUERY_CHANGED,
-    FredDueStateV1.DUE_RELEASE, FredDueStateV1.DUE_STALE,
-})
+DUE_STATES = frozenset(
+    {
+        FredDueStateV1.DUE_MISSING,
+        FredDueStateV1.DUE_QUERY_CHANGED,
+        FredDueStateV1.DUE_RELEASE,
+        FredDueStateV1.DUE_STALE,
+    }
+)
 
 RETRYABLE_FAILURE_CODES = frozenset({FredQueryFailureCodeV1.TRANSIENT_TRANSPORT})
 
@@ -145,6 +149,7 @@ def canonical_decimal(value: Decimal) -> str:
 
 def canonical_json(value: object) -> bytes:
     """Deterministic canonical JSON for this domain, stdlib only."""
+
     def clean(item):
         if isinstance(item, Enum):
             return item.value
@@ -153,8 +158,11 @@ def canonical_json(value: object) -> bytes:
         if type(item) is datetime:
             if item.tzinfo is None or item.utcoffset() is None:
                 raise ValueError("aware_utc_required")
-            return (item.astimezone(timezone.utc)
-                    .isoformat(timespec="microseconds").replace("+00:00", "Z"))
+            return (
+                item.astimezone(UTC)
+                .isoformat(timespec="microseconds")
+                .replace("+00:00", "Z")
+            )
         if isinstance(item, Decimal):
             return canonical_decimal(item)
         if isinstance(item, str):
@@ -166,15 +174,21 @@ def canonical_json(value: object) -> bytes:
         if item is None or type(item) in (bool, int):
             return item
         raise ValueError("noncanonical_value")
-    return (json.dumps(clean(value), sort_keys=True, separators=(",", ":"),
-                       ensure_ascii=False) + "\n").encode("utf-8")
+
+    return (
+        json.dumps(
+            clean(value), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        )
+        + "\n"
+    ).encode("utf-8")
 
 
 def domain_digest(domain: str, payload: object) -> str:
     if type(domain) is not str or not domain:
         raise ValueError("invalid_domain")
-    return hashlib.sha256(canonical_json({"domain": domain,
-                                          "payload": payload})).hexdigest()
+    return hashlib.sha256(
+        canonical_json({"domain": domain, "payload": payload})
+    ).hexdigest()
 
 
 def _require_date(value: object, name: str) -> None:
@@ -188,15 +202,21 @@ def _require_optional_date(value: object, name: str) -> None:
 
 
 def _require_aware_utc(value: object) -> None:
-    if (type(value) is not datetime or value.tzinfo is None
-            or value.utcoffset() is None
-            or value.utcoffset().total_seconds() != 0):
+    if (
+        type(value) is not datetime
+        or value.tzinfo is None
+        or value.utcoffset() is None
+        or value.utcoffset().total_seconds() != 0
+    ):
         raise ValueError("aware_utc_required")
 
 
 def _require_digest(value: object, name: str) -> None:
-    if (type(value) is not str or len(value) != 64
-            or any(character not in "0123456789abcdef" for character in value)):
+    if (
+        type(value) is not str
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
         raise ValueError(f"invalid_{name}")
 
 
@@ -232,12 +252,15 @@ class FredSeriesQueryV1:
 
     @property
     def query_identity(self) -> str:
-        return domain_digest(QUERY_DOMAIN, {
-            "series_id": self.series_id,
-            "observation_start": self.observation_start,
-            "observation_end": self.observation_end,
-            "revision_policy": self.revision_policy,
-        })
+        return domain_digest(
+            QUERY_DOMAIN,
+            {
+                "series_id": self.series_id,
+                "observation_start": self.observation_start,
+                "observation_end": self.observation_end,
+                "revision_policy": self.revision_policy,
+            },
+        )
 
 
 @dataclass(frozen=True)
@@ -263,27 +286,38 @@ class FredObservationV1:
             raise ValueError("ordered_realtime_range")
 
     def normalized(self) -> dict:
-        return {"observation_date": self.observation_date,
-                "value": None if self.value is None else canonical_decimal(self.value),
-                "value_state": self.value_state,
-                "realtime_start": self.realtime_start,
-                "realtime_end": self.realtime_end}
+        return {
+            "observation_date": self.observation_date,
+            "value": None if self.value is None else canonical_decimal(self.value),
+            "value_state": self.value_state,
+            "realtime_start": self.realtime_start,
+            "realtime_end": self.realtime_end,
+        }
 
 
-def compute_revision_identity(*, query_identity: str, series_id: str,
-                              observations: tuple, release_id: int | None,
-                              release_date: date | None, vintage_date: date | None,
-                              completeness: FredCompletenessV1) -> str:
+def compute_revision_identity(
+    *,
+    query_identity: str,
+    series_id: str,
+    observations: tuple,
+    release_id: int | None,
+    release_date: date | None,
+    vintage_date: date | None,
+    completeness: FredCompletenessV1,
+) -> str:
     """Digest the answered material; ``fetched_at`` is deliberately excluded."""
-    return domain_digest(REVISION_DOMAIN, {
-        "query_identity": query_identity,
-        "series_id": series_id,
-        "release_id": release_id,
-        "release_date": release_date,
-        "vintage_date": vintage_date,
-        "completeness": completeness,
-        "observations": [item.normalized() for item in observations],
-    })
+    return domain_digest(
+        REVISION_DOMAIN,
+        {
+            "query_identity": query_identity,
+            "series_id": series_id,
+            "release_id": release_id,
+            "release_date": release_date,
+            "vintage_date": vintage_date,
+            "completeness": completeness,
+            "observations": [item.normalized() for item in observations],
+        },
+    )
 
 
 @dataclass(frozen=True)
@@ -311,8 +345,9 @@ class FredSeriesFactV1:
         if days != sorted(days) or len(set(days)) != len(days):
             raise ValueError("unordered_or_duplicate_observations")
         _require_aware_utc(self.fetched_at)
-        if self.release_id is not None and (type(self.release_id) is not int
-                                            or self.release_id <= 0):
+        if self.release_id is not None and (
+            type(self.release_id) is not int or self.release_id <= 0
+        ):
             raise ValueError("invalid_release_id")
         _require_optional_date(self.release_date, "release_date")
         _require_optional_date(self.vintage_date, "vintage_date")
@@ -320,32 +355,55 @@ class FredSeriesFactV1:
             raise ValueError("invalid_completeness")
         _require_digest(self.revision_identity, "revision_identity")
         if self.revision_identity != compute_revision_identity(
-                query_identity=self.query_identity, series_id=self.series_id,
-                observations=self.observations, release_id=self.release_id,
-                release_date=self.release_date, vintage_date=self.vintage_date,
-                completeness=self.completeness):
+            query_identity=self.query_identity,
+            series_id=self.series_id,
+            observations=self.observations,
+            release_id=self.release_id,
+            release_date=self.release_date,
+            vintage_date=self.vintage_date,
+            completeness=self.completeness,
+        ):
             raise ValueError("revision_identity_mismatch")
 
     @property
     def present_observations(self) -> tuple:
-        return tuple(item for item in self.observations
-                     if item.value_state is FredValueStateV1.PRESENT)
+        return tuple(
+            item
+            for item in self.observations
+            if item.value_state is FredValueStateV1.PRESENT
+        )
 
 
-def build_fred_series_fact_v1(*, query_identity: str, series_id: str,
-                              observations: tuple, fetched_at: datetime,
-                              release_id: int | None, release_date: date | None,
-                              vintage_date: date | None,
-                              completeness: FredCompletenessV1) -> FredSeriesFactV1:
+def build_fred_series_fact_v1(
+    *,
+    query_identity: str,
+    series_id: str,
+    observations: tuple,
+    fetched_at: datetime,
+    release_id: int | None,
+    release_date: date | None,
+    vintage_date: date | None,
+    completeness: FredCompletenessV1,
+) -> FredSeriesFactV1:
     return FredSeriesFactV1(
-        query_identity, series_id, observations, fetched_at, release_id,
-        release_date, vintage_date,
+        query_identity,
+        series_id,
+        observations,
+        fetched_at,
+        release_id,
+        release_date,
+        vintage_date,
         compute_revision_identity(
-            query_identity=query_identity, series_id=series_id,
-            observations=observations, release_id=release_id,
-            release_date=release_date, vintage_date=vintage_date,
-            completeness=completeness),
-        completeness)
+            query_identity=query_identity,
+            series_id=series_id,
+            observations=observations,
+            release_id=release_id,
+            release_date=release_date,
+            vintage_date=vintage_date,
+            completeness=completeness,
+        ),
+        completeness,
+    )
 
 
 @dataclass(frozen=True)
@@ -399,11 +457,14 @@ def release_slot_for(series_id: str, release_date: date) -> str:
     return f"{series_id}:{release_date.isoformat()}"
 
 
-def build_fred_release_schedule_v1(*, series_id: str, release_id: int,
-                                   release_date: date,
-                                   official_release_at: datetime,
-                                   schedule_provenance: object,
-                                   ) -> FredReleaseScheduleV1:
+def build_fred_release_schedule_v1(
+    *,
+    series_id: str,
+    release_id: int,
+    release_date: date,
+    official_release_at: datetime,
+    schedule_provenance: object,
+) -> FredReleaseScheduleV1:
     """Build the dual-authority schedule from an already-resolved instant.
 
     ``official_release_at`` is the BLS publication instant, already resolved
@@ -412,18 +473,22 @@ def build_fred_release_schedule_v1(*, series_id: str, release_id: int,
     two different authorities, so they are cross-checked here.
     """
     _require_registered_series(series_id)
-    if (type(release_id) is not int or type(release_id) is bool
-            or release_id <= 0):
+    if type(release_id) is not int or type(release_id) is bool or release_id <= 0:
         raise ValueError("invalid_release_id")
     _require_date(release_date, "release_date")
     _require_aware_utc(official_release_at)
-    if abs((official_release_at.date() - release_date).days) > MAX_SCHEDULE_JOIN_GAP_DAYS:
+    if (
+        abs((official_release_at.date() - release_date).days)
+        > MAX_SCHEDULE_JOIN_GAP_DAYS
+    ):
         raise ValueError("cross_authority_gap")
     return FredReleaseScheduleV1(
-        series_id, official_release_at,
+        series_id,
+        official_release_at,
         release_slot_for(series_id, release_date),
         official_release_at + SCHEDULE_VALID_FOR,
-        domain_digest(SCHEDULE_DOMAIN, schedule_provenance))
+        domain_digest(SCHEDULE_DOMAIN, schedule_provenance),
+    )
 
 
 @dataclass(frozen=True)
@@ -470,12 +535,19 @@ class MacroFredInputV1:
         used = self.coverage is FredCoverageV1.USED
         if used:
             _require_digest(self.revision_identity, "revision_identity")
-        elif (self.revision_identity is not None or self.current_value is not None
-                or self.current_date is not None or self.prior_value is not None
-                or self.prior_date is not None or self.direction is not None):
+        elif (
+            self.revision_identity is not None
+            or self.current_value is not None
+            or self.current_date is not None
+            or self.prior_value is not None
+            or self.prior_date is not None
+            or self.direction is not None
+        ):
             raise ValueError("omitted_coverage_carries_no_value")
-        for value, day in ((self.current_value, self.current_date),
-                           (self.prior_value, self.prior_date)):
+        for value, day in (
+            (self.current_value, self.current_date),
+            (self.prior_value, self.prior_date),
+        ):
             if value is not None and type(value) is not Decimal:
                 raise ValueError("invalid_observation_value")
             _require_optional_date(day, "observation_date")
@@ -488,19 +560,26 @@ class MacroFredInputV1:
                 raise ValueError("direction_requires_two_present_values")
 
 
-def compute_macro_provenance_digest(*, query_identity: str,
-                                    revision_identity: str | None,
-                                    due_slot: str | None, due_state: FredDueStateV1,
-                                    coverage: FredCoverageV1,
-                                    schedule_provenance_digest: str | None) -> str:
-    return domain_digest(PROVENANCE_DOMAIN, {
-        "query_identity": query_identity,
-        "revision_identity": revision_identity,
-        "due_slot": due_slot,
-        "due_state": due_state,
-        "coverage": coverage,
-        "schedule_provenance_digest": schedule_provenance_digest,
-    })
+def compute_macro_provenance_digest(
+    *,
+    query_identity: str,
+    revision_identity: str | None,
+    due_slot: str | None,
+    due_state: FredDueStateV1,
+    coverage: FredCoverageV1,
+    schedule_provenance_digest: str | None,
+) -> str:
+    return domain_digest(
+        PROVENANCE_DOMAIN,
+        {
+            "query_identity": query_identity,
+            "revision_identity": revision_identity,
+            "due_slot": due_slot,
+            "due_state": due_state,
+            "coverage": coverage,
+            "schedule_provenance_digest": schedule_provenance_digest,
+        },
+    )
 
 
 def observation_direction(observations: tuple) -> tuple:
@@ -508,8 +587,9 @@ def observation_direction(observations: tuple) -> tuple:
 
     A MISSING observation is skipped, never read as zero.
     """
-    present = tuple(item for item in observations
-                    if item.value_state is FredValueStateV1.PRESENT)
+    present = tuple(
+        item for item in observations if item.value_state is FredValueStateV1.PRESENT
+    )
     if not present:
         return None, None, None
     current = present[-1]

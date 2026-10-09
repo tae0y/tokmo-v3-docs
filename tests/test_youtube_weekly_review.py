@@ -4,14 +4,14 @@ Contract: .ai/plans/2026-08-16_youtube-semantic-dedupe-weekly-sds.md
 Verticals 6-8 — canonical week derivation, pair scan idempotency, resume.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
 
 from tokmo.programs.youtube_weekly_review import kst_iso_week
 
-UTC = timezone.utc
+UTC = UTC
 KST = ZoneInfo("Asia/Seoul")
 
 
@@ -50,14 +50,13 @@ def test_week_identity_requires_aware_instant():
 
 # --- V7: weekly scan coverage, idempotency, no fabrication ------------------
 
-from datetime import timedelta  # noqa: E402
 
 UTC_RUN = datetime(2026, 8, 16, 9, 0, tzinfo=UTC)
 
-from tokmo.records.ops_kernel import OpsKernelStore  # noqa: E402
-from tokmo.programs.youtube_tracking import admit_report_candidates  # noqa: E402
-from tokmo.programs.youtube_weekly_review import run_weekly_review  # noqa: E402
-from tokmo.values.ops_kernel import (  # noqa: E402
+from tokmo.programs.youtube_tracking import admit_report_candidates
+from tokmo.programs.youtube_weekly_review import run_weekly_review
+from tokmo.records.ops_kernel import OpsKernelStore
+from tokmo.values.ops_kernel import (
     HypothesisIndexKeyV1,
     IndexKeyKind,
     ProducerRole,
@@ -111,7 +110,9 @@ def _three_hypothesis_store(tmp_path):
         ProducerRole.ANALYSIS,
         _candidate(
             statement="재서술 동일 구조",
-            source_ref="66fuB_7nofM", revision="r2", payload_digest="e" * 64,
+            source_ref="66fuB_7nofM",
+            revision="r2",
+            payload_digest="e" * 64,
             observed_at=base + timedelta(days=1),
             next_check_at=base + timedelta(days=31),
         ),
@@ -120,29 +121,37 @@ def _three_hypothesis_store(tmp_path):
     # conflicting trigger -> distinct hypothesis #2
     admit_report_candidates(
         store,
-        (_candidate(
-            statement="매도 관점 가설",
-            trigger_expression="entity:005980:stake_sale_confirmed",
-            source_ref="77fuB_8nofM", revision="r3", payload_digest="f" * 64,
-            observed_at=base + timedelta(days=2),
-            next_check_at=base + timedelta(days=32),
-        ),),
+        (
+            _candidate(
+                statement="매도 관점 가설",
+                trigger_expression="entity:005980:stake_sale_confirmed",
+                source_ref="77fuB_8nofM",
+                revision="r3",
+                payload_digest="f" * 64,
+                observed_at=base + timedelta(days=2),
+                next_check_at=base + timedelta(days=32),
+            ),
+        ),
         now=base + timedelta(days=2),
     )
     # ambiguous high overlap -> hypothesis #3 + OPEN review
     admit_report_candidates(
         store,
-        (_candidate(
-            statement="흐름 관점 가설",
-            source_ref="88fuB_9nofM", revision="r4", payload_digest="a" * 64,
-            observed_at=base + timedelta(days=3),
-            next_check_at=base + timedelta(days=33),
-            index_keys=(
-                _key(E, "entity:005980"),
-                _key(M, "metric:semis:sovereign_flow_v2"),
-                _key(F, "effect:semis_long_growth"),
+        (
+            _candidate(
+                statement="흐름 관점 가설",
+                source_ref="88fuB_9nofM",
+                revision="r4",
+                payload_digest="a" * 64,
+                observed_at=base + timedelta(days=3),
+                next_check_at=base + timedelta(days=33),
+                index_keys=(
+                    _key(E, "entity:005980"),
+                    _key(M, "metric:semis:sovereign_flow_v2"),
+                    _key(F, "effect:semis_long_growth"),
+                ),
             ),
-        ),),
+        ),
         now=base + timedelta(days=3),
     )
     return store
@@ -158,12 +167,13 @@ def test_weekly_scan_covers_every_pair_and_persists_findings(tmp_path):
     assert outcome.pairs_scanned == 6  # C(4,2)
     # findings persisted through the store seams
     summary = store.read_weekly_review_summary("2026-W33")
-    kinds = sorted(
-        f"{row.classification}" for row in summary["pairs"]
-    )
+    kinds = sorted(f"{row.classification}" for row in summary["pairs"])
     assert kinds == [
-        "MERGE_REVIEW", "MERGE_REVIEW", "RELATED_BUT_DISTINCT",
-        "RELATED_BUT_DISTINCT", "RELATED_BUT_DISTINCT",
+        "MERGE_REVIEW",
+        "MERGE_REVIEW",
+        "RELATED_BUT_DISTINCT",
+        "RELATED_BUT_DISTINCT",
+        "RELATED_BUT_DISTINCT",
         "SAME_HYPOTHESIS_NEW_SIGHTING",
     ]
     # SAME finding created NO fabricated sighting: still 2 sightings total
@@ -190,7 +200,8 @@ def test_next_week_reevaluates(tmp_path):
     store = _three_hypothesis_store(tmp_path)
     run_weekly_review(store, now=datetime(2026, 8, 16, 9, 0, tzinfo=UTC))
     next_week = run_weekly_review(
-        store, now=datetime(2026, 8, 17, 9, 0, tzinfo=UTC),
+        store,
+        now=datetime(2026, 8, 17, 9, 0, tzinfo=UTC),
     )  # Monday 2026-08-17 18:00 KST -> 2026-W34
     assert next_week.status == "COMPLETE"
     assert next_week.week_identity == "2026-W34"
@@ -204,18 +215,14 @@ def test_next_week_reevaluates(tmp_path):
 
 def test_weekly_review_records_no_fabricated_sightings(tmp_path):
     store = _three_hypothesis_store(tmp_path)
-    ids = [
-        row.hypothesis_id for row in store.read_open_hypotheses()
-    ]
+    ids = [row.hypothesis_id for row in store.read_open_hypotheses()]
     before = {
         hypothesis_id: store.read_hypothesis_sightings(hypothesis_id)
         for hypothesis_id in ids
     }
     run_weekly_review(store, now=datetime(2026, 8, 16, 9, 0, tzinfo=UTC))
     for hypothesis_id in ids:
-        assert store.read_hypothesis_sightings(hypothesis_id) == before[
-            hypothesis_id
-        ]
+        assert store.read_hypothesis_sightings(hypothesis_id) == before[hypothesis_id]
     store.close()
 
 
@@ -226,27 +233,33 @@ def test_interrupted_run_resumes_without_duplicate_findings(tmp_path):
     store = _three_hypothesis_store(tmp_path)
     week = kst_iso_week(datetime(2026, 8, 16, 9, 0, tzinfo=UTC))
     reservation = store.reserve_weekly_review(
-        ProducerRole.ANALYSIS, week, now=datetime(2026, 8, 16, 9, 0, tzinfo=UTC),
+        ProducerRole.ANALYSIS,
+        week,
+        now=datetime(2026, 8, 16, 9, 0, tzinfo=UTC),
     )
     assert reservation["status"] == "CREATED"
     # simulate a crash after one pair adjudication
-    ids = sorted(
-        row.hypothesis_id for row in store.read_open_hypotheses()
-    )
+    ids = sorted(row.hypothesis_id for row in store.read_open_hypotheses())
     from tokmo.programs.youtube_semantic import classify_semantic_profiles
     from tokmo.values.ops_kernel import SemanticProfileV1
+
     left = store.read_hypothesis(ids[0])
     right = store.read_hypothesis(ids[1])
     decision = classify_semantic_profiles(
         SemanticProfileV1.from_hypothesis(
-            left, index_keys=store.read_hypothesis_index(ids[0]),
+            left,
+            index_keys=store.read_hypothesis_index(ids[0]),
         ),
         SemanticProfileV1.from_hypothesis(
-            right, index_keys=store.read_hypothesis_index(ids[1]),
+            right,
+            index_keys=store.read_hypothesis_index(ids[1]),
         ),
     )
     store.record_weekly_pair_adjudication(
-        ProducerRole.ANALYSIS, week.identity, (ids[0], ids[1]), decision,
+        ProducerRole.ANALYSIS,
+        week.identity,
+        (ids[0], ids[1]),
+        decision,
         now=datetime(2026, 8, 16, 9, 0, tzinfo=UTC),
     )
     # no COMPLETE receipt exists yet
@@ -271,14 +284,26 @@ def test_cli_seam_runs_one_review_and_replays_as_duplicate(tmp_path, capsys):
     store = _three_hypothesis_store(tmp_path)
     store.close()
     path = tmp_path / "ops" / "ops_kernel.sqlite3"
-    argv = [sys.executable, "-m", "tokmo.programs.youtube_weekly_review",
-            str(path), "--now", "2026-08-16T09:00:00+00:00"]
-    env = {"PYTHONPATH": str(
-        __import__("pathlib").Path(__file__).parents[1] / "src",
-    ), "PATH": "/usr/bin:/bin", "HOME": str(tmp_path)}
+    argv = [
+        sys.executable,
+        "-m",
+        "tokmo.programs.youtube_weekly_review",
+        str(path),
+        "--now",
+        "2026-08-16T09:00:00+00:00",
+    ]
+    env = {
+        "PYTHONPATH": str(
+            __import__("pathlib").Path(__file__).parents[1] / "src",
+        ),
+        "PATH": "/usr/bin:/bin",
+        "HOME": str(tmp_path),
+    }
     refused = subprocess.run(
         [argv[0], "-m", "tokmo.programs.youtube_weekly_review", str(path)],
-        capture_output=True, text=True, env=env,
+        capture_output=True,
+        text=True,
+        env=env,
     )
     assert refused.returncode == 1
     assert "refusal=observed_now_required" in refused.stderr
@@ -296,26 +321,30 @@ def test_run_weekly_review_source_tree_is_network_and_merge_free():
     import ast
     from pathlib import Path
 
-    source = Path(__file__).parents[1] / (
-        "src/tokmo/programs/youtube_weekly_review.py"
-    )
+    source = Path(__file__).parents[1] / ("src/tokmo/programs/youtube_weekly_review.py")
     tree = ast.parse(source.read_text())
     banned_calls = {
-        "urlopen", "requests", "socket", "post", "send_message",
-        "merge_hypotheses", "create_order", "upsert_hypothesis",
+        "urlopen",
+        "requests",
+        "socket",
+        "post",
+        "send_message",
+        "merge_hypotheses",
+        "create_order",
+        "upsert_hypothesis",
         "record_sighting",
     }
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
             name = getattr(node.func, "id", None) or getattr(
-                node.func, "attr", None,
+                node.func,
+                "attr",
+                None,
             )
             assert name not in banned_calls, f"forbidden call: {name}"
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             module = getattr(node, "module", "") or ""
-            names = [
-                alias.name for alias in node.names
-            ]
+            names = [alias.name for alias in node.names]
             assert not any(
                 module.startswith(prefix) or name.startswith(prefix)
                 for prefix in ("requests", "socket", "http", "urllib")
@@ -330,25 +359,31 @@ def test_resumed_complete_summarizes_whole_durable_week(tmp_path):
     store = _three_hypothesis_store(tmp_path)
     week = kst_iso_week(datetime(2026, 8, 16, 9, 0, tzinfo=UTC))
     store.reserve_weekly_review(
-        ProducerRole.ANALYSIS, week, now=datetime(2026, 8, 16, 9, 0, tzinfo=UTC),
+        ProducerRole.ANALYSIS,
+        week,
+        now=datetime(2026, 8, 16, 9, 0, tzinfo=UTC),
     )
-    ids = sorted(
-        row.hypothesis_id for row in store.read_open_hypotheses()
-    )
+    ids = sorted(row.hypothesis_id for row in store.read_open_hypotheses())
     from tokmo.programs.youtube_semantic import classify_semantic_profiles
     from tokmo.values.ops_kernel import SemanticProfileV1
+
     left = store.read_hypothesis(ids[0])
     right = store.read_hypothesis(ids[1])
     decision = classify_semantic_profiles(
         SemanticProfileV1.from_hypothesis(
-            left, index_keys=store.read_hypothesis_index(ids[0]),
+            left,
+            index_keys=store.read_hypothesis_index(ids[0]),
         ),
         SemanticProfileV1.from_hypothesis(
-            right, index_keys=store.read_hypothesis_index(ids[1]),
+            right,
+            index_keys=store.read_hypothesis_index(ids[1]),
         ),
     )
     store.record_weekly_pair_adjudication(
-        ProducerRole.ANALYSIS, week.identity, (ids[0], ids[1]), decision,
+        ProducerRole.ANALYSIS,
+        week.identity,
+        (ids[0], ids[1]),
+        decision,
         now=datetime(2026, 8, 16, 9, 0, tzinfo=UTC),
     )
     outcome = run_weekly_review(store, now=datetime(2026, 8, 16, 12, 0, tzinfo=UTC))
@@ -367,24 +402,27 @@ def test_resumed_complete_summarizes_whole_durable_week(tmp_path):
 def test_duplicate_week_returns_frozen_reservation_hypothesis_ids(tmp_path):
     store = _three_hypothesis_store(tmp_path)
     run_weekly_review(store, now=datetime(2026, 8, 16, 9, 0, tzinfo=UTC))
-    frozen = sorted(
-        row.hypothesis_id for row in store.read_open_hypotheses()
-    )
+    frozen = sorted(row.hypothesis_id for row in store.read_open_hypotheses())
     # a NEW unrelated hypothesis admitted after the week completed must not
     # leak into the DUPLICATE replay's summary of that week
     from tokmo.programs.youtube_tracking import admit_report_candidates
 
     admit_report_candidates(
         store,
-        (_candidate(
-            statement="주 완료 후 신규 무관 가설",
-            trigger_expression="entity:035720:other",
-            invalidation_conditions=("metric:035720:other_exit",),
-            index_keys=(_key(E, "entity:035720"),),
-            source_ref="AAfuB_1nofM", revision="rA", payload_digest="b" * 64,
-            observed_at=datetime(2026, 8, 16, 10, 0, tzinfo=UTC),
-            next_check_at=datetime(2026, 8, 16, 10, 0, tzinfo=UTC) + timedelta(days=30),
-        ),),
+        (
+            _candidate(
+                statement="주 완료 후 신규 무관 가설",
+                trigger_expression="entity:035720:other",
+                invalidation_conditions=("metric:035720:other_exit",),
+                index_keys=(_key(E, "entity:035720"),),
+                source_ref="AAfuB_1nofM",
+                revision="rA",
+                payload_digest="b" * 64,
+                observed_at=datetime(2026, 8, 16, 10, 0, tzinfo=UTC),
+                next_check_at=datetime(2026, 8, 16, 10, 0, tzinfo=UTC)
+                + timedelta(days=30),
+            ),
+        ),
         now=datetime(2026, 8, 16, 10, 0, tzinfo=UTC),
     )
     replay = run_weekly_review(store, now=datetime(2026, 8, 16, 14, 0, tzinfo=UTC))
@@ -399,48 +437,65 @@ def test_review_resolution_history_is_append_only_across_requeue(tmp_path):
     never overwrite the first."""
     from tokmo.programs.youtube_semantic import classify_semantic_profiles
     from tokmo.values.ops_kernel import (
-        HypothesisState, SemanticDecisionV1, SemanticProfileV1,
+        SemanticProfileV1,
     )
 
     store = _three_hypothesis_store(tmp_path)
-    ids = sorted(
-        row.hypothesis_id for row in store.read_open_hypotheses()
-    )
+    ids = sorted(row.hypothesis_id for row in store.read_open_hypotheses())
     left = store.read_hypothesis(ids[2])
     right = store.read_hypothesis(ids[3])
     decision = classify_semantic_profiles(
         SemanticProfileV1.from_hypothesis(
-            left, index_keys=store.read_hypothesis_index(ids[2]),
+            left,
+            index_keys=store.read_hypothesis_index(ids[2]),
         ),
         SemanticProfileV1.from_hypothesis(
-            right, index_keys=store.read_hypothesis_index(ids[3]),
+            right,
+            index_keys=store.read_hypothesis_index(ids[3]),
         ),
     )
     assert decision.classification.value == "MERGE_REVIEW"
     first = store.queue_merge_review(
-        ProducerRole.ANALYSIS, ids[2], ids[3], decision, now=UTC_RUN,
+        ProducerRole.ANALYSIS,
+        ids[2],
+        ids[3],
+        decision,
+        now=UTC_RUN,
         origin="WEEKLY_REVIEW",
     )
     assert first == "created"
     resolved = store.resolve_merge_review(
-        ProducerRole.ANALYSIS, ids[2], ids[3], "REJECTED", now=UTC_RUN,
+        ProducerRole.ANALYSIS,
+        ids[2],
+        ids[3],
+        "REJECTED",
+        now=UTC_RUN,
         origin="WEEKLY_REVIEW",
     )
     assert resolved == "resolved"
     # a later week re-queues the same ambiguous pair
     second = store.queue_merge_review(
-        ProducerRole.ANALYSIS, ids[2], ids[3], decision,
-        now=UTC_RUN + timedelta(days=7), origin="WEEKLY_REVIEW",
+        ProducerRole.ANALYSIS,
+        ids[2],
+        ids[3],
+        decision,
+        now=UTC_RUN + timedelta(days=7),
+        origin="WEEKLY_REVIEW",
     )
     assert second == "created"
     resolved_again = store.resolve_merge_review(
-        ProducerRole.ANALYSIS, ids[2], ids[3], "APPROVED",
-        now=UTC_RUN + timedelta(days=8), origin="WEEKLY_REVIEW",
+        ProducerRole.ANALYSIS,
+        ids[2],
+        ids[3],
+        "APPROVED",
+        now=UTC_RUN + timedelta(days=8),
+        origin="WEEKLY_REVIEW",
     )
     assert resolved_again == "resolved"
     history = store.read_merge_review_history(ids[2], ids[3])
     assert [row.status for row in history] == [
-        "REJECTED", "APPROVED",
+        "REJECTED",
+        "APPROVED",
     ]
     # every resolution event carries its own resolved_at
     assert history[0].resolved_at < history[1].resolved_at
@@ -470,17 +525,22 @@ def test_w2_counters_equal_week_pair_rows_not_store_wide_tables(tmp_path):
     # admission-time OPEN review (store-wide but not W2's own finding)
     admit_report_candidates(
         store,
-        (_candidate(
-            statement="주간 사전 모호 가설",
-            source_ref="BBfuB_2nofM", revision="rB", payload_digest="c" * 64,
-            observed_at=datetime(2026, 8, 18, 7, 0, tzinfo=UTC),
-            next_check_at=datetime(2026, 8, 18, 7, 0, tzinfo=UTC) + timedelta(days=30),
-            index_keys=(
-                _key(E, "entity:005980"),
-                _key(M, "metric:semis:sovereign_flow_v9"),
-                _key(F, "effect:semis_long_growth"),
+        (
+            _candidate(
+                statement="주간 사전 모호 가설",
+                source_ref="BBfuB_2nofM",
+                revision="rB",
+                payload_digest="c" * 64,
+                observed_at=datetime(2026, 8, 18, 7, 0, tzinfo=UTC),
+                next_check_at=datetime(2026, 8, 18, 7, 0, tzinfo=UTC)
+                + timedelta(days=30),
+                index_keys=(
+                    _key(E, "entity:005980"),
+                    _key(M, "metric:semis:sovereign_flow_v9"),
+                    _key(F, "effect:semis_long_growth"),
+                ),
             ),
-        ),),
+        ),
         now=datetime(2026, 8, 18, 7, 0, tzinfo=UTC),
     )
     store_wide_reviews_before = len(store.read_merge_reviews())
@@ -495,15 +555,13 @@ def test_w2_counters_equal_week_pair_rows_not_store_wide_tables(tmp_path):
 
     week_pairs = store.read_weekly_review_summary("2026-W35")["pairs"]
     expected_edges = sum(
-        1 for row in week_pairs
-        if row.classification == "RELATED_BUT_DISTINCT"
+        1 for row in week_pairs if row.classification == "RELATED_BUT_DISTINCT"
     )
     expected_reviews = sum(
         1 for row in week_pairs if row.classification == "MERGE_REVIEW"
     )
     expected_same = sum(
-        1 for row in week_pairs
-        if row.classification == "SAME_HYPOTHESIS_NEW_SIGHTING"
+        1 for row in week_pairs if row.classification == "SAME_HYPOTHESIS_NEW_SIGHTING"
     )
     run = store.read_weekly_review_summary("2026-W35")["run"]
     # EXACT equality against this week's pair rows, not >= against the
@@ -528,43 +586,58 @@ def test_resume_creates_only_one_unresolved_open_review(tmp_path):
     admit_report_candidates(store, (_candidate(),), now=base)
     admit_report_candidates(
         store,
-        (_candidate(
-            statement="모호 가설",
-            source_ref="88fuB_9nofM", revision="r4", payload_digest="a" * 64,
-            observed_at=base + timedelta(days=3),
-            next_check_at=base + timedelta(days=33),
-            index_keys=(
-                _key(E, "entity:005980"),
-                _key(M, "metric:semis:sovereign_flow_v2"),
-                _key(F, "effect:semis_long_growth"),
+        (
+            _candidate(
+                statement="모호 가설",
+                source_ref="88fuB_9nofM",
+                revision="r4",
+                payload_digest="a" * 64,
+                observed_at=base + timedelta(days=3),
+                next_check_at=base + timedelta(days=33),
+                index_keys=(
+                    _key(E, "entity:005980"),
+                    _key(M, "metric:semis:sovereign_flow_v2"),
+                    _key(F, "effect:semis_long_growth"),
+                ),
             ),
-        ),),
+        ),
         now=base + timedelta(days=3),
     )
-    ids = sorted(
-        row.hypothesis_id for row in store.read_open_hypotheses()
-    )
+    ids = sorted(row.hypothesis_id for row in store.read_open_hypotheses())
     assert len(ids) == 2
     a, b = ids
     decision = classify_semantic_profiles(
         SemanticProfileV1.from_hypothesis(
-            store.read_hypothesis(a), index_keys=store.read_hypothesis_index(a),
+            store.read_hypothesis(a),
+            index_keys=store.read_hypothesis_index(a),
         ),
         SemanticProfileV1.from_hypothesis(
-            store.read_hypothesis(b), index_keys=store.read_hypothesis_index(b),
+            store.read_hypothesis(b),
+            index_keys=store.read_hypothesis_index(b),
         ),
     )
     assert decision.classification.value == "MERGE_REVIEW"
     # the WEEKLY path queues its own review for the same pair
-    assert store.queue_merge_review(
-        ProducerRole.ANALYSIS, a, b, decision, now=UTC_RUN,
-        origin="WEEKLY_REVIEW",
-    ) == "created"
+    assert (
+        store.queue_merge_review(
+            ProducerRole.ANALYSIS,
+            a,
+            b,
+            decision,
+            now=UTC_RUN,
+            origin="WEEKLY_REVIEW",
+        )
+        == "created"
+    )
     # resume attempt at a LATER instant must be a duplicate, not a second
     # unresolved OPEN with a different event id
     resumed = store.queue_merge_review(
-        ProducerRole.ANALYSIS, a, b, decision,
-        now=UTC_RUN + timedelta(hours=3), origin="WEEKLY_REVIEW",
+        ProducerRole.ANALYSIS,
+        a,
+        b,
+        decision,
+        now=UTC_RUN + timedelta(hours=3),
+        origin="WEEKLY_REVIEW",
     )
     assert resumed == "duplicate"
     with store._read() as connection:
@@ -577,14 +650,28 @@ def test_resume_creates_only_one_unresolved_open_review(tmp_path):
     assert unresolved == 1
     # after manual resolution OF THAT ORIGIN'S row, a LATER requeue is a
     # new append-only event; still exactly one unresolved OPEN afterwards
-    assert store.resolve_merge_review(
-        ProducerRole.ANALYSIS, a, b, "REJECTED", now=UTC_RUN + timedelta(days=1),
-        origin="WEEKLY_REVIEW",
-    ) == "resolved"
-    assert store.queue_merge_review(
-        ProducerRole.ANALYSIS, a, b, decision,
-        now=UTC_RUN + timedelta(days=7), origin="WEEKLY_REVIEW",
-    ) == "created"
+    assert (
+        store.resolve_merge_review(
+            ProducerRole.ANALYSIS,
+            a,
+            b,
+            "REJECTED",
+            now=UTC_RUN + timedelta(days=1),
+            origin="WEEKLY_REVIEW",
+        )
+        == "resolved"
+    )
+    assert (
+        store.queue_merge_review(
+            ProducerRole.ANALYSIS,
+            a,
+            b,
+            decision,
+            now=UTC_RUN + timedelta(days=7),
+            origin="WEEKLY_REVIEW",
+        )
+        == "created"
+    )
     with store._read() as connection:
         unresolved_after = connection.execute(
             "SELECT count(*) FROM merge_review_queue WHERE hypothesis_a=? "
@@ -610,69 +697,85 @@ def test_merge_supersedes_only_unresolved_open_reviews(tmp_path):
     admit_report_candidates(store, (_candidate(),), now=base)
     admit_report_candidates(
         store,
-        (_candidate(
-            statement="모호 가설",
-            source_ref="88fuB_9nofM", revision="r4", payload_digest="a" * 64,
-            observed_at=base + timedelta(days=3),
-            next_check_at=base + timedelta(days=33),
-            index_keys=(
-                _key(E, "entity:005980"),
-                _key(M, "metric:semis:sovereign_flow_v2"),
-                _key(F, "effect:semis_long_growth"),
+        (
+            _candidate(
+                statement="모호 가설",
+                source_ref="88fuB_9nofM",
+                revision="r4",
+                payload_digest="a" * 64,
+                observed_at=base + timedelta(days=3),
+                next_check_at=base + timedelta(days=33),
+                index_keys=(
+                    _key(E, "entity:005980"),
+                    _key(M, "metric:semis:sovereign_flow_v2"),
+                    _key(F, "effect:semis_long_growth"),
+                ),
             ),
-        ),),
+        ),
         now=base + timedelta(days=3),
     )
-    ids = sorted(
-        row.hypothesis_id for row in store.read_open_hypotheses()
-    )
+    ids = sorted(row.hypothesis_id for row in store.read_open_hypotheses())
     assert len(ids) == 2
     a, b = ids
     decision = classify_semantic_profiles(
         SemanticProfileV1.from_hypothesis(
-            store.read_hypothesis(a), index_keys=store.read_hypothesis_index(a),
+            store.read_hypothesis(a),
+            index_keys=store.read_hypothesis_index(a),
         ),
         SemanticProfileV1.from_hypothesis(
-            store.read_hypothesis(b), index_keys=store.read_hypothesis_index(b),
+            store.read_hypothesis(b),
+            index_keys=store.read_hypothesis_index(b),
         ),
     )
     assert decision.classification.value == "MERGE_REVIEW"
     # admission itself queued the only review (ADMISSION origin, unresolved)
-    assert store.queue_merge_review(
-        ProducerRole.ANALYSIS, a, b, decision, now=base + timedelta(days=3),
-        origin="ADMISSION",
-    ) == "duplicate"
+    assert (
+        store.queue_merge_review(
+            ProducerRole.ANALYSIS,
+            a,
+            b,
+            decision,
+            now=base + timedelta(days=3),
+            origin="ADMISSION",
+        )
+        == "duplicate"
+    )
     # a human supersedes the review WITHOUT merging
-    assert store.resolve_merge_review(
-        ProducerRole.ANALYSIS, a, b, "SUPERSEDED", now=UTC_RUN,
-        origin="ADMISSION",
-    ) == "resolved"
+    assert (
+        store.resolve_merge_review(
+            ProducerRole.ANALYSIS,
+            a,
+            b,
+            "SUPERSEDED",
+            now=UTC_RUN,
+            origin="ADMISSION",
+        )
+        == "resolved"
+    )
 
     def all_rows():
         with store._read() as connection:
             return [
                 (row["review_id"], row["status"], row["resolved_at"])
                 for row in connection.execute(
-                    "SELECT * FROM merge_review_queue "
-                    "ORDER BY review_id"
+                    "SELECT * FROM merge_review_queue ORDER BY review_id"
                 )
             ]
 
     before = all_rows()
     assert len(before) == 2  # closed OPEN marker + SUPERSEDED event
-    history_before = [
-        row.review_id for row in store.read_merge_review_history(a, b)
-    ]
+    history_before = [row.review_id for row in store.read_merge_review_history(a, b)]
     # merging one involved hypothesis succeeds and creates NO spurious
     # SUPERSEDED event for the already-closed review
     outcome = store.merge_hypotheses(
-        ProducerRole.ANALYSIS, a, b, now=UTC_RUN + timedelta(days=1),
+        ProducerRole.ANALYSIS,
+        a,
+        b,
+        now=UTC_RUN + timedelta(days=1),
     )
     assert outcome is not None
     assert all_rows() == before  # no new events of any kind
-    history_after = [
-        row.review_id for row in store.read_merge_review_history(a, b)
-    ]
+    history_after = [row.review_id for row in store.read_merge_review_history(a, b)]
     assert history_after == history_before
     store.close()
 
@@ -680,38 +783,45 @@ def test_merge_supersedes_only_unresolved_open_reviews(tmp_path):
 def test_read_merge_reviews_open_status_excludes_resolved_rows(tmp_path):
     """status='OPEN' filter must behave like the default actionable view:
     OPEN rows already carried into a resolution event are not actionable."""
-    from tokmo.programs.youtube_semantic import classify_semantic_profiles
-    from tokmo.values.ops_kernel import SemanticProfileV1
 
     store = OpsKernelStore(tmp_path / "ops" / "ops_kernel.sqlite3")
     base = datetime(2026, 8, 13, 5, 30, tzinfo=UTC)
     admit_report_candidates(store, (_candidate(),), now=base)
     admit_report_candidates(
         store,
-        (_candidate(
-            statement="모호 가설",
-            source_ref="88fuB_9nofM", revision="r4", payload_digest="a" * 64,
-            observed_at=base + timedelta(days=3),
-            next_check_at=base + timedelta(days=33),
-            index_keys=(
-                _key(E, "entity:005980"),
-                _key(M, "metric:semis:sovereign_flow_v2"),
-                _key(F, "effect:semis_long_growth"),
+        (
+            _candidate(
+                statement="모호 가설",
+                source_ref="88fuB_9nofM",
+                revision="r4",
+                payload_digest="a" * 64,
+                observed_at=base + timedelta(days=3),
+                next_check_at=base + timedelta(days=33),
+                index_keys=(
+                    _key(E, "entity:005980"),
+                    _key(M, "metric:semis:sovereign_flow_v2"),
+                    _key(F, "effect:semis_long_growth"),
+                ),
             ),
-        ),),
+        ),
         now=base + timedelta(days=3),
     )
-    ids = sorted(
-        row.hypothesis_id for row in store.read_open_hypotheses()
-    )
+    ids = sorted(row.hypothesis_id for row in store.read_open_hypotheses())
     a, b = ids
     # the ADMISSION-origin review is the store's only queue row
     before = store.read_merge_reviews(status="OPEN")
     assert len(before) == 1
-    assert store.resolve_merge_review(
-        ProducerRole.ANALYSIS, a, b, "REJECTED", now=UTC_RUN,
-        origin="ADMISSION",
-    ) == "resolved"
+    assert (
+        store.resolve_merge_review(
+            ProducerRole.ANALYSIS,
+            a,
+            b,
+            "REJECTED",
+            now=UTC_RUN,
+            origin="ADMISSION",
+        )
+        == "resolved"
+    )
     # the OPEN row for the resolved event is closed in place; an explicit
     # status='OPEN' query must not resurrect it as actionable
     assert store.read_merge_reviews(status="OPEN") == ()
@@ -742,15 +852,20 @@ def test_weekly_summary_ids_are_frozen_reservation_ids(tmp_path):
     # frozen summary ids of that week
     admit_report_candidates(
         store,
-        (_candidate(
-            statement="완료 후 신규 가설",
-            trigger_expression="entity:035720:other",
-            invalidation_conditions=("metric:035720:other_exit",),
-            index_keys=(_key(E, "entity:035720"),),
-            source_ref="CCfuB_3nofM", revision="rC", payload_digest="3" * 64,
-            observed_at=datetime(2026, 8, 16, 10, 0, tzinfo=UTC),
-            next_check_at=datetime(2026, 8, 16, 10, 0, tzinfo=UTC) + timedelta(days=30),
-        ),),
+        (
+            _candidate(
+                statement="완료 후 신규 가설",
+                trigger_expression="entity:035720:other",
+                invalidation_conditions=("metric:035720:other_exit",),
+                index_keys=(_key(E, "entity:035720"),),
+                source_ref="CCfuB_3nofM",
+                revision="rC",
+                payload_digest="3" * 64,
+                observed_at=datetime(2026, 8, 16, 10, 0, tzinfo=UTC),
+                next_check_at=datetime(2026, 8, 16, 10, 0, tzinfo=UTC)
+                + timedelta(days=30),
+            ),
+        ),
         now=datetime(2026, 8, 16, 10, 0, tzinfo=UTC),
     )
     replay = run_weekly_review(store, now=datetime(2026, 8, 16, 14, 0, tzinfo=UTC))

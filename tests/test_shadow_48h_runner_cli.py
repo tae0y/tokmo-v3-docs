@@ -8,27 +8,27 @@ invoked through the exact production cadence CLI seam in fixture dry-run
 mode. No secret ever reaches stdout, stderr, or durable state.
 """
 
-from datetime import datetime, timedelta, timezone
 import json
-from pathlib import Path
 import signal
 import subprocess
 import sys
 import time
-
-import pytest
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from tokmo.records.prelaunch_markers import create_pass_marker
 
 ROOT = Path(__file__).parents[1]
-UTC = timezone.utc
+UTC = UTC
 SECRET = "runner-cli-secret-bearer"
 
 
 def repo_head() -> str:
     return subprocess.run(
         ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.strip()
 
 
@@ -38,7 +38,8 @@ def zulu(value: datetime) -> str:
 
 def grid(value: datetime) -> datetime:
     return datetime.fromtimestamp(
-        int(value.timestamp()) // 300 * 300, tz=UTC,
+        int(value.timestamp()) // 300 * 300,
+        tz=UTC,
     )
 
 
@@ -46,32 +47,43 @@ def write_markers(tmp_path, commit):
     markers = tmp_path / "markers"
     created = datetime(2026, 8, 1, tzinfo=UTC)
     create_pass_marker(
-        markers / "full_suite.json", kind="full-suite", commit_sha=commit,
-        command=".venv/bin/python -m pytest -q", test_count=2466,
-        created_at=created, provenance="hermes/full-suite",
+        markers / "full_suite.json",
+        kind="full-suite",
+        commit_sha=commit,
+        command=".venv/bin/python -m pytest -q",
+        test_count=2466,
+        created_at=created,
+        provenance="hermes/full-suite",
     )
     create_pass_marker(
-        markers / "review.json", kind="pilot-acceptance", commit_sha=commit,
-        command="direct glm reclosure", test_count=1,
-        created_at=created, provenance="direct-zai/glm-5.2",
+        markers / "review.json",
+        kind="pilot-acceptance",
+        commit_sha=commit,
+        command="direct glm reclosure",
+        test_count=1,
+        created_at=created,
+        provenance="direct-zai/glm-5.2",
     )
     return markers / "full_suite.json", markers / "review.json"
 
 
 def write_fixture(tmp_path):
     path = tmp_path / "fixture.json"
-    path.write_text(json.dumps({
-        "token": SECRET,
-        "calendar": {"KR": {}, "US": {}},
-        "accounts": [{"seed": "7", "holdings": []}],
-        "quotes": {},
-        "orders": {},
-    }))
+    path.write_text(
+        json.dumps(
+            {
+                "token": SECRET,
+                "calendar": {"KR": {}, "US": {}},
+                "accounts": [{"seed": "7", "holdings": []}],
+                "quotes": {},
+                "orders": {},
+            }
+        )
+    )
     return path
 
 
-def write_config(tmp_path, *, start_at, duration=1800, commit=None,
-                 markers=None):
+def write_config(tmp_path, *, start_at, duration=1800, commit=None, markers=None):
     commit = repo_head() if commit is None else commit
     if markers is None:
         markers = write_markers(tmp_path, commit)
@@ -94,11 +106,21 @@ def write_config(tmp_path, *, start_at, duration=1800, commit=None,
 
 def launch(config_path, tmp_path, **popen_kwargs):
     return subprocess.Popen(
-        [sys.executable, str(ROOT / "tools" / "run_48h_shadow.py"),
-         "--config", str(config_path)],
-        cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-        env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(ROOT / "src"),
-             "HOME": str(tmp_path)},
+        [
+            sys.executable,
+            str(ROOT / "tools" / "run_48h_shadow.py"),
+            "--config",
+            str(config_path),
+        ],
+        cwd=ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env={
+            "PATH": "/usr/bin:/bin",
+            "PYTHONPATH": str(ROOT / "src"),
+            "HOME": str(tmp_path),
+        },
         **popen_kwargs,
     )
 
@@ -156,7 +178,8 @@ def test_commit_mismatch_fails_closed(tmp_path):
 def test_absent_marker_fails_closed(tmp_path):
     start = grid(datetime.now(UTC)) + timedelta(hours=1)
     config_path = write_config(
-        tmp_path, start_at=start,
+        tmp_path,
+        start_at=start,
         markers=(tmp_path / "nope-full.json", tmp_path / "nope-review.json"),
     )
     code, _stdout, stderr = run_cli(config_path, tmp_path)
@@ -170,21 +193,25 @@ def test_elapsed_campaign_resumes_to_missed_and_terminal_complete(tmp_path):
     config = json.loads(config_path.read_text())
     harness = tmp_path / "shadow" / "harness"
     harness.mkdir(parents=True)
-    state_path(tmp_path).write_text(json.dumps({
-        "schema": "tokmo-48h-shadow-state-v1",
-        "config": {
-            "start_at_utc": config["start_at"],
-            "duration_seconds": 1800,
-            "interval_seconds": 300,
-            "expected_commit": config["expected_commit"],
-            "mode": "live-shadow",
-            "policy_version": "cadence-300s-v1",
-        },
-        "actual_start": config["start_at"],
-        "intended_end": zulu(start + timedelta(seconds=1800)),
-        "ticks": {},
-        "terminal": None,
-    }))
+    state_path(tmp_path).write_text(
+        json.dumps(
+            {
+                "schema": "tokmo-48h-shadow-state-v1",
+                "config": {
+                    "start_at_utc": config["start_at"],
+                    "duration_seconds": 1800,
+                    "interval_seconds": 300,
+                    "expected_commit": config["expected_commit"],
+                    "mode": "live-shadow",
+                    "policy_version": "cadence-300s-v1",
+                },
+                "actual_start": config["start_at"],
+                "intended_end": zulu(start + timedelta(seconds=1800)),
+                "ticks": {},
+                "terminal": None,
+            }
+        )
+    )
     code, stdout, _stderr = run_cli(config_path, tmp_path)
     assert code == 0
     terminal = json.loads(stdout.splitlines()[-1])
@@ -192,8 +219,7 @@ def test_elapsed_campaign_resumes_to_missed_and_terminal_complete(tmp_path):
     assert terminal["terminal"]["counts"] == {"MISSED": 6}
     state = json.loads(state_path(tmp_path).read_text())
     assert all(
-        record["status"] == "MISSED"
-        and record["reason"] == "elapsed_during_downtime"
+        record["status"] == "MISSED" and record["reason"] == "elapsed_during_downtime"
         for record in state["ticks"].values()
     )
     # never replayed: the production tick seam never ran, provider zero
@@ -218,21 +244,25 @@ def test_current_slot_runs_through_the_production_cli_seam(tmp_path):
     harness = tmp_path / "shadow" / "harness"
     harness.mkdir(parents=True)
     config = json.loads(config_path.read_text())
-    state_path(tmp_path).write_text(json.dumps({
-        "schema": "tokmo-48h-shadow-state-v1",
-        "config": {
-            "start_at_utc": config["start_at"],
-            "duration_seconds": 300,
-            "interval_seconds": 300,
-            "expected_commit": config["expected_commit"],
-            "mode": "live-shadow",
-            "policy_version": "cadence-300s-v1",
-        },
-        "actual_start": config["start_at"],
-        "intended_end": zulu(start + timedelta(seconds=300)),
-        "ticks": {},
-        "terminal": None,
-    }))
+    state_path(tmp_path).write_text(
+        json.dumps(
+            {
+                "schema": "tokmo-48h-shadow-state-v1",
+                "config": {
+                    "start_at_utc": config["start_at"],
+                    "duration_seconds": 300,
+                    "interval_seconds": 300,
+                    "expected_commit": config["expected_commit"],
+                    "mode": "live-shadow",
+                    "policy_version": "cadence-300s-v1",
+                },
+                "actual_start": config["start_at"],
+                "intended_end": zulu(start + timedelta(seconds=300)),
+                "ticks": {},
+                "terminal": None,
+            }
+        )
+    )
     code, stdout, stderr = run_cli(config_path, tmp_path, timeout=120)
     assert code == 0, stderr
     state = json.loads(state_path(tmp_path).read_text())
@@ -244,9 +274,8 @@ def test_current_slot_runs_through_the_production_cli_seam(tmp_path):
     assert (tmp_path / "shadow" / "ops" / "cadence_ticks.sqlite3").is_file()
     assert state["terminal"]["status"] == "COMPLETE"
     # bounded lifecycle only: START then FINISH, no stock alerts
-    lifecycle = (tmp_path / "shadow" / "harness" / "lifecycle_log.jsonl")
-    kinds = [json.loads(line)["kind"] for line in
-             lifecycle.read_text().splitlines()]
+    lifecycle = tmp_path / "shadow" / "harness" / "lifecycle_log.jsonl"
+    kinds = [json.loads(line)["kind"] for line in lifecycle.read_text().splitlines()]
     assert kinds == ["START", "FINISH"]
     # no secret in stdout, stderr, or durable state
     for text in (stdout, stderr, state_path(tmp_path).read_text()):

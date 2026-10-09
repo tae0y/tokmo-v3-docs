@@ -9,6 +9,7 @@ the tool now refuses before touching anything.
 
 Every fixture is synthetic and lives under ``tmp_path``.
 """
+
 from __future__ import annotations
 
 import ast
@@ -35,7 +36,8 @@ REPRODUCED_ARGUMENTS = ("--file", "{workbook}", "--root", "{root}", "--approve")
 
 def load_legacy_tool():
     spec = importlib.util.spec_from_file_location(
-        "synthetic_legacy_pension_tool", LEGACY_TOOL)
+        "synthetic_legacy_pension_tool", LEGACY_TOOL
+    )
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
@@ -45,6 +47,7 @@ def load_legacy_tool():
 # ---------------------------------------------------------------------------
 # A production-SHAPED generation-1 root
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def generation_one_root(tmp_path) -> Path:
@@ -57,7 +60,8 @@ def generation_one_root(tmp_path) -> Path:
     """
     from tests.test_pension_current_read_model import clock, seven
     from tests.test_pension_snapshot_generation_migration import (
-        toss_capture, toss_permit,
+        toss_capture,
+        toss_permit,
     )
     from tokmo.records.holdings_snapshots import HoldingsSnapshotStore
     from tokmo.records.pension_revisions import PensionRegistryStore
@@ -67,15 +71,15 @@ def generation_one_root(tmp_path) -> Path:
     (root / "toss").mkdir(mode=0o700)
     (root / "stores").mkdir(mode=0o700)
 
-    snapshots = HoldingsSnapshotStore(
-        holdings_snapshot_store_path(root), clock=clock)
+    snapshots = HoldingsSnapshotStore(holdings_snapshot_store_path(root), clock=clock)
     capture = toss_capture()
     receipt = snapshots.append(capture, toss_permit(capture.snapshot_id))
     assert receipt.status == "SAVED", receipt.reason
     assert stored_generation(holdings_snapshot_store_path(root)) == "1"
 
     registry = PensionRegistryStore(
-        root / "stores" / "pension_registry.sqlite3", clock=clock)
+        root / "stores" / "pension_registry.sqlite3", clock=clock
+    )
     revision = seven()
     registry.create_candidate(revision)
     registry.promote_to_pending(revision.revision_id)
@@ -120,7 +124,8 @@ def stored_generation(path: Path) -> str:
     try:
         return connection.execute(
             "SELECT value FROM storage_metadata"
-            " WHERE key='holdings_snapshot_schema_version'").fetchone()[0]
+            " WHERE key='holdings_snapshot_schema_version'"
+        ).fetchone()[0]
     finally:
         connection.close()
 
@@ -141,12 +146,14 @@ def registry_state(root: Path) -> dict[str, object]:
             "bytes": digest_of(registry_path(root)),
             "size": registry_path(root).stat().st_size,
             "revisions": connection.execute(
-                "SELECT revision_id, state FROM pension_revisions"
-                " ORDER BY revision_id").fetchall(),
+                "SELECT revision_id, state FROM pension_revisions ORDER BY revision_id"
+            ).fetchall(),
             "pointer": connection.execute(
-                "SELECT * FROM pension_active_pointer").fetchall(),
+                "SELECT * FROM pension_active_pointer"
+            ).fetchall(),
             "activations": connection.execute(
-                "SELECT count(*) FROM pension_activation_events").fetchone()[0],
+                "SELECT count(*) FROM pension_activation_events"
+            ).fetchone()[0],
         }
     finally:
         connection.close()
@@ -158,8 +165,11 @@ def snapshot_state(root: Path) -> dict[str, object]:
     try:
         counts = {
             table: connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
-            for table in ("holdings_snapshots", "holdings_snapshot_accounts",
-                          "holdings_snapshot_items")
+            for table in (
+                "holdings_snapshots",
+                "holdings_snapshot_accounts",
+                "holdings_snapshot_items",
+            )
         }
     finally:
         connection.close()
@@ -177,17 +187,24 @@ def snapshot_databases_under(root: Path) -> list[str]:
 # The reproduced invocation, as a real subprocess
 # ---------------------------------------------------------------------------
 
+
 def run_legacy(root: Path, *arguments: str) -> subprocess.CompletedProcess:
     environment = dict(os.environ)
     environment["PYTHONPATH"] = os.pathsep.join(
-        [str(REPO_ROOT / "src"), str(REPO_ROOT), environment.get("PYTHONPATH", "")])
+        [str(REPO_ROOT / "src"), str(REPO_ROOT), environment.get("PYTHONPATH", "")]
+    )
     return subprocess.run(
         [sys.executable, str(LEGACY_TOOL), *arguments],
-        capture_output=True, text=True, cwd=REPO_ROOT, env=environment)
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+        env=environment,
+    )
 
 
 def test_the_reproduced_approve_invocation_is_refused_and_changes_nothing(
-        generation_one_root, landing_workbook):
+    generation_one_root, landing_workbook
+):
     """The reviewer's exact repro: RC nonzero, and nothing moved."""
     root = generation_one_root
     registry_before = registry_state(root)
@@ -195,7 +212,8 @@ def test_the_reproduced_approve_invocation_is_refused_and_changes_nothing(
     workbook_before = digest_of(landing_workbook)
 
     result = run_legacy(
-        root, "--file", str(landing_workbook), "--root", str(root), "--approve")
+        root, "--file", str(landing_workbook), "--root", str(root), "--approve"
+    )
 
     # 1. Nonzero exit with a clear deprecation message naming both successors.
     assert result.returncode != 0
@@ -221,24 +239,42 @@ def test_the_reproduced_approve_invocation_is_refused_and_changes_nothing(
     assert digest_of(landing_workbook) == workbook_before
 
 
-@pytest.mark.parametrize("arguments", [
-    pytest.param(("--file", "{workbook}", "--root", "{root}"), id="default"),
-    pytest.param(("--file", "{workbook}", "--preview-only"), id="preview-only"),
-    pytest.param(("--file", "{workbook}", "--root", "{root}", "--approve",
-                  "--source-as-of", "2026-08-13"), id="approve-with-as-of"),
-    pytest.param((), id="no-arguments"),
-    pytest.param(("--unknown-flag",), id="unknown-flag"),
-])
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        pytest.param(("--file", "{workbook}", "--root", "{root}"), id="default"),
+        pytest.param(("--file", "{workbook}", "--preview-only"), id="preview-only"),
+        pytest.param(
+            (
+                "--file",
+                "{workbook}",
+                "--root",
+                "{root}",
+                "--approve",
+                "--source-as-of",
+                "2026-08-13",
+            ),
+            id="approve-with-as-of",
+        ),
+        pytest.param((), id="no-arguments"),
+        pytest.param(("--unknown-flag",), id="unknown-flag"),
+    ],
+)
 def test_every_other_invocation_is_refused_too(
-        generation_one_root, landing_workbook, arguments):
+    generation_one_root, landing_workbook, arguments
+):
     """Including --preview-only: the refusal is total, not approve-only."""
     root = generation_one_root
     registry_before = registry_state(root)
     snapshot_before = snapshot_state(root)
 
-    result = run_legacy(root, *(
-        argument.format(workbook=landing_workbook, root=root)
-        for argument in arguments))
+    result = run_legacy(
+        root,
+        *(
+            argument.format(workbook=landing_workbook, root=root)
+            for argument in arguments
+        ),
+    )
 
     assert result.returncode == 2
     assert "REFUSED" in result.stderr
@@ -260,6 +296,7 @@ def test_only_help_succeeds_and_it_still_says_deprecated(generation_one_root):
 # ---------------------------------------------------------------------------
 # The refusal precedes imports and store constructors -- structurally
 # ---------------------------------------------------------------------------
+
 
 def test_the_module_imports_nothing_from_tokmo_at_all():
     """The strongest available proof that no store can be constructed: the
@@ -285,11 +322,23 @@ def test_the_module_imports_nothing_from_tokmo_at_all():
         if isinstance(node, (ast.Name, ast.Attribute))
     }
     assert used <= {
-        "sys", "argv", "arguments", "argument", "list", "print", "stderr",
-        "main", "HELP", "REFUSAL", "REFUSED_EXIT_CODE",
-        "NEW_HOLDINGS_ENTRYPOINT", "NEW_LEDGER_ENTRYPOINT",
-        "SystemExit", "__name__",
-        "list", "str", "int",   # the type annotations on main()
+        "sys",
+        "argv",
+        "arguments",
+        "argument",
+        "list",
+        "print",
+        "stderr",
+        "main",
+        "HELP",
+        "REFUSAL",
+        "REFUSED_EXIT_CODE",
+        "NEW_HOLDINGS_ENTRYPOINT",
+        "NEW_LEDGER_ENTRYPOINT",
+        "SystemExit",
+        "__name__",
+        "str",
+        "int",  # the type annotations on main()
     }, sorted(used)
 
 
@@ -309,7 +358,6 @@ def test_the_refusal_happens_before_any_tokmo_import_could_occur(monkeypatch):
         def find_spec(self, fullname, path=None, target=None):
             if fullname == "tokmo" or fullname.startswith("tokmo."):
                 raise AssertionError(f"legacy tool reached {fullname}")
-            return None
 
     module = load_legacy_tool()
     monkeypatch.setattr(sys, "meta_path", [Tripwire(), *sys.meta_path])

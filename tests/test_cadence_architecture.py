@@ -18,37 +18,46 @@ import pytest
 
 ROOT = Path(__file__).parents[1]
 
-LEGACY_ADMISSION_NAMES = frozenset({
-    "plan_requests", "arm_account_rows", "start_request", "settle_request",
-    "reserve_request",
-})
+LEGACY_ADMISSION_NAMES = frozenset(
+    {
+        "plan_requests",
+        "arm_account_rows",
+        "start_request",
+        "settle_request",
+        "reserve_request",
+    }
+)
 
 # Closed allowlist of named historical G2 acceptance modules (m3). These are
 # the bounded, already-reviewed G2 collectors/runners; nothing may be added
 # here without review, and any other module in the sealed graph fails on any
 # legacy admission name regardless of its filename.
-HISTORICAL_G2_PROGRAM_MODULES = frozenset({
-    "trades_sync.py",  # G2 trades collector: plans/starts/settles order pages
-})
+HISTORICAL_G2_PROGRAM_MODULES = frozenset(
+    {
+        "trades_sync.py",  # G2 trades collector: plans/starts/settles order pages
+    }
+)
 
 # Closed allowlist of named historical G2 wiring scopes inside the
 # composition/transport owner. Composition itself stays sealed: legacy names
 # anywhere outside exactly these top-level scopes fail the test.
-HISTORICAL_G2_COMPOSITION_SCOPES = frozenset({
-    "_g2a_account_calendar_start",
-    "_g2a_account_calendar_settle",
-    "_g2a_plan_start_token",
-    "_g2a_settle_token",
-    "_g2b_plan_start_session_calendar",
-    "_g2b_settle_session_calendar",
-    "_g2b_plan_start_token",
-    "_g2b_settle_token",
-    "_g2b_plan_start",
-    "_g2b_settle",
-    "_g2b_plan_arm_account_holdings",
-    "build_g2b_live_deps",
-    "build_g2d_live_deps",
-})
+HISTORICAL_G2_COMPOSITION_SCOPES = frozenset(
+    {
+        "_g2a_account_calendar_start",
+        "_g2a_account_calendar_settle",
+        "_g2a_plan_start_token",
+        "_g2a_settle_token",
+        "_g2b_plan_start_session_calendar",
+        "_g2b_settle_session_calendar",
+        "_g2b_plan_start_token",
+        "_g2b_settle_token",
+        "_g2b_plan_start",
+        "_g2b_settle",
+        "_g2b_plan_arm_account_holdings",
+        "build_g2b_live_deps",
+        "build_g2d_live_deps",
+    }
+)
 
 COMPOSITION = ROOT / "src" / "tokmo" / "composition.py"
 
@@ -57,9 +66,7 @@ def legacy_names_used(node) -> set:
     """Every legacy admission name reachable as an attribute or bare name."""
     used = {
         child.attr for child in ast.walk(node) if isinstance(child, ast.Attribute)
-    } | {
-        child.id for child in ast.walk(node) if isinstance(child, ast.Name)
-    }
+    } | {child.id for child in ast.walk(node) if isinstance(child, ast.Name)}
     return used & LEGACY_ADMISSION_NAMES
 
 
@@ -70,7 +77,8 @@ def sealed_program_files(*, programs_root=None, tools_root=None):
     programs_root = programs_root or (ROOT / "src" / "tokmo" / "programs")
     tools_root = tools_root or (ROOT / "tools")
     files = sorted(
-        path for path in programs_root.rglob("*.py")
+        path
+        for path in programs_root.rglob("*.py")
         if path.relative_to(programs_root).as_posix()
         not in HISTORICAL_G2_PROGRAM_MODULES
     )
@@ -99,7 +107,8 @@ def test_market_regime_uses_static_imports_and_shared_target_authority():
     )
     imports = {
         alias.name
-        for node in tree.body if isinstance(node, ast.ImportFrom)
+        for node in tree.body
+        if isinstance(node, ast.ImportFrom)
         and node.module == "tokmo.programs.quotes_sync"
         for alias in node.names
     }
@@ -114,8 +123,10 @@ def test_market_regime_uses_static_imports_and_shared_target_authority():
 def test_composition_outside_named_g2_scopes_cannot_reach_legacy_surface():
     tree = ast.parse(COMPOSITION.read_text())
     for node in tree.body:
-        if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-                and node.name in HISTORICAL_G2_COMPOSITION_SCOPES):
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+            and node.name in HISTORICAL_G2_COMPOSITION_SCOPES
+        ):
             continue
         leaked = legacy_names_used(node)
         assert not leaked, (
@@ -132,7 +143,8 @@ def test_g2_allowlists_are_closed_and_still_real():
         assert (programs / name).is_file(), f"stale allowlist module: {name}"
     tree = ast.parse(COMPOSITION.read_text())
     top_level = {
-        node.name for node in tree.body
+        node.name
+        for node in tree.body
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
     }
     stale = HISTORICAL_G2_COMPOSITION_SCOPES - top_level
@@ -181,6 +193,7 @@ def test_legacy_g2_plan_start_reserve_apis_are_sealed_legacy_only():
 
 def test_new_cadence_transport_closure_requires_started_receipt_field():
     from dataclasses import MISSING as DATACLASS_MISSING
+
     from tokmo.values.calendar_refresh import CalendarFetchResult
     from tokmo.values.ops_kernel import CalendarStartReceiptV1
 
@@ -189,10 +202,15 @@ def test_new_cadence_transport_closure_requires_started_receipt_field():
     assert CalendarStartReceiptV1.__dataclass_fields__["state"]
     with pytest.raises(ValueError):
         CalendarStartReceiptV1(
-            "v", __import__("datetime").datetime(2026, 8, 1, tzinfo=__import__("datetime").timezone.utc),
+            "v",
+            __import__("datetime").datetime(
+                2026, 8, 1, tzinfo=__import__("datetime").timezone.utc
+            ),
             __import__("tokmo.values.session_gate", fromlist=["Market"]).Market.KR,
-            __import__("datetime").date(2026, 8, 1), 0,
-            "calendar:KR:2026-08-01:0", "PLANNED",
+            __import__("datetime").date(2026, 8, 1),
+            0,
+            "calendar:KR:2026-08-01:0",
+            "PLANNED",
         )
 
 
@@ -205,8 +223,10 @@ def test_closed_cadence_operations_match_wire_operation_specs():
     # CONDITIONAL_ORDERS is a Pulse-lane operation (conditional SDS §4.4);
     # the 300s request-parity vocabulary never carries it.
     assert set(CADENCE_OPERATIONS) - toss_operations == {
-        "MEMBERSHIP_NASDAQ_LISTED", "MEMBERSHIP_OTHER_LISTED",
-        "MEMBERSHIP_SEC_REGISTRY", "MEMBERSHIP_SEC_ISSUER",
+        "MEMBERSHIP_NASDAQ_LISTED",
+        "MEMBERSHIP_OTHER_LISTED",
+        "MEMBERSHIP_SEC_REGISTRY",
+        "MEMBERSHIP_SEC_ISSUER",
         "MEMBERSHIP_TOSS_STOCKS",
         "CONDITIONAL_ORDERS",
     }
@@ -237,8 +257,12 @@ def test_stage2_masked_collectors_stay_inside_the_sealed_graph():
         for path in sealed_program_files()
         if "programs" in path.parts
     }
-    for module in ("holdings_sync.py", "quotes_sync.py", "analysis_barrier.py",
-                   "candidate_builder.py"):
+    for module in (
+        "holdings_sync.py",
+        "quotes_sync.py",
+        "analysis_barrier.py",
+        "candidate_builder.py",
+    ):
         assert module in sealed, f"{module} escaped the sealed program graph"
 
 
@@ -250,7 +274,8 @@ def test_trades_sync_mask_path_never_uses_legacy_names_for_mask_admission():
     tree = ast.parse(source)
     imported = {
         alias.name
-        for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
         and node.module == "tokmo.values.open_market_mask"
         for alias in node.names
     }

@@ -1,8 +1,10 @@
 """One declared-UA, GET-only SEC primary-document read; no exhibits crawl or retry."""
+
 import hashlib
-from html.parser import HTMLParser
 import re
 import urllib.request
+from html.parser import HTMLParser
+
 from defusedxml.ElementTree import fromstring
 
 from tokmo.facts.sec_live import build_live_opener
@@ -44,12 +46,15 @@ def document_text(raw):
     is_html = re.search(r"<html(?:\s|>)", source, re.IGNORECASE) is not None
     # Inline XBRL filings are XHTML, often with an XML declaration. Treat their visible
     # mixed text as HTML; XML-leaf extraction loses surrounding text and exposes ix:hidden.
-    if not is_html and re.match(r"\s*<(?:\?xml|ownershipDocument\b|edgarSubmission\b)", source):
+    if not is_html and re.match(
+        r"\s*<(?:\?xml|ownershipDocument\b|edgarSubmission\b)", source
+    ):
         try:
             root = fromstring(source)
         except Exception:
             raise ValueError("document_xml_unavailable") from None
         parts = []
+
         def leaves(node, path=()):
             if len(path) > 32:
                 raise ValueError("document_xml_depth")
@@ -58,17 +63,26 @@ def document_text(raw):
                 parts.append(".".join(path) + ": " + node.text.strip())
             for child in node:
                 leaves(child, path)
+
         leaves(root)
         text = "\n".join(parts)
     else:
         parser = _Text()
         parser.feed(source)
         parser.close()
-        text = "\n".join(" ".join(line.split()) for line in "".join(parser.parts).splitlines() if line.strip())
+        text = "\n".join(
+            " ".join(line.split())
+            for line in "".join(parser.parts).splitlines()
+            if line.strip()
+        )
     if not text or len(text) > MAX_TEXT:
         raise ValueError("document_text_limit")
-    return {"text": text, "source_document_sha256": hashlib.sha256(raw).hexdigest(),
-            "document_scope": "primary_document_only", "attachments_verified": False}
+    return {
+        "text": text,
+        "source_document_sha256": hashlib.sha256(raw).hexdigest(),
+        "document_scope": "primary_document_only",
+        "attachments_verified": False,
+    }
 
 
 class SecDocumentReader:
@@ -76,17 +90,33 @@ class SecDocumentReader:
         self.user_agent_loader, self.opener_factory = user_agent_loader, opener_factory
 
     def __call__(self, listing):
-        url = sec_document_url(listing.get("cik"), listing.get("accession_number"), listing.get("primary_document"))
+        url = sec_document_url(
+            listing.get("cik"),
+            listing.get("accession_number"),
+            listing.get("primary_document"),
+        )
         try:
             agent = self.user_agent_loader()
-            if not isinstance(agent, str) or not agent.strip() or re.search(r"[\r\n]", agent):
+            if (
+                not isinstance(agent, str)
+                or not agent.strip()
+                or re.search(r"[\r\n]", agent)
+            ):
                 raise ValueError("bad agent")
         except Exception:
             raise ValueError("document_auth_unavailable") from None
         try:
-            request = urllib.request.Request(url, method="GET", headers={"User-Agent": agent, "Accept-Encoding": "identity"})
+            request = urllib.request.Request(
+                url,
+                method="GET",
+                headers={"User-Agent": agent, "Accept-Encoding": "identity"},
+            )
             with self.opener_factory().open(request, timeout=10) as response:
-                if response.status != 200 or response.headers.get("Content-Encoding", "identity").lower() != "identity":
+                if (
+                    response.status != 200
+                    or response.headers.get("Content-Encoding", "identity").lower()
+                    != "identity"
+                ):
                     raise ValueError("bad response")
                 raw = response.read(MAX_BYTES + 1)
         except Exception:

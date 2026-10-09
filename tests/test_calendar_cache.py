@@ -1,25 +1,30 @@
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pytest
 
 from tokmo.records.calendar_cache import (
     CalendarCacheCorruptError,
-    CalendarCacheStore,
     CalendarCacheSchema2,
+    CalendarCacheStore,
 )
 from tokmo.values.material_pack import canonical_encode
 from tokmo.values.session_gate import Market
-from tokmo.values.toss_market_calendar import CalendarSession, IntegratedHour, KrMarketDay, UsMarketDay
+from tokmo.values.toss_market_calendar import (
+    CalendarSession,
+    IntegratedHour,
+    KrMarketDay,
+    UsMarketDay,
+)
 
-NOW = datetime(2026, 7, 30, 0, 30, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 30, 0, 30, tzinfo=UTC)
 
 
 def test_calendar_cache_typed_roundtrip_half_none_and_per_market_staleness(tmp_path):
     path = tmp_path / "calendar.json"
     store = CalendarCacheStore(path, clock=lambda: NOW)
     session = CalendarSession(
-        datetime(2026, 7, 29, 23, 0, tzinfo=timezone.utc),
-        datetime(2026, 7, 30, 6, 0, tzinfo=timezone.utc),
+        datetime(2026, 7, 29, 23, 0, tzinfo=UTC),
+        datetime(2026, 7, 30, 6, 0, tzinfo=UTC),
     )
     kr = KrMarketDay(date(2026, 7, 30), IntegratedHour(regular_market=None))
     us = UsMarketDay(date(2026, 7, 29), regular_market=session)
@@ -30,16 +35,21 @@ def test_calendar_cache_typed_roundtrip_half_none_and_per_market_staleness(tmp_p
     assert loaded.us.sessions["regularMarket"].start.endswith("Z")
     assert store.is_stale(Market.KR, NOW) is False
     assert store.is_stale(Market.US, NOW) is False
-    boundary = datetime(2026, 7, 30, 14, 30, tzinfo=timezone.utc)
+    boundary = datetime(2026, 7, 30, 14, 30, tzinfo=UTC)
     assert store.is_stale(Market.KR, boundary) is False
     assert store.is_stale(Market.US, boundary) is True
 
     bad = {
-        "schema_version": 1, "updated_at": "2026-07-30T00:30:00Z", "us": None,
+        "schema_version": 1,
+        "updated_at": "2026-07-30T00:30:00Z",
+        "us": None,
         "kr": {
-            "trade_date": "2026-07-30", "regular_start": None,
-            "regular_end": "2026-07-30T06:00:00Z", "source_trade_date": "2026-07-30",
-            "fetched_at": "2026-07-30T00:30:00Z", "schema_version": 1,
+            "trade_date": "2026-07-30",
+            "regular_start": None,
+            "regular_end": "2026-07-30T06:00:00Z",
+            "source_trade_date": "2026-07-30",
+            "fetched_at": "2026-07-30T00:30:00Z",
+            "schema_version": 1,
             "parser_version": "toss-market-calendar-v1",
         },
     }
@@ -50,7 +60,9 @@ def test_calendar_cache_typed_roundtrip_half_none_and_per_market_staleness(tmp_p
     assert path.read_bytes() == original
 
 
-def test_calendar_cache_write_accepts_one_missing_market_and_same_dates_are_noop(tmp_path):
+def test_calendar_cache_write_accepts_one_missing_market_and_same_dates_are_noop(
+    tmp_path,
+):
     path = tmp_path / "calendar.json"
     store = CalendarCacheStore(path, clock=lambda: NOW)
     us = UsMarketDay(date(2026, 7, 29), regular_market=None)
@@ -68,15 +80,24 @@ def test_calendar_cache_write_accepts_one_missing_market_and_same_dates_are_noop
 def test_valid_v1_cache_is_compatible_but_incomplete_and_forces_refresh(tmp_path):
     path = tmp_path / "calendar.json"
     legacy_day = {
-        "trade_date": "2026-07-30", "regular_start": "2026-07-30T00:00:00Z",
+        "trade_date": "2026-07-30",
+        "regular_start": "2026-07-30T00:00:00Z",
         "regular_end": "2026-07-30T06:00:00Z",
-        "source_trade_date": "2026-07-30", "fetched_at": "2026-07-30T00:30:00Z",
-        "schema_version": 1, "parser_version": "toss-market-calendar-v1",
+        "source_trade_date": "2026-07-30",
+        "fetched_at": "2026-07-30T00:30:00Z",
+        "schema_version": 1,
+        "parser_version": "toss-market-calendar-v1",
     }
-    path.write_bytes(canonical_encode({
-        "schema_version": 1, "kr": legacy_day, "us": None,
-        "updated_at": "2026-07-30T00:30:00Z",
-    }))
+    path.write_bytes(
+        canonical_encode(
+            {
+                "schema_version": 1,
+                "kr": legacy_day,
+                "us": None,
+                "updated_at": "2026-07-30T00:30:00Z",
+            }
+        )
+    )
     loaded = CalendarCacheStore(path, clock=lambda: NOW).read()
     assert loaded.schema_version == 2
     assert loaded.kr is None and loaded.us is None

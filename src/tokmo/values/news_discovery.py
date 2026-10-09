@@ -1,8 +1,9 @@
 """Deterministic, transport-free NEWS discovery values."""
-from dataclasses import dataclass
-from enum import Enum
+
 import hashlib
 import json
+from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 
 
@@ -80,7 +81,9 @@ class NewsDiscoveryPolicyV1:
         return hashlib.sha256(raw).hexdigest()
 
 
-def load_public_aliases(path: Path) -> tuple[dict[str, tuple[str, ...]], tuple[str, ...]]:
+def load_public_aliases(
+    path: Path,
+) -> tuple[dict[str, tuple[str, ...]], tuple[str, ...]]:
     value = json.loads(path.read_text(encoding="utf-8"))
     aliases = {key: tuple(items) for key, items in value["aliases"].items()}
     return aliases, tuple(value["suppressed"])

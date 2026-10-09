@@ -1,14 +1,17 @@
 """Private append-only diagnostics for NEWS identity conflicts."""
 
-from datetime import datetime, timedelta
 import hashlib
 import json
 import os
-from pathlib import Path
 import sqlite3
+from datetime import datetime, timedelta
+from pathlib import Path
 
 from tokmo.records.private_sqlite import (
-    MIN_SQLITE_VERSION, connect_private, prepare_private_path, private_creation,
+    MIN_SQLITE_VERSION,
+    connect_private,
+    prepare_private_path,
+    private_creation,
     table_is_strict,
 )
 
@@ -66,7 +69,9 @@ def _ddl_sha256(connection: sqlite3.Connection) -> str:
     rows = connection.execute(
         "SELECT type,name,sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY type,name"
     ).fetchall()
-    encoded = b"".join(b"\0".join(value.encode() for value in row) + b"\n" for row in rows)
+    encoded = b"".join(
+        b"\0".join(value.encode() for value in row) + b"\n" for row in rows
+    )
     return hashlib.sha256(encoded).hexdigest()
 
 
@@ -85,18 +90,29 @@ _EXPECTED_DDL_SHA256 = _expected_ddl_sha256()
 
 def _validate(connection: sqlite3.Connection) -> None:
     try:
-        tables = {row[0] for row in connection.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'")}
-        triggers = {row[0] for row in connection.execute(
-            "SELECT name FROM sqlite_master WHERE type='trigger'")}
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        triggers = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='trigger'"
+            )
+        }
         meta = connection.execute(
             "SELECT schema_id,schema_version,ddl_sha256 FROM schema_meta WHERE singleton=1"
         ).fetchone()
-        if (tables != _TABLES or triggers != {"news_conflicts_no_update", "news_conflicts_no_delete"}
-                or any(not table_is_strict(connection, name) for name in _TABLES)
-                or meta != (_SCHEMA_ID, 1, _EXPECTED_DDL_SHA256)
-                or _ddl_sha256(connection) != _EXPECTED_DDL_SHA256
-                or connection.execute("PRAGMA integrity_check").fetchone() != ("ok",)):
+        if (
+            tables != _TABLES
+            or triggers != {"news_conflicts_no_update", "news_conflicts_no_delete"}
+            or any(not table_is_strict(connection, name) for name in _TABLES)
+            or meta != (_SCHEMA_ID, 1, _EXPECTED_DDL_SHA256)
+            or _ddl_sha256(connection) != _EXPECTED_DDL_SHA256
+            or connection.execute("PRAGMA integrity_check").fetchone() != ("ok",)
+        ):
             raise RuntimeError("schema_mismatch")
     except sqlite3.DatabaseError as error:
         raise RuntimeError("schema_mismatch") from error
@@ -151,22 +167,35 @@ def append_conflict(canonical_path: Path, record: dict) -> str:
         try:
             connection.execute("BEGIN IMMEDIATE")
             columns = (
-                "conflict_id", "observed_at", "expires_at", "connector_id",
-                "target_fingerprint", "match_count", "match_by_article_id",
-                "match_by_url_hash", "match_by_content_hash",
-                "matched_document_fingerprints_json", "changed_fields_json",
-                "old_published_at", "new_published_at",
-                "old_publisher_host_hash", "new_publisher_host_hash",
-                "old_title_fingerprint", "new_title_fingerprint",
-                "incoming_article_id_hash", "incoming_canonical_url_hash",
+                "conflict_id",
+                "observed_at",
+                "expires_at",
+                "connector_id",
+                "target_fingerprint",
+                "match_count",
+                "match_by_article_id",
+                "match_by_url_hash",
+                "match_by_content_hash",
+                "matched_document_fingerprints_json",
+                "changed_fields_json",
+                "old_published_at",
+                "new_published_at",
+                "old_publisher_host_hash",
+                "new_publisher_host_hash",
+                "old_title_fingerprint",
+                "new_title_fingerprint",
+                "incoming_article_id_hash",
+                "incoming_canonical_url_hash",
             )
             intended = tuple(record[name] for name in columns)
             connection.execute(
                 f"INSERT OR IGNORE INTO news_conflicts({','.join(columns)}) "
-                f"VALUES({','.join('?' for _ in columns)})", intended)
+                f"VALUES({','.join('?' for _ in columns)})",
+                intended,
+            )
             stored = connection.execute(
-                f"SELECT {','.join(columns)} FROM news_conflicts "
-                "WHERE conflict_id=?", (record["conflict_id"],)
+                f"SELECT {','.join(columns)} FROM news_conflicts WHERE conflict_id=?",
+                (record["conflict_id"],),
             ).fetchone()
             if stored != intended:
                 raise RuntimeError("audit_row_mismatch")
@@ -201,10 +230,17 @@ def _read_conflicts(canonical_path: Path, *, limit: int = 100) -> list[dict]:
     try:
         _validate(connection)
         connection.row_factory = sqlite3.Row
-        rows = [dict(row) for row in connection.execute(
-            "SELECT * FROM news_conflicts ORDER BY observed_at,conflict_id LIMIT ?", (limit,))]
+        rows = [
+            dict(row)
+            for row in connection.execute(
+                "SELECT * FROM news_conflicts ORDER BY observed_at,conflict_id LIMIT ?",
+                (limit,),
+            )
+        ]
         for row in rows:
-            row["matched_document_fingerprints"] = json.loads(row.pop("matched_document_fingerprints_json"))
+            row["matched_document_fingerprints"] = json.loads(
+                row.pop("matched_document_fingerprints_json")
+            )
             row["changed_fields"] = json.loads(row.pop("changed_fields_json"))
         return rows
     finally:

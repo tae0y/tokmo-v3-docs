@@ -5,6 +5,7 @@ corpus path while writing all receipts and NEWS stores below a private isolated
 root.  It never creates ``news_activation.json``, binds a model/provider, sends
 Telegram, registers a scheduler, or calls the producer outside ``run_pulse_once``.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -12,7 +13,7 @@ import os
 import sqlite3
 from contextlib import closing
 from dataclasses import asdict
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from tokmo.programs.integrated_pulse import run_pulse_once
@@ -44,8 +45,7 @@ def _sidecar_snapshot(path: Path) -> dict:
         sidecar = Path(str(path) + suffix)
         if sidecar.exists():
             stat = sidecar.stat()
-            result[suffix] = {
-                "size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+            result[suffix] = {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
     return result
 
 
@@ -72,33 +72,45 @@ def _metrics(root: Path) -> dict:
     episode_path = root / "stores" / "news_episodes.sqlite3"
     ops_path = root / "ops" / "ops_kernel.sqlite3"
     metrics = {
-        "discovery_runs": 0, "scanned_documents": 0,
-        "discovery_candidates": 0, "candidate_states": {},
-        "classifier_calls": 0, "telegram_news_outbox": 0,
+        "discovery_runs": 0,
+        "scanned_documents": 0,
+        "discovery_candidates": 0,
+        "candidate_states": {},
+        "classifier_calls": 0,
+        "telegram_news_outbox": 0,
         "news_event_outbox": 0,
     }
     if episode_path.exists():
         with closing(sqlite3.connect(episode_path)) as connection:
             metrics["discovery_runs"] = _count(
-                connection, "SELECT COUNT(*) FROM discovery_runs")
+                connection, "SELECT COUNT(*) FROM discovery_runs"
+            )
             metrics["scanned_documents"] = _count(
-                connection, "SELECT COALESCE(SUM(scanned_documents),0)"
-                            " FROM discovery_runs")
+                connection,
+                "SELECT COALESCE(SUM(scanned_documents),0) FROM discovery_runs",
+            )
             metrics["discovery_candidates"] = _count(
-                connection, "SELECT COUNT(*) FROM discovery_candidates")
+                connection, "SELECT COUNT(*) FROM discovery_candidates"
+            )
             metrics["classifier_calls"] = _count(
-                connection, "SELECT COUNT(*) FROM classifier_calls")
-            metrics["candidate_states"] = dict(connection.execute(
-                "SELECT state,COUNT(*) FROM discovery_candidates GROUP BY state"
-            ).fetchall())
+                connection, "SELECT COUNT(*) FROM classifier_calls"
+            )
+            metrics["candidate_states"] = dict(
+                connection.execute(
+                    "SELECT state,COUNT(*) FROM discovery_candidates GROUP BY state"
+                ).fetchall()
+            )
     if ops_path.exists():
         with closing(sqlite3.connect(ops_path)) as connection:
             metrics["telegram_news_outbox"] = _count(
-                connection, "SELECT COUNT(*) FROM alert_outbox"
-                            " WHERE channel='TELEGRAM' AND origin LIKE 'NEWS%'")
+                connection,
+                "SELECT COUNT(*) FROM alert_outbox"
+                " WHERE channel='TELEGRAM' AND origin LIKE 'NEWS%'",
+            )
             metrics["news_event_outbox"] = _count(
-                connection, "SELECT COUNT(*) FROM alert_outbox"
-                            " WHERE origin='NEWS_EVENT'")
+                connection,
+                "SELECT COUNT(*) FROM alert_outbox WHERE origin='NEWS_EVENT'",
+            )
     return metrics
 
 
@@ -108,17 +120,21 @@ def _isolated(root: Path, corpus: Path) -> bool:
     return root != corpus.parent and root not in corpus.parents
 
 
-def run_news_g2_shadow_oneshot(*, root, corpus_path, cutoff,
-                               observed_now_utc) -> dict:
+def run_news_g2_shadow_oneshot(*, root, corpus_path, cutoff, observed_now_utc) -> dict:
     """Run exactly one aligned Pulse slot with NEWS SHADOW producer enabled."""
     root = Path(root)
     corpus_path = Path(corpus_path)
-    if (not isinstance(observed_now_utc, datetime)
-            or observed_now_utc.tzinfo is None
-            or observed_now_utc.utcoffset() is None):
+    if (
+        not isinstance(observed_now_utc, datetime)
+        or observed_now_utc.tzinfo is None
+        or observed_now_utc.utcoffset() is None
+    ):
         raise ValueError("observed_now_utc must be aware")
-    if (not isinstance(cutoff, datetime) or cutoff.tzinfo is None
-            or cutoff.utcoffset() is None):
+    if (
+        not isinstance(cutoff, datetime)
+        or cutoff.tzinfo is None
+        or cutoff.utcoffset() is None
+    ):
         raise ValueError("cutoff must be aware")
     if not corpus_path.is_file() or not _isolated(root, corpus_path):
         raise ValueError("G2 root must be isolated from the corpus")
@@ -129,48 +145,63 @@ def run_news_g2_shadow_oneshot(*, root, corpus_path, cutoff,
     sidecars_before = _sidecar_snapshot(corpus_path)
     snapshot_path = _freeze_corpus(corpus_path, root)
     snapshot = _source_snapshot(snapshot_path)
-    slot_epoch = (int(observed_now_utc.timestamp())
-                  // PRODUCER_INTERVAL_SECONDS * PRODUCER_INTERVAL_SECONDS)
-    scheduled = datetime.fromtimestamp(slot_epoch, timezone.utc)
+    slot_epoch = (
+        int(observed_now_utc.timestamp())
+        // PRODUCER_INTERVAL_SECONDS
+        * PRODUCER_INTERVAL_SECONDS
+    )
+    scheduled = datetime.fromtimestamp(slot_epoch, UTC)
     observed = scheduled
-    window_from = max(
-        scheduled - timedelta(hours=DISCOVERY_WINDOW_HOURS), cutoff)
+    window_from = max(scheduled - timedelta(hours=DISCOVERY_WINDOW_HOURS), cutoff)
     read = read_discovery_documents_v1(
-        snapshot_path, window_from=window_from,
-        max_rows=DISCOVERY_MAX_DOCUMENTS)
+        snapshot_path, window_from=window_from, max_rows=DISCOVERY_MAX_DOCUMENTS
+    )
     if read.status != "OK":
         raise RuntimeError(f"G2 corpus read failed: {read.status}")
     documents = read.documents
     audit = discover_topics(documents, holdings=())
     gate = DialogueActivationV1(True, cutoff, "g2-news-shadow-oneshot")
-    ops = OpsKernelStore(root / "ops" / "ops_kernel.sqlite3",
-                         stable_phase_ids=frozenset())
+    ops = OpsKernelStore(
+        root / "ops" / "ops_kernel.sqlite3", stable_phase_ids=frozenset()
+    )
     deps = build_pulse_production_deps(
-        root=root, clock=lambda: observed,
+        root=root,
+        clock=lambda: observed,
         watchlist_symbols={Market.KR: frozenset(), Market.US: frozenset()},
-        dialogue_cutoff=cutoff, news_ops_kernel=ops,
-        news_gate=(gate, "SHADOW"), news_documents_path=snapshot_path,
-        quotes_provider_enabled=False, execution_provider_enabled=False,
-        conditional_provider_enabled=False, dialogue_activation_enabled=False)
+        dialogue_cutoff=cutoff,
+        news_ops_kernel=ops,
+        news_gate=(gate, "SHADOW"),
+        news_documents_path=snapshot_path,
+        quotes_provider_enabled=False,
+        execution_provider_enabled=False,
+        conditional_provider_enabled=False,
+        dialogue_activation_enabled=False,
+    )
     tick = run_pulse_once(
-        root=root, policy_version="pulse-60s-v1",
-        scheduled_for_utc=scheduled, observed_now_utc=observed, deps=deps)
+        root=root,
+        policy_version="pulse-60s-v1",
+        scheduled_for_utc=scheduled,
+        observed_now_utc=observed,
+        deps=deps,
+    )
     source_after = _source_snapshot(corpus_path)
     sidecars_after = _sidecar_snapshot(corpus_path)
     metrics = _metrics(root)
-    audit_matches_production = (
-        metrics["scanned_documents"] == len(documents)
-        and metrics["discovery_candidates"] == len(audit.candidates))
+    audit_matches_production = metrics["scanned_documents"] == len(
+        documents
+    ) and metrics["discovery_candidates"] == len(audit.candidates)
     return {
-        "status": tick.outcome, "reason": tick.reason,
+        "status": tick.outcome,
+        "reason": tick.reason,
         "scheduled_for_utc": scheduled.isoformat(),
         "stages": [dict(stage) for stage in tick.stages],
         "wire_counts": dict(tick.wire_counts),
         "source": source_before,
         "source_sidecars_before": sidecars_before,
         "source_sidecars_after": sidecars_after,
-        "source_unchanged": (source_before == source_after
-                             and sidecars_before == sidecars_after),
+        "source_unchanged": (
+            source_before == source_after and sidecars_before == sidecars_after
+        ),
         "snapshot": {**snapshot, "path": str(snapshot_path)},
         "metrics": metrics,
         "actual_miss_evidence": {
@@ -181,8 +212,7 @@ def run_news_g2_shadow_oneshot(*, root, corpus_path, cutoff,
             "syndicated_documents": audit.syndicated_documents,
             "dropped_over_cap": audit.dropped_over_cap,
             "surfaced_candidates": [asdict(item) for item in audit.candidates],
-            "dropped_candidates": [
-                asdict(item) for item in audit.dropped_candidates],
+            "dropped_candidates": [asdict(item) for item in audit.dropped_candidates],
             "decisions": [asdict(item) for item in audit.decisions],
             "matches_production": audit_matches_production,
         },

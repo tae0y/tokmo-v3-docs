@@ -2,27 +2,27 @@
 
 import dataclasses
 import os
-import stat
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
 import sqlite3
+import stat
 import time
+from datetime import UTC, datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
-from tokmo.records.holdings_persistence import authorize_user_request
 from tokmo.records.holdings_persistence import (
     MIGRATION_CRITERIA_VERSION,
     MIGRATION_PROGRAM_TOKEN,
     HoldingsPersistencePermitV1,
     PurposeKind,
+    authorize_user_request,
 )
 from tokmo.records.holdings_snapshots import (
     HoldingsSnapshotReadError,
     HoldingsSnapshotStore,
-    snapshot_content_hash,
     canonical_snapshot_bytes,
     legacy_snapshot_id,
+    snapshot_content_hash,
 )
 from tokmo.records.private_sqlite import (
     acquire_immediate_transaction,
@@ -37,7 +37,7 @@ from tokmo.values import (
     TossHoldingFact,
 )
 
-NOW = datetime(2026, 7, 28, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 28, tzinfo=UTC)
 UUID4_HEX = "16fd27068baf433b82eb8c7fada847da"
 
 
@@ -48,23 +48,34 @@ def value(snapshot_id=UUID4_HEX):
         captured_at=NOW,
         discovered_account_count=2,
         accounts=(
-            HoldingsSnapshotAccount(1, (TossHoldingFact(
-                "AAPL", "10", "150.5", "averagePurchasePrice",
-                "USD", "US", "market", "Apple Inc.", "STOCK"),)),
+            HoldingsSnapshotAccount(
+                1,
+                (
+                    TossHoldingFact(
+                        "AAPL",
+                        "10",
+                        "150.5",
+                        "averagePurchasePrice",
+                        "USD",
+                        "US",
+                        "market",
+                        "Apple Inc.",
+                        "STOCK",
+                    ),
+                ),
+            ),
             HoldingsSnapshotAccount(2, ()),
         ),
         content_hash="0" * 64,
     )
-    return dataclasses.replace(
-        result, content_hash=snapshot_content_hash(result))
+    return dataclasses.replace(result, content_hash=snapshot_content_hash(result))
 
 
 def store_with_row(tmp_path):
     path = tmp_path / "toss" / "holdings_snapshots.sqlite3"
     store = HoldingsSnapshotStore(path, clock=lambda: NOW)
     current = value()
-    permit = authorize_user_request(
-        snapshot_id=current.snapshot_id, clock=lambda: NOW)
+    permit = authorize_user_request(snapshot_id=current.snapshot_id, clock=lambda: NOW)
     assert store.append(current, permit).status == "SAVED"
     return path, store, current
 
@@ -86,8 +97,7 @@ def test_schema_mismatch_foreign_well_formed(tmp_path):
 def test_semantic_tamper_is_store_corrupt(tmp_path):
     path, store, current = store_with_row(tmp_path)
     connection = sqlite3.connect(path)
-    connection.execute(
-        "UPDATE holdings_snapshot_items SET quantity='11'")
+    connection.execute("UPDATE holdings_snapshot_items SET quantity='11'")
     connection.commit()
     connection.close()
 
@@ -101,7 +111,8 @@ def test_each_persisted_timestamp_tamper_is_store_corrupt(tmp_path, column):
     path, store, current = store_with_row(tmp_path)
     connection = sqlite3.connect(path)
     connection.execute(
-        f"UPDATE holdings_snapshots SET {column}='2026-07-28T00:00:00+00:00'")
+        f"UPDATE holdings_snapshots SET {column}='2026-07-28T00:00:00+00:00'"
+    )
     connection.commit()
     connection.close()
 
@@ -122,7 +133,8 @@ def test_analyze_extra_internal_table_is_schema_mismatch(tmp_path):
 
 
 def test_table_xinfo_manifest_detects_introspection_only_mutation(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     import tokmo.records.holdings_snapshots as module
 
@@ -144,18 +156,23 @@ def test_table_xinfo_manifest_detects_introspection_only_mutation(
             return getattr(self.connection, name)
 
     monkeypatch.setattr(
-        module, "connect_private",
-        lambda path, **kwargs: MutatedXinfo(real_connect(path, **kwargs)))
+        module,
+        "connect_private",
+        lambda path, **kwargs: MutatedXinfo(real_connect(path, **kwargs)),
+    )
     with pytest.raises(HoldingsSnapshotReadError) as raised:
         store.read_latest()
     assert raised.value.reason == "schema_mismatch"
 
 
-@pytest.mark.parametrize("statement", [
-    "UPDATE holdings_snapshots SET content_hash='" + "1" * 64 + "'",
-    "DELETE FROM holdings_snapshot_accounts WHERE account_ordinal=2",
-    "DELETE FROM holdings_snapshot_items",
-])
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "UPDATE holdings_snapshots SET content_hash='" + "1" * 64 + "'",
+        "DELETE FROM holdings_snapshot_accounts WHERE account_ordinal=2",
+        "DELETE FROM holdings_snapshot_items",
+    ],
+)
 def test_tampered_relational_content_is_store_corrupt(tmp_path, statement):
     path, store, current = store_with_row(tmp_path)
     connection = sqlite3.connect(path)
@@ -174,8 +191,8 @@ def test_foreign_key_check_failure_is_store_corrupt(tmp_path):
     connection = sqlite3.connect(path)
     connection.execute("PRAGMA foreign_keys=OFF")
     connection.execute(
-        "INSERT INTO holdings_snapshot_accounts VALUES (?, 3)",
-        ("f" * 64,))
+        "INSERT INTO holdings_snapshot_accounts VALUES (?, 3)", ("f" * 64,)
+    )
     connection.commit()
     connection.close()
 
@@ -201,8 +218,9 @@ def test_read_leaves_no_journal_or_mtime_change(tmp_path):
     assert store.read_snapshot(current.snapshot_id) == current
     after = path.stat().st_mtime_ns
     assert after == before
-    assert not any(Path(f"{path}{suffix}").exists()
-                   for suffix in ("-journal", "-wal", "-shm"))
+    assert not any(
+        Path(f"{path}{suffix}").exists() for suffix in ("-journal", "-wal", "-shm")
+    )
 
 
 def test_unsafe_path_symlink_rejected(tmp_path):
@@ -210,10 +228,8 @@ def test_unsafe_path_symlink_rejected(tmp_path):
     other = tmp_path / "other.sqlite3"
     path.rename(other)
     path.symlink_to(other)
-    permit = authorize_user_request(
-        snapshot_id=current.snapshot_id, clock=lambda: NOW)
-    receipt = HoldingsSnapshotStore(
-        path, clock=lambda: NOW).append(current, permit)
+    permit = authorize_user_request(snapshot_id=current.snapshot_id, clock=lambda: NOW)
+    receipt = HoldingsSnapshotStore(path, clock=lambda: NOW).append(current, permit)
     assert receipt.status == "FAILED"
     assert receipt.reason == "store_write_failed"
 
@@ -224,16 +240,13 @@ def test_dangling_symlink_and_unsafe_modes_rejected(tmp_path):
     path = parent / "holdings_snapshots.sqlite3"
     path.symlink_to(parent / "missing.sqlite3")
     current = value()
-    permit = authorize_user_request(
-        snapshot_id=current.snapshot_id, clock=lambda: NOW)
-    receipt = HoldingsSnapshotStore(path, clock=lambda: NOW).append(
-        current, permit)
+    permit = authorize_user_request(snapshot_id=current.snapshot_id, clock=lambda: NOW)
+    receipt = HoldingsSnapshotStore(path, clock=lambda: NOW).append(current, permit)
     assert receipt.reason == "store_write_failed"
     path.unlink()
     path.write_bytes(b"")
     os.chmod(path, 0o644)
-    receipt = HoldingsSnapshotStore(path, clock=lambda: NOW).append(
-        current, permit)
+    receipt = HoldingsSnapshotStore(path, clock=lambda: NOW).append(current, permit)
     assert receipt.reason == "store_write_failed"
 
 
@@ -258,8 +271,11 @@ def test_dir_fd_relative_open_works(tmp_path, monkeypatch):
 
     monkeypatch.setattr("tokmo.records.private_sqlite.os.open", recording_open)
     assert not prepare_private_path(path).unsafe
-    assert any(candidate == path.name and dir_fd is not None
-               and flags & os.O_NOFOLLOW for candidate, flags, dir_fd in calls)
+    assert any(
+        candidate == path.name and dir_fd is not None and flags & os.O_NOFOLLOW
+        for candidate, flags, dir_fd in calls
+    )
+
 
 def test_fifo_and_unsafe_parent_mode_rejected(tmp_path):
     parent = tmp_path / "toss"
@@ -267,14 +283,17 @@ def test_fifo_and_unsafe_parent_mode_rejected(tmp_path):
     path = parent / "holdings_snapshots.sqlite3"
     os.mkfifo(path, mode=0o600)
     current = value()
-    permit = authorize_user_request(
-        snapshot_id=current.snapshot_id, clock=lambda: NOW)
-    assert HoldingsSnapshotStore(path, clock=lambda: NOW).append(
-        current, permit).reason == "store_write_failed"
+    permit = authorize_user_request(snapshot_id=current.snapshot_id, clock=lambda: NOW)
+    assert (
+        HoldingsSnapshotStore(path, clock=lambda: NOW).append(current, permit).reason
+        == "store_write_failed"
+    )
     path.unlink()
     os.chmod(parent, 0o755)
-    assert HoldingsSnapshotStore(path, clock=lambda: NOW).append(
-        current, permit).reason == "store_write_failed"
+    assert (
+        HoldingsSnapshotStore(path, clock=lambda: NOW).append(current, permit).reason
+        == "store_write_failed"
+    )
 
 
 def test_old_sqlite_version_rejected(tmp_path, monkeypatch):
@@ -285,8 +304,10 @@ def test_old_sqlite_version_rejected(tmp_path, monkeypatch):
     receipt = HoldingsSnapshotStore(
         tmp_path / "toss" / "holdings_snapshots.sqlite3",
         clock=lambda: NOW,
-    ).append(current, authorize_user_request(
-        snapshot_id=current.snapshot_id, clock=lambda: NOW))
+    ).append(
+        current,
+        authorize_user_request(snapshot_id=current.snapshot_id, clock=lambda: NOW),
+    )
     assert receipt.status == "FAILED"
     assert receipt.reason == "store_write_failed"
 
@@ -310,8 +331,8 @@ def test_invalid_runtime_uuid_and_fabricated_pairing_rejected(tmp_path):
 def test_canonical_utc_different_tzinfo_same_bytes():
     first = value()
     second = dataclasses.replace(
-        first, captured_at=first.captured_at.astimezone(
-            timezone(timedelta(hours=9))))
+        first, captured_at=first.captured_at.astimezone(timezone(timedelta(hours=9)))
+    )
     assert canonical_snapshot_bytes(first) == canonical_snapshot_bytes(second)
 
 
@@ -320,8 +341,10 @@ def test_closed_redaction_surfaces_and_account_repr(tmp_path):
     receipt = HoldingsSnapshotStore(
         tmp_path / "toss" / "holdings_snapshots.sqlite3",
         clock=lambda: NOW,
-    ).append(current, authorize_user_request(
-        snapshot_id=current.snapshot_id, clock=lambda: NOW))
+    ).append(
+        current,
+        authorize_user_request(snapshot_id=current.snapshot_id, clock=lambda: NOW),
+    )
     rendered = repr(receipt)
     assert current.snapshot_id not in rendered
     assert current.content_hash not in rendered
@@ -354,18 +377,18 @@ def test_private_journal_owner_only_and_sidecar_closure(tmp_path):
     try:
         acquire_immediate_transaction(connection)
         connection.execute(
-            "UPDATE holdings_snapshots SET stored_at=? "
-            "WHERE snapshot_id=?",
-            ("2026-07-28T00:00:01.000000+00:00", current.snapshot_id))
+            "UPDATE holdings_snapshots SET stored_at=? WHERE snapshot_id=?",
+            ("2026-07-28T00:00:01.000000+00:00", current.snapshot_id),
+        )
         sidecars = assert_private_sidecars_while_open(path)
         assert sidecars
-        assert all(stat.S_IMODE(item.stat().st_mode) == 0o600
-                   for item in sidecars)
+        assert all(stat.S_IMODE(item.stat().st_mode) == 0o600 for item in sidecars)
         connection.execute("COMMIT")
     finally:
         connection.close()
-    assert not any(Path(f"{path}{suffix}").exists()
-                   for suffix in ("-journal", "-wal", "-shm"))
+    assert not any(
+        Path(f"{path}{suffix}").exists() for suffix in ("-journal", "-wal", "-shm")
+    )
 
 
 def test_legacy_digest_admission_and_read_back(tmp_path):
@@ -380,8 +403,8 @@ def test_legacy_digest_admission_and_read_back(tmp_path):
         authorized_at=NOW,
     )
     store = HoldingsSnapshotStore(
-        tmp_path / "toss" / "holdings_snapshots.sqlite3",
-        clock=lambda: NOW)
+        tmp_path / "toss" / "holdings_snapshots.sqlite3", clock=lambda: NOW
+    )
     assert store.import_legacy(legacy, permit).status == "SAVED"
     assert store.read_snapshot(digest) == legacy
 
@@ -390,8 +413,7 @@ def test_injected_commit_failure_zero_partial(tmp_path, monkeypatch):
     import tokmo.records.holdings_snapshots as module
 
     path, store, first = store_with_row(tmp_path)
-    second = dataclasses.replace(
-        first, snapshot_id="a6e4c9a06b1743188cb2dd8e5a06a3d4")
+    second = dataclasses.replace(first, snapshot_id="a6e4c9a06b1743188cb2dd8e5a06a3d4")
     real_connect = module.connect_private
 
     class FailingCommit:
@@ -407,10 +429,14 @@ def test_injected_commit_failure_zero_partial(tmp_path, monkeypatch):
             return getattr(self.connection, name)
 
     monkeypatch.setattr(
-        module, "connect_private",
-        lambda path, **kwargs: FailingCommit(real_connect(path, **kwargs)))
-    receipt = store.append(second, authorize_user_request(
-        snapshot_id=second.snapshot_id, clock=lambda: NOW))
+        module,
+        "connect_private",
+        lambda path, **kwargs: FailingCommit(real_connect(path, **kwargs)),
+    )
+    receipt = store.append(
+        second,
+        authorize_user_request(snapshot_id=second.snapshot_id, clock=lambda: NOW),
+    )
     assert receipt.status == "FAILED"
     assert receipt.reason == "store_write_failed"
 
@@ -422,13 +448,13 @@ def test_injected_commit_failure_zero_partial(tmp_path, monkeypatch):
 
 
 def test_commit_and_rollback_failure_returns_closed_receipt_zero_partial(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     import tokmo.records.holdings_snapshots as module
 
     _, store, first = store_with_row(tmp_path)
-    second = dataclasses.replace(
-        first, snapshot_id="a6e4c9a06b1743188cb2dd8e5a06a3d4")
+    second = dataclasses.replace(first, snapshot_id="a6e4c9a06b1743188cb2dd8e5a06a3d4")
     real_connect = module.connect_private
 
     class DoubleFailure:
@@ -444,10 +470,14 @@ def test_commit_and_rollback_failure_returns_closed_receipt_zero_partial(
             return getattr(self.connection, name)
 
     monkeypatch.setattr(
-        module, "connect_private",
-        lambda path, **kwargs: DoubleFailure(real_connect(path, **kwargs)))
-    receipt = store.append(second, authorize_user_request(
-        snapshot_id=second.snapshot_id, clock=lambda: NOW))
+        module,
+        "connect_private",
+        lambda path, **kwargs: DoubleFailure(real_connect(path, **kwargs)),
+    )
+    receipt = store.append(
+        second,
+        authorize_user_request(snapshot_id=second.snapshot_id, clock=lambda: NOW),
+    )
     assert receipt.status == "FAILED"
     assert receipt.reason == "store_write_failed"
 
@@ -462,21 +492,26 @@ def test_fsync_failure_returns_closed_receipt_and_zero_partial(tmp_path, monkeyp
 
     current = value()
     monkeypatch.setattr(
-        module, "fsync_directory",
-        lambda path: (_ for _ in ()).throw(OSError("injected fsync failure")))
+        module,
+        "fsync_directory",
+        lambda path: (_ for _ in ()).throw(OSError("injected fsync failure")),
+    )
     path = tmp_path / "toss" / "holdings_snapshots.sqlite3"
     receipt = HoldingsSnapshotStore(
         path,
         clock=lambda: NOW,
-    ).append(current, authorize_user_request(
-        snapshot_id=current.snapshot_id, clock=lambda: NOW))
+    ).append(
+        current,
+        authorize_user_request(snapshot_id=current.snapshot_id, clock=lambda: NOW),
+    )
     assert receipt.status == "FAILED"
     assert receipt.reason == "store_write_failed"
     assert not path.exists()
 
 
 def test_precreated_fsync_failure_retains_caller_owned_artifact(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     import tokmo.records.holdings_snapshots as module
 
@@ -486,28 +521,33 @@ def test_precreated_fsync_failure_retains_caller_owned_artifact(
     fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
     os.close(fd)
     monkeypatch.setattr(
-        module, "fsync_directory",
-        lambda _path: (_ for _ in ()).throw(OSError("injected")))
+        module,
+        "fsync_directory",
+        lambda _path: (_ for _ in ()).throw(OSError("injected")),
+    )
     current = value()
     receipt = HoldingsSnapshotStore(
-        path, clock=lambda: NOW, initialize_precreated=True,
-    ).append(current, authorize_user_request(
-        snapshot_id=current.snapshot_id, clock=lambda: NOW))
-    assert (receipt.status, receipt.reason) == (
-        "FAILED", "store_write_failed")
+        path,
+        clock=lambda: NOW,
+        initialize_precreated=True,
+    ).append(
+        current,
+        authorize_user_request(snapshot_id=current.snapshot_id, clock=lambda: NOW),
+    )
+    assert (receipt.status, receipt.reason) == ("FAILED", "store_write_failed")
     assert path.exists()
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert not Path(f"{path}-journal").exists()
 
 
 def test_commit_failure_and_close_failure_stay_closed_zero_partial(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     import tokmo.records.holdings_snapshots as module
 
     _, store, first = store_with_row(tmp_path)
-    second = dataclasses.replace(
-        first, snapshot_id="a6e4c9a06b1743188cb2dd8e5a06a3d4")
+    second = dataclasses.replace(first, snapshot_id="a6e4c9a06b1743188cb2dd8e5a06a3d4")
     real_connect = module.connect_private
 
     class CommitAndCloseFailure:
@@ -527,11 +567,14 @@ def test_commit_failure_and_close_failure_stay_closed_zero_partial(
             return getattr(self.connection, name)
 
     monkeypatch.setattr(
-        module, "connect_private",
-        lambda path, **kwargs: CommitAndCloseFailure(
-            real_connect(path, **kwargs)))
-    receipt = store.append(second, authorize_user_request(
-        snapshot_id=second.snapshot_id, clock=lambda: NOW))
+        module,
+        "connect_private",
+        lambda path, **kwargs: CommitAndCloseFailure(real_connect(path, **kwargs)),
+    )
+    receipt = store.append(
+        second,
+        authorize_user_request(snapshot_id=second.snapshot_id, clock=lambda: NOW),
+    )
     assert receipt.status == "FAILED"
     assert receipt.reason == "store_write_failed"
 
@@ -545,8 +588,7 @@ def test_injected_pre_commit_failure_zero_partial(tmp_path, monkeypatch):
     import tokmo.records.holdings_snapshots as module
 
     path, store, first = store_with_row(tmp_path)
-    second = dataclasses.replace(
-        first, snapshot_id="a6e4c9a06b1743188cb2dd8e5a06a3d4")
+    second = dataclasses.replace(first, snapshot_id="a6e4c9a06b1743188cb2dd8e5a06a3d4")
     real_connect = module.connect_private
 
     class FailingInsert:
@@ -562,10 +604,14 @@ def test_injected_pre_commit_failure_zero_partial(tmp_path, monkeypatch):
             return getattr(self.connection, name)
 
     monkeypatch.setattr(
-        module, "connect_private",
-        lambda path, **kwargs: FailingInsert(real_connect(path, **kwargs)))
-    receipt = store.append(second, authorize_user_request(
-        snapshot_id=second.snapshot_id, clock=lambda: NOW))
+        module,
+        "connect_private",
+        lambda path, **kwargs: FailingInsert(real_connect(path, **kwargs)),
+    )
+    receipt = store.append(
+        second,
+        authorize_user_request(snapshot_id=second.snapshot_id, clock=lambda: NOW),
+    )
     assert receipt.reason == "store_write_failed"
 
     monkeypatch.setattr(module, "connect_private", real_connect)
@@ -579,8 +625,7 @@ def test_path_swap_detected_write_path_has_zero_partial(tmp_path, monkeypatch):
     import tokmo.records.holdings_snapshots as module
 
     _, store, first = store_with_row(tmp_path)
-    second = dataclasses.replace(
-        first, snapshot_id="a6e4c9a06b1743188cb2dd8e5a06a3d4")
+    second = dataclasses.replace(first, snapshot_id="a6e4c9a06b1743188cb2dd8e5a06a3d4")
     real_identity = module.path_identity
     calls = 0
 
@@ -591,8 +636,10 @@ def test_path_swap_detected_write_path_has_zero_partial(tmp_path, monkeypatch):
         return (device, inode + 1) if calls == 2 else (device, inode)
 
     monkeypatch.setattr(module, "path_identity", swapped_after_commit)
-    receipt = store.append(second, authorize_user_request(
-        snapshot_id=second.snapshot_id, clock=lambda: NOW))
+    receipt = store.append(
+        second,
+        authorize_user_request(snapshot_id=second.snapshot_id, clock=lambda: NOW),
+    )
     assert receipt.status == "FAILED"
     assert receipt.reason == "store_write_failed"
 
@@ -603,22 +650,28 @@ def test_path_swap_detected_write_path_has_zero_partial(tmp_path, monkeypatch):
     assert store.read_snapshot(first.snapshot_id) == first
 
 
-@pytest.mark.parametrize("mutation,reason", [
-    ("CREATE TABLE unexpected(value TEXT) STRICT", "schema_mismatch"),
-    ("UPDATE holdings_snapshot_items SET quantity='11'", "store_corrupt"),
-])
+@pytest.mark.parametrize(
+    "mutation,reason",
+    [
+        ("CREATE TABLE unexpected(value TEXT) STRICT", "schema_mismatch"),
+        ("UPDATE holdings_snapshot_items SET quantity='11'", "store_corrupt"),
+    ],
+)
 def test_append_existing_invalid_store_returns_closed_reason(
-    tmp_path, mutation, reason,
+    tmp_path,
+    mutation,
+    reason,
 ):
     path, store, first = store_with_row(tmp_path)
     connection = sqlite3.connect(path)
     connection.execute(mutation)
     connection.commit()
     connection.close()
-    second = dataclasses.replace(
-        first, snapshot_id="a6e4c9a06b1743188cb2dd8e5a06a3d4")
-    receipt = store.append(second, authorize_user_request(
-        snapshot_id=second.snapshot_id, clock=lambda: NOW))
+    second = dataclasses.replace(first, snapshot_id="a6e4c9a06b1743188cb2dd8e5a06a3d4")
+    receipt = store.append(
+        second,
+        authorize_user_request(snapshot_id=second.snapshot_id, clock=lambda: NOW),
+    )
     assert receipt.status == "FAILED"
     assert receipt.reason == reason
 
@@ -646,9 +699,10 @@ def test_quick_check_failure_is_store_corrupt(tmp_path, monkeypatch):
             return getattr(self.connection, name)
 
     monkeypatch.setattr(
-        module, "connect_private",
-        lambda path, **kwargs: FailedQuickCheck(
-            real_connect(path, **kwargs)))
+        module,
+        "connect_private",
+        lambda path, **kwargs: FailedQuickCheck(real_connect(path, **kwargs)),
+    )
     with pytest.raises(HoldingsSnapshotReadError) as raised:
         store.read_snapshot(current.snapshot_id)
     assert raised.value.reason == "store_corrupt"
@@ -656,14 +710,15 @@ def test_quick_check_failure_is_store_corrupt(tmp_path, monkeypatch):
 
 def test_bounded_database_lock(tmp_path):
     path, store, first = store_with_row(tmp_path)
-    second = dataclasses.replace(
-        first, snapshot_id="a6e4c9a06b1743188cb2dd8e5a06a3d4")
+    second = dataclasses.replace(first, snapshot_id="a6e4c9a06b1743188cb2dd8e5a06a3d4")
     locker = sqlite3.connect(path, isolation_level=None)
     locker.execute("BEGIN IMMEDIATE")
     started = time.monotonic()
     try:
-        receipt = store.append(second, authorize_user_request(
-            snapshot_id=second.snapshot_id, clock=lambda: NOW))
+        receipt = store.append(
+            second,
+            authorize_user_request(snapshot_id=second.snapshot_id, clock=lambda: NOW),
+        )
     finally:
         locker.execute("ROLLBACK")
         locker.close()
@@ -702,7 +757,8 @@ def test_immediate_transaction_acquisition_times_out_without_transaction_and_res
     try:
         with pytest.raises(sqlite3.OperationalError) as raised:
             acquire_immediate_transaction(
-                connection, timeout_seconds=0.05, poll_interval=0.01)
+                connection, timeout_seconds=0.05, poll_interval=0.01
+            )
         elapsed = time.monotonic() - started
         assert sqlite_locked(raised.value)
         assert 0.04 <= elapsed <= 0.15
@@ -736,7 +792,9 @@ def test_begin_success_after_deadline_rolls_back_and_restores_timeout(monkeypatc
     with pytest.raises(sqlite3.OperationalError):
         acquire_immediate_transaction(connection, timeout_seconds=1.0)
     assert connection.commands == [
-        "PRAGMA busy_timeout=0", "BEGIN IMMEDIATE", "ROLLBACK",
+        "PRAGMA busy_timeout=0",
+        "BEGIN IMMEDIATE",
+        "ROLLBACK",
         "PRAGMA busy_timeout=1000",
     ]
     assert not connection.in_transaction

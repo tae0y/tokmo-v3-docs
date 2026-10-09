@@ -1,8 +1,8 @@
 """Bounded atomic replacement for mutable private JSON files."""
 
 import os
-from pathlib import Path
 import stat
+from pathlib import Path
 
 from tokmo.records.durability import fsync_directory
 

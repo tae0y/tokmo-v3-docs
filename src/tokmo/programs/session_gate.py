@@ -10,7 +10,12 @@ from tokmo.values.session_gate import (
     SessionVerdict,
     judge_sessions,
 )
-from tokmo.values.toss_market_calendar import CalendarSession, IntegratedHour, KrMarketDay, UsMarketDay
+from tokmo.values.toss_market_calendar import (
+    CalendarSession,
+    IntegratedHour,
+    KrMarketDay,
+    UsMarketDay,
+)
 
 B_C_D_READ_ONLY_OWNER = frozenset({"B", "C", "D"})
 
@@ -65,13 +70,20 @@ def _days_from_cache(cache):
 def _stale(day, market, now):
     if day is None:
         return True
-    return date.fromisoformat(day.trade_date) != now.astimezone(
-        ZoneInfo(MARKET_TIMEZONE[market])
-    ).date()
+    return (
+        date.fromisoformat(day.trade_date)
+        != now.astimezone(ZoneInfo(MARKET_TIMEZONE[market])).date()
+    )
 
 
-def run_session_gate(*, kr_calendar_provider, us_calendar_provider,
-                     cache_read, cache_write, now: datetime) -> SessionGateResult:
+def run_session_gate(
+    *,
+    kr_calendar_provider,
+    us_calendar_provider,
+    cache_read,
+    cache_write,
+    now: datetime,
+) -> SessionGateResult:
     try:
         cache = cache_read()
     except Exception:
@@ -90,7 +102,9 @@ def run_session_gate(*, kr_calendar_provider, us_calendar_provider,
             return SessionGateResult(now, verdicts, False, False)
         cache_write(kr, us)
         verdicts = judge_sessions(kr, us, now)
-        return SessionGateResult(now, verdicts, any(item.open for item in verdicts), True)
+        return SessionGateResult(
+            now, verdicts, any(item.open for item in verdicts), True
+        )
 
     kr_stale = _stale(cache.kr, Market.KR, now)
     us_stale = _stale(cache.us, Market.US, now)
@@ -99,12 +113,16 @@ def run_session_gate(*, kr_calendar_provider, us_calendar_provider,
         judged = judge_sessions(kr, us, now)
         verdicts = tuple(
             SessionVerdict(item.market, False, "stale_cache", None)
-            if ((item.market is Market.KR and kr_stale)
-                or (item.market is Market.US and us_stale))
+            if (
+                (item.market is Market.KR and kr_stale)
+                or (item.market is Market.US and us_stale)
+            )
             else item
             for item in judged
         )
-        return SessionGateResult(now, verdicts, any(item.open for item in verdicts), False)
+        return SessionGateResult(
+            now, verdicts, any(item.open for item in verdicts), False
+        )
 
     kr, us = _days_from_cache(cache)
     if kr_stale or us_stale:
@@ -117,15 +135,21 @@ def run_session_gate(*, kr_calendar_provider, us_calendar_provider,
             judged = judge_sessions(kr, us, now)
             verdicts = tuple(
                 SessionVerdict(item.market, False, "stale_cache", None)
-                if ((item.market is Market.KR and kr_stale)
-                    or (item.market is Market.US and us_stale))
+                if (
+                    (item.market is Market.KR and kr_stale)
+                    or (item.market is Market.US and us_stale)
+                )
                 else item
                 for item in judged
             )
-            return SessionGateResult(now, verdicts, any(item.open for item in verdicts), False)
+            return SessionGateResult(
+                now, verdicts, any(item.open for item in verdicts), False
+            )
         cache_write(kr, us)
         written = True
     else:
         written = False
     verdicts = judge_sessions(kr, us, now)
-    return SessionGateResult(now, verdicts, any(item.open for item in verdicts), written)
+    return SessionGateResult(
+        now, verdicts, any(item.open for item in verdicts), written
+    )
