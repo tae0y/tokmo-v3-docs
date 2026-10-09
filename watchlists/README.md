@@ -1,16 +1,16 @@
-# Tokmo V3 Watchlists
+# 관심 종목 목록
 
-This directory is the Git-tracked source of truth for the user's explicit current tracking intent.
+이 디렉터리는 사용자가 지금 추적하려는 종목을 git으로 관리하는 기준 목록입니다.
 
-- `KR.json` and `US.json` contain only user-approved symbols.
-- Toss latest COMPLETE holdings remain the sole source of truth for actual ownership.
-- Playbooks remain narrative/thesis/history documents and are not scanned into watchlists.
-- The five-minute account cadence may union active watchlist symbols into quote/market-data targets, but must never persist them as holdings.
-- The SEC collector may union active US watchlist symbols into its filing target universe and preserves per-symbol provenance.
-- Removal is represented by `status: retired`; entries are not silently deleted.
-- Quantity, cost basis, account identity, current price, and inferred holding state are forbidden here.
+- `KR.json`과 `US.json`에는 사용자가 승인한 종목만 넣습니다.
+- 실제 보유 여부는 토스의 최신 COMPLETE 보유 데이터만 기준으로 삼습니다.
+- 플레이북은 투자 근거와 이력을 적는 문서이므로, 관심 종목 목록을 만들 때 읽지 않습니다.
+- 5분 주기 캐던스는 활성 관심 종목을 시세 수집 대상에 더할 수 있지만, 보유 종목으로 저장하지는 않습니다.
+- SEC 수집기는 활성 미국 관심 종목을 공시 수집 대상에 더할 수 있으며, 종목마다 어디서 왔는지를 남깁니다.
+- 종목을 뺄 때는 `status: retired`로 표시합니다. 항목을 지우지 않습니다.
+- 수량, 평단, 계좌 정보, 현재가, 추정한 보유 상태는 넣을 수 없습니다.
 
-Validate with:
+다음 명령으로 검증합니다.
 
 ```bash
 .venv/bin/python tools/validate_watchlists.py

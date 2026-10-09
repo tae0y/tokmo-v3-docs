@@ -10,13 +10,13 @@ actively check the marker/receipt. Clearing the marker requires manual
 verification — never automatic.
 """
 
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
 import json
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 
-CLOCK_NOW = datetime(2026, 8, 10, 0, 0, tzinfo=timezone.utc)
+CLOCK_NOW = datetime(2026, 8, 10, 0, 0, tzinfo=UTC)
 
 
 def test_pulse_pause_marker_path(tmp_path):
@@ -31,6 +31,7 @@ def test_pulse_pause_marker_clear_requires_manual_verification(tmp_path):
     """Clearing the pause marker must be a documented manual step, not
     automatic. The runbook documents the procedure."""
     from tokmo.programs.integrated_pulse import _PAUSE_MARKER
+
     marker = tmp_path / "runtime" / _PAUSE_MARKER
     marker.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     marker.write_text("rolling_ceiling_exceeded")
@@ -58,7 +59,8 @@ def test_g2_shadow_harness_30_ticks_same_root_green(tmp_path):
     - marker not created (provider operations disabled by default)
     """
     from tokmo.programs.integrated_pulse import (
-        build_fixture_pulse_deps, run_pulse_once,
+        build_fixture_pulse_deps,
+        run_pulse_once,
     )
     from tokmo.records.pulse_tick_receipts import PulseTickReceiptStore
 
@@ -66,11 +68,13 @@ def test_g2_shadow_harness_30_ticks_same_root_green(tmp_path):
         "lookahead": {},
         "holdings": {
             "captured_at": "2026-08-10T00:00:00Z",
-            "accounts": [{
-                "account_scope": "toss-acct-" + "a" * 24,
-                "label": "개인",
-                "holdings": [],
-            }],
+            "accounts": [
+                {
+                    "account_scope": "toss-acct-" + "a" * 24,
+                    "label": "개인",
+                    "holdings": [],
+                }
+            ],
         },
         "native_refs": {},
         "quotes": {},
@@ -90,11 +94,15 @@ def test_g2_shadow_harness_30_ticks_same_root_green(tmp_path):
     for i in range(30):
         slot = CLOCK_NOW + timedelta(seconds=60 * i)
         deps = build_fixture_pulse_deps(
-            fixture=fixture, clock=lambda s=slot: s, root=root,
+            fixture=fixture,
+            clock=lambda s=slot: s,
+            root=root,
         )
         result = run_pulse_once(
-            root=root, policy_version="pulse-60s-v1",
-            scheduled_for_utc=slot, observed_now_utc=slot,
+            root=root,
+            policy_version="pulse-60s-v1",
+            scheduled_for_utc=slot,
+            observed_now_utc=slot,
             deps=deps,
         )
         if result.outcome in ("SAVED", "SKIPPED_CLOSED"):
@@ -129,8 +137,7 @@ def test_runbook_truthfully_documents_no_system_alert():
         pytest.skip("runbook not yet created")
     text = runbook.read_text()
     # The runbook must NOT claim an alert is sent
-    assert "시스템 알림은 발생하지 않는다" in text or \
-           "시스템 알림은 발생하지 않는다" in text
+    assert "시스템 알림은 보내지 않습니다" in text
     # Must mention marker and receipt as the verification path
     assert "marker" in text.lower() or "마커" in text
     assert "receipt" in text.lower() or "수신" in text or "영수증" in text
@@ -143,7 +150,9 @@ def test_ceiling_marker_only_when_provider_operations_active(tmp_path):
     contract — it does not test the ceiling-exceeded path itself
     (which requires a live provider simulation)."""
     from tokmo.programs.integrated_pulse import (
-        build_fixture_pulse_deps, run_pulse_once, _PAUSE_MARKER,
+        _PAUSE_MARKER,
+        build_fixture_pulse_deps,
+        run_pulse_once,
     )
 
     fixture = {
@@ -159,11 +168,15 @@ def test_ceiling_marker_only_when_provider_operations_active(tmp_path):
     tick_root.mkdir(mode=0o700)
     slot = CLOCK_NOW
     deps = build_fixture_pulse_deps(
-        fixture=fixture, clock=lambda: slot, root=tick_root,
+        fixture=fixture,
+        clock=lambda: slot,
+        root=tick_root,
     )
     result = run_pulse_once(
-        root=tick_root, policy_version="pulse-60s-v1",
-        scheduled_for_utc=slot, observed_now_utc=slot,
+        root=tick_root,
+        policy_version="pulse-60s-v1",
+        scheduled_for_utc=slot,
+        observed_now_utc=slot,
         deps=deps,
     )
     marker = tick_root / "runtime" / _PAUSE_MARKER
@@ -174,18 +187,22 @@ def test_marker_persists_across_ticks_in_same_root(tmp_path):
     """When a marker exists in a persistent root, subsequent ticks must
     see it and fail immediately. The marker is durable across ticks."""
     from tokmo.programs.integrated_pulse import (
-        build_fixture_pulse_deps, run_pulse_once, _PAUSE_MARKER,
+        _PAUSE_MARKER,
+        build_fixture_pulse_deps,
+        run_pulse_once,
     )
 
     fixture = {
         "lookahead": {},
         "holdings": {
             "captured_at": "2026-08-10T00:00:00Z",
-            "accounts": [{
-                "account_scope": "toss-acct-" + "a" * 24,
-                "label": "개인",
-                "holdings": [],
-            }],
+            "accounts": [
+                {
+                    "account_scope": "toss-acct-" + "a" * 24,
+                    "label": "개인",
+                    "holdings": [],
+                }
+            ],
         },
         "native_refs": {},
         "quotes": {},
@@ -204,15 +221,20 @@ def test_marker_persists_across_ticks_in_same_root(tmp_path):
     # Next tick should see the marker and fail
     slot = CLOCK_NOW
     deps = build_fixture_pulse_deps(
-        fixture=fixture, clock=lambda: slot, root=root,
+        fixture=fixture,
+        clock=lambda: slot,
+        root=root,
     )
     result = run_pulse_once(
-        root=root, policy_version="pulse-60s-v1",
-        scheduled_for_utc=slot, observed_now_utc=slot,
+        root=root,
+        policy_version="pulse-60s-v1",
+        scheduled_for_utc=slot,
+        observed_now_utc=slot,
         deps=deps,
     )
     assert result.outcome == "FAILED"
     assert result.reason is not None
     # When the marker exists, Pulse fails immediately with "paused" reason
-    assert "paused" in str(result.reason) or \
-           "rolling_ceiling_exceeded" in str(result.reason)
+    assert "paused" in str(result.reason) or "rolling_ceiling_exceeded" in str(
+        result.reason
+    )

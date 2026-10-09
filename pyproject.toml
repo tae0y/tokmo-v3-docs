@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tokmo-v3-spike"
-version = "20261008.1"   # release v20261008_01 (vYYYYMMDD_NN <-> YYYYMMDD.N, PEP 440 has no "_"); docs/RELEASE.md
+version = "20261008.1"   # release v20261008_01 (vYYYYMMDD_NN <-> YYYYMMDD.N, PEP 440 has no "_"); see RELEASE.json
 requires-python = ">=3.12"
 description = "Read-only Tokmo V3 foundation walking spike"
 dependencies = [
