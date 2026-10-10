@@ -8,6 +8,7 @@ from datetime import timedelta
 import pytest
 from test_news_decision_engine import decision, observation, screen
 from test_news_incremental_review import context
+from test_news_product_gate import gate_world  # pytest fixture
 
 from tokmo.programs.news_decision_engine import RECORDED_TIME, NewsDecisionEngine
 from tokmo.programs.news_usage_diagnostics import (

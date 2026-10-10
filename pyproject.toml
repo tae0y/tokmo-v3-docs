@@ -24,3 +24,8 @@ tokmo-cadence = "tokmo.composition:cadence_main"
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests import pytest fixtures from sibling test modules and receive them as parameters;
+# ruff reads those imports as unused or shadowed and `--fix` would delete them.
+"tests/**" = ["F401", "F811"]

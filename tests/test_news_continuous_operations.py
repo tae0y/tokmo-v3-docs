@@ -10,7 +10,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import pytest
 from test_news_g3_live_lane import LIVE_WINDOW_END, NOW, _live_body, _write_gate
 from test_news_observation import NOW as REPORT_NOW
-from test_news_observation import build_report, put
+from test_news_observation import (
+    build_report,
+    environment,  # pytest fixture
+    put,
+)
 
 from tokmo.programs.news_alert_delivery import live_delivery_authorized
 from tokmo.programs.news_decision_engine import morning

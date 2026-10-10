@@ -13,6 +13,7 @@ from test_investment_followup import (
     interpretation,
     response,
     review,
+    store,  # pytest fixture
 )
 
 from tokmo.programs.investment_followup import deliver_pending, record_text

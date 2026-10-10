@@ -7,7 +7,13 @@ from datetime import timedelta
 import pytest
 import run_investment_followup_cron as cron
 import subscription_json_model as adapter
-from test_investment_plans import NOW, register, run, unchanged
+from test_investment_plans import (
+    NOW,
+    register,
+    run,
+    store,  # pytest fixture
+    unchanged,
+)
 from test_quant_decisions import response, sample_input
 
 from tokmo.programs.followup_health import enrich_errors, error_info

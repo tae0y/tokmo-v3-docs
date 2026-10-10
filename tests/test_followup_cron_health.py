@@ -7,7 +7,13 @@ from datetime import datetime, timedelta
 
 import pytest
 import run_investment_followup_cron as cron
-from test_investment_followup import NOW, choice, response, review
+from test_investment_followup import (
+    NOW,
+    choice,
+    response,
+    review,
+    store,  # pytest fixture
+)
 
 from tokmo.programs.investment_followup_worker import run_tick, validate_matches
 

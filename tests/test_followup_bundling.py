@@ -6,7 +6,13 @@ from copy import deepcopy
 from datetime import timedelta
 
 import pytest
-from test_investment_followup import NOW, choice, response, review
+from test_investment_followup import (
+    NOW,
+    choice,
+    response,
+    review,
+    store,  # pytest fixture
+)
 
 from tokmo.programs.followup_bundling import choice_context
 from tokmo.programs.investment_followup import deliver_pending, render_followup
