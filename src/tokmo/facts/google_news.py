@@ -5,7 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlsplit
-from xml.etree import ElementTree
+
+from defusedxml import ElementTree
 
 from tokmo.values.news_connectors import (
     NewsConnectorItem,

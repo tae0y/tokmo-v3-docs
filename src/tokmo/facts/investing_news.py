@@ -5,8 +5,9 @@ from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from html import unescape
 from urllib.parse import urlsplit
-from xml.etree import ElementTree
 from zoneinfo import ZoneInfo
+
+from defusedxml import ElementTree
 
 from tokmo.values.external_news import ContentMode
 from tokmo.values.news_connectors import (

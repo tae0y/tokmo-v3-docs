@@ -2,7 +2,8 @@
 
 from dataclasses import dataclass
 from datetime import datetime
-from xml.etree import ElementTree
+
+from defusedxml import ElementTree
 
 from tokmo.facts.news_http import ClosedNewsGet, NewsHttpResponse
 from tokmo.facts.news_rss import parse_rss_news

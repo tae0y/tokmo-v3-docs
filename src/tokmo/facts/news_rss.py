@@ -4,7 +4,8 @@ from datetime import UTC
 from email.utils import parsedate_to_datetime
 from html import unescape
 from html.parser import HTMLParser
-from xml.etree import ElementTree
+
+from defusedxml import ElementTree
 
 from tokmo.values.news_connectors import (
     NewsConnectorItem,

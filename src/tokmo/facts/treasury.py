@@ -4,7 +4,8 @@ from collections.abc import Callable
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlencode
-from xml.etree import ElementTree
+
+from defusedxml import ElementTree
 
 from tokmo.values import YieldCurveFact
 

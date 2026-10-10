@@ -34,7 +34,7 @@ wheels = [
 
 [[package]]
 name = "tokmo-v3-spike"
-version = "0.0.1"
+version = "20261008.1"
 source = { editable = "." }
 dependencies = [
     { name = "defusedxml" },

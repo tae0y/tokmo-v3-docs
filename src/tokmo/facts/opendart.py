@@ -14,7 +14,8 @@ import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from xml.etree import ElementTree
+
+from defusedxml import ElementTree
 
 from tokmo.facts.eia import LIVE_TRANSPORT_FAILURE_CODES
 from tokmo.values import OPENDART_SOURCE, OpenDartDisclosureFact, UnavailableFact
